@@ -1,0 +1,3 @@
+{% extends 'store/base.html' %}
+{% block title %}Solicitud enviada | Mantas Wayuu{% endblock %}
+{% block content %}<section class="confirmation"><p class="eyebrow">Solicitud recibida</p><h1>Tu diseño ya está en camino</h1><p>Recibimos la solicitud <strong>#{{ design.id }}</strong> para una manta talla {{ design.size }} con patrón {{ design.pattern }}.</p><p class="price">Estimado: ${{ design.estimated_price|floatformat:0 }} COP</p><p>Te contactaremos para confirmar el diseño, el pago y el tiempo de elaboración.</p><a class="button" href="{% url 'store:catalog' %}">Volver al catálogo</a></section>{% endblock %}

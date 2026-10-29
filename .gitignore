@@ -1,0 +1,8 @@
+# Entorno virtual y secretos
+backend/.venv/
+backend/.env
+
+# Archivos generados localmente
+__pycache__/
+*.py[cod]
+backend/db.sqlite3

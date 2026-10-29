@@ -1,0 +1,3 @@
+{% extends 'store/base.html' %}
+{% block title %}Pedido confirmado | Mantas Wayuu{% endblock %}
+{% block content %}<section class="confirmation"><p class="eyebrow">Pedido recibido</p><h1>¡Gracias por tu compra!</h1><p>Tu pedido es el <strong>#{{ order.id }}</strong>. Nos comunicaremos contigo para confirmar pago y envío.</p><h2>Resumen</h2>{% for item in order.items.all %}<p>{{ item.quantity }} × {{ item.product.name }} — ${{ item.subtotal|floatformat:0 }} COP</p>{% endfor %}<p class="price">Total: ${{ order.total|floatformat:0 }} COP</p><a class="button" href="{% url 'store:catalog' %}">Volver al catálogo</a></section>{% endblock %}

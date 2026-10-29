@@ -1,0 +1,27 @@
+{% extends "admin/base.html" %}
+{% load static i18n %}
+
+{% block title %}Administración | Wayuuwaa aa'in{% endblock %}
+
+{% block extrahead %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'admin/wayuu_admin.css' %}?v=20261026-5">
+  <script defer src="{% static 'store/development-reload.js' %}"></script>
+{% endblock %}
+
+{% block branding %}
+  <div id="site-name">
+    <a href="{% url 'admin:index' %}"><span>Wayuuwaa</span> <em>aa'in</em><small>Administración de la tienda</small></a>
+  </div>
+{% endblock %}
+
+{% block userlinks %}
+  <div class="admin-account-menu">
+    <a class="admin-main-link" href="/">Ir a página principal <b>↗</b></a>
+    <a href="{% url 'admin:password_change' %}">Cambiar contraseña</a>
+    <form action="{% url 'store:logout' %}" method="post">
+      {% csrf_token %}
+      <button class="admin-logout" type="submit">Cerrar sesión</button>
+    </form>
+  </div>
+{% endblock %}

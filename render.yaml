@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: wayuuwaa-backend
+    env: python
+    plan: free
+    region: oregon
+    buildCommand: "cd backend && pip install -r requirements.txt && python manage.py collectstatic --noinput"
+    startCommand: "cd backend && gunicorn config.wsgi --bind 0.0.0.0:$PORT"
+    envVars:
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_DEBUG
+        value: "False"
+      - key: ALLOWED_HOSTS
+        value: "wayuuwaa-backend.onrender.com"
+      - key: CORS_ALLOWED_ORIGINS
+        value: "https://wayuuwaa.vercel.app"
+      - key: CSRF_TRUSTED_ORIGINS
+        value: "https://wayuuwaa.vercel.app"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: wayuuwaa-db
+          property: connectionString
+
+databases:
+  - name: wayuuwaa-db
+    databaseName: wayuuwaa
+    user: wayuuwaa
+    plan: free

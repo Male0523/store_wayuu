@@ -1,0 +1,51 @@
+/* Movimiento sutil y detalles editoriales para dar vida sin distraer. */
+:root { --gold: #c69251; }
+.site-header { transition: background .25s, box-shadow .25s; }
+.site-header.is-scrolled { background: rgba(255,253,249,.88); box-shadow: 0 8px 30px rgba(41,35,30,.08); }
+.site-header nav a { position: relative; }
+.site-header nav a:not(.nav-cart):not(.nav-subtle)::after { content: ''; position: absolute; left: 2px; right: 2px; bottom: 1px; height: 1px; background: var(--terra); transform: scaleX(0); transform-origin: left; transition: transform .22s; }
+.site-header nav a:hover::after { transform: scaleX(1); }
+.site-header nav .nav-cart { transition: transform .2s, background .2s; }
+.site-header nav .nav-cart:hover { transform: translateY(-2px); background: var(--ink); color: #fff; }
+.pro-hero { isolation: isolate; position: relative; }
+.pro-hero::before { content: '◇  ◈  ◇'; position: absolute; z-index: -1; left: 4%; bottom: 8%; word-spacing: 24px; color: rgba(190,100,77,.17); font: 4rem 'Playfair Display'; animation: drift 8s ease-in-out infinite; }
+.pro-art { background-size: 160% 160%; animation: color-flow 14s ease infinite; }
+.sun { box-shadow: 0 0 0 18px rgba(243,207,134,.13), 0 0 0 42px rgba(243,207,134,.07); animation: sun-pulse 5s ease-in-out infinite; }
+.manta { animation: manta-float 5s ease-in-out infinite; }
+.manta i:nth-child(2) { animation: manta-shift 4s ease-in-out infinite; }
+.benefit-row p { transition: background .25s, transform .25s; }
+.benefit-row p:hover { background: #fffaf3; transform: translateY(-3px); }
+.pro-search { transition: box-shadow .2s, border-color .2s; }
+.pro-search:focus-within { border-color: var(--terra); box-shadow: 0 0 0 4px rgba(190,100,77,.1); }
+.filters a:hover { border-color: var(--terra); color: var(--terra); transform: translateY(-2px); }
+.pro-card { transform-style: preserve-3d; }
+.pro-card h3 a { transition: color .2s; }
+.pro-card:hover h3 a { color: var(--terra); }
+.pro-image img { transition: transform .6s cubic-bezier(.2,.8,.2,1), filter .4s; }
+.pro-card:hover .pro-image img { transform: scale(1.08); filter: saturate(1.08) contrast(1.03); }
+.pro-image span { backdrop-filter: blur(6px); }
+.pro-story { position: relative; overflow: hidden; }
+.pro-story::after { content: '✦'; position: absolute; right: 8%; top: 12%; color: rgba(198,146,81,.25); font-size: 8rem; animation: twinkle 3.5s ease-in-out infinite; }
+.pro-faq details { transition: background .2s; }
+.pro-faq details[open] { background: rgba(255,255,255,.45); }
+.pro-contact { position: relative; overflow: hidden; }
+.pro-contact::before, .pro-contact::after { content: '◈'; position: absolute; color: rgba(190,100,77,.12); font-size: 6rem; }
+.pro-contact::before { left: 8%; top: 18%; }
+.pro-contact::after { right: 8%; bottom: 5%; }
+.gallery-main img { transition: transform .7s ease; }
+.gallery-main:hover img { transform: scale(1.04); }
+.product-buy { background: linear-gradient(135deg,#fffdf9,#f8f0e6); }
+.role-hint { margin: 0; color: var(--muted); font-size: .84rem; line-height: 1.55; }
+.js-reveal { opacity: 0; transform: translateY(24px); transition: opacity .7s ease, transform .7s ease; }
+.js-reveal.is-visible { opacity: 1; transform: none; }
+.js-reveal:nth-child(2) { transition-delay: .08s; }
+.js-reveal:nth-child(3) { transition-delay: .16s; }
+.js-reveal:nth-child(4) { transition-delay: .24s; }
+@keyframes color-flow { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+@keyframes manta-float { 0%,100% { transform: translateY(0) rotate(-1deg); } 50% { transform: translateY(-13px) rotate(1deg); } }
+@keyframes manta-shift { 0%,100% { transform: scaleY(1); } 50% { transform: scaleY(.92); } }
+@keyframes sun-pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+@keyframes drift { 0%,100% { transform: translateX(0); } 50% { transform: translateX(18px); } }
+@keyframes twinkle { 0%,100% { opacity: .25; transform: scale(.92) rotate(0); } 50% { opacity: .6; transform: scale(1.08) rotate(15deg); } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } .js-reveal { opacity: 1; transform: none; } }
+@media (max-width: 520px) { .pro-contact::before, .pro-contact::after { display: none; } }

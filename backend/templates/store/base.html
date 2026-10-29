@@ -1,0 +1,52 @@
+{% load static %}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Wayuuwaa aa'in: mantas Wayuu tejidas a mano en La Guajira.">
+  <title>{% block title %}Wayuuwaa aa'in | Mantas Wayuu{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'store/styles.css' %}">
+  <link rel="stylesheet" href="{% static 'store/pro.css' %}">
+  <link rel="stylesheet" href="{% static 'store/designer.css' %}">
+  <link rel="stylesheet" href="{% static 'store/commerce.css' %}">
+  <link rel="stylesheet" href="{% static 'store/ui.css' %}">
+  <link rel="stylesheet" href="{% static 'store/shell.css' %}">
+  <link rel="stylesheet" href="{% static 'store/professional.css' %}">
+  <link rel="stylesheet" href="{% static 'store/atelier.css' %}">
+  <link rel="stylesheet" href="{% static 'store/neutral-catalog.css' %}">
+  <link rel="stylesheet" href="{% static 'store/studio-access.css' %}">
+  <link rel="stylesheet" href="{% static 'store/warm-natural.css' %}">
+  <link rel="stylesheet" href="{% static 'store/artisan-palette.css' %}?v=20260909-2">
+  <link rel="stylesheet" href="{% static 'store/layout-surface.css' %}?v=20261028-2">
+  <script defer src="{% static 'store/catalog-quick-view.js' %}"></script>
+  <script defer src="{% static 'store/development-reload.js' %}"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="nav-shell">
+      <a class="brand" href="{% url 'store:catalog' %}">Wayuuwaa <span>aa'in</span><small>mantas tejidas a mano</small></a>
+      <nav aria-label="Navegación principal">
+        {% if request.user.is_authenticated %}
+          {% for item in navigation_items %}
+            <a class="{% if item.route_name == 'store:cart' %}nav-cart{% elif item.route_name == 'store:logout' %}nav-subtle{% endif %}" href="{{ item.url }}" title="{{ item.description }}">{% if item.route_name == 'store:customer_dashboard' %}<img class="nav-icon" src="{% static 'store/icons/account.svg' %}" alt="">{% elif item.route_name == 'store:cart' %}<img class="nav-icon" src="{% static 'store/icons/bag.svg' %}" alt="">{% endif %}{{ item.label }}</a>
+          {% endfor %}
+        {% else %}
+          <a href="{% url 'store:catalog' %}#catalogo">Catálogo</a>
+          <a href="{% url 'store:catalog' %}#historia">Historia</a>
+          <a class="nav-cart" href="{% url 'store:login' %}">Iniciar sesión</a>
+        {% endif %}
+      </nav>
+    </div>
+  </header>
+  <main class="container">
+    {% for message in messages %}<div class="message {{ message.tags }}">{{ message }}</div>{% endfor %}
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="site-footer">
+    <div><a class="brand footer-brand" href="{% url 'store:catalog' %}">Wayuuwaa <span>aa'in</span></a><p>Mantas Wayuu tejidas a mano con tradición y amor en La Guajira.</p></div>
+    <div><strong>Explorar</strong><a href="{% url 'store:catalog' %}#catalogo">Catálogo</a><a href="{% url 'store:catalog' %}#historia">Historia</a><a href="{% url 'store:catalog' %}#faq">Preguntas</a></div>
+    <div><strong>Comunidad</strong><a href="{% url 'store:register_craftswoman' %}">Soy artesana Wayuu</a><p>Compra consciente, hecha con respeto.</p></div>
+  </footer>
+</body>
+</html>

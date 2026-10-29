@@ -1,0 +1,14 @@
+{% extends 'store/base.html' %}
+{% block title %}Catálogo | Mantas Wayuu{% endblock %}
+{% block content %}
+<section class="hero"><p class="eyebrow">Artesanía colombiana</p><h1>Mantas Wayuu con historia</h1><p>Piezas elaboradas con tradición, color y dedicación.</p></section>
+<div class="filters"><a href="{% url 'store:catalog' %}">Todas</a>{% for category in categories %}<a href="?categoria={{ category|urlencode }}">{{ category }}</a>{% endfor %}</div>
+<section class="grid">
+{% for product in products %}
+  <article class="card">
+    <a href="{% url 'store:product_detail' product.id %}" class="image-wrap">{% if product.image_url %}<img src="{{ product.image_url }}" alt="{{ product.name }}">{% else %}<span>Foto próxima</span>{% endif %}</a>
+    <div class="card-body"><p class="eyebrow">Talla {{ product.size }}{% if product.region %} · {{ product.region }}{% endif %}</p><h2><a href="{% url 'store:product_detail' product.id %}">{{ product.name }}</a></h2>{% if product.color %}<p>{{ product.color }}</p>{% endif %}{% if product.craftswoman %}<p>Por {{ product.craftswoman.name }}</p>{% endif %}<strong>${{ product.price|floatformat:0 }} COP</strong></div>
+  </article>
+{% empty %}<p>Aún no hay productos publicados. Agrégalos desde el panel administrador.</p>{% endfor %}
+</section>
+{% endblock %}
