@@ -15,6 +15,7 @@ urlpatterns = [
     path('admin/products/', api.AdminProductListView.as_view(), name='admin-products'),
     path('admin/products/<int:product_id>/', api.AdminProductDetailView.as_view(), name='admin-product-detail'),
     path('admin/orders/<int:order_id>/status/', api.AdminOrderStatusView.as_view(), name='admin-order-status'),
+    path('admin/users/', api.SuperadminUserListView.as_view(), name='superadmin-users'),
     path('auth/register/', api.CustomerRegistrationView.as_view(), name='register'),
     path('auth/register/craftswoman/', api.CraftswomanRegistrationView.as_view(), name='register-craftswoman'),
     path('auth/login/', api.LoginView.as_view(), name='login'),

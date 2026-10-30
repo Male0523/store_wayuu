@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { useUserSession } from './frontend/src/context/user-context';
 import {
   ShoppingBag,
   Heart,
@@ -195,6 +196,7 @@ const ARTISANS: Artisan[] = [
 ];
 
 export default function App() {
+  const { login, register, user } = useUserSession();
   // Estado de navegación entre las tres vistas principales solicitadas
   const [currentView, setCurrentView] = useState<'home' | 'login' | 'register'>('home');
 
@@ -210,10 +212,12 @@ export default function App() {
   const [loginPassword, setLoginPassword] = useState('');
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginSimulationMessage, setLoginSimulationMessage] = useState<string | null>(null);
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   // Formulario de Registro
   const [regFirstName, setRegFirstName] = useState('');
   const [regLastName, setRegLastName] = useState('');
+  const [regUsername, setRegUsername] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regPhone, setRegPhone] = useState('');
   const [regPassword, setRegPassword] = useState('');
@@ -263,23 +267,39 @@ export default function App() {
     setIsMobileMenuOpen(false);
   };
 
-  // Manejador del submit de Iniciar Sesión (Simulación de entrada al módulo cliente)
-  const handleLoginSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!loginEmail || !loginPassword) return;
-
-    setLoginSimulationMessage(
-      '¡Autenticación simulada con éxito! En el sistema desplegado, este botón redirige al módulo privado del rol CLIENTE.'
-    );
+  const goToRolePanel = (role: string) => {
+    const destinations: Record<string, string> = {
+      customer: '/cliente',
+      craftswoman: '/tejedora',
+      admin: '/admin',
+      superadmin: '/superadmin',
+    };
+    const destination = destinations[role];
+    if (!destination) return;
+    window.history.pushState(null, '', destination);
+    window.dispatchEvent(new PopStateEvent('popstate'));
   };
 
-  // Manejador del submit de Registro con validaciones estrictas
-  const handleRegisterSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loginEmail || !loginPassword) return;
+    setLoginError(null);
+    try {
+      const account = await login(loginEmail, loginPassword);
+      setLoginSimulationMessage('Sesión iniciada correctamente.');
+      goToRolePanel(account.role);
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : 'No fue posible iniciar sesión.');
+    }
+  };
+
+  const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const errors: { [key: string]: string } = {};
 
     if (!regFirstName.trim()) errors.firstName = 'El nombre es obligatorio.';
     if (!regLastName.trim()) errors.lastName = 'Los apellidos son obligatorios.';
+    if (!regUsername.trim()) errors.username = 'El nombre de usuario es obligatorio.';
     
     if (!regEmail.trim()) {
       errors.email = 'El correo electrónico es obligatorio.';
@@ -291,8 +311,8 @@ export default function App() {
 
     if (!regPassword) {
       errors.password = 'La contraseña es obligatoria.';
-    } else if (regPassword.length < 6) {
-      errors.password = 'La contraseña debe tener al menos 6 caracteres.';
+    } else if (regPassword.length < 8) {
+      errors.password = 'La contraseña debe tener al menos 8 caracteres.';
     }
 
     if (regPassword !== regConfirmPassword) {
@@ -305,8 +325,19 @@ export default function App() {
 
     setRegErrors(errors);
 
-    if (Object.keys(errors).length === 0) {
+    if (Object.keys(errors).length > 0) return;
+    try {
+      const account = await register({
+        name: `${regFirstName.trim()} ${regLastName.trim()}`,
+        username: regUsername.trim(),
+        email: regEmail.trim(),
+        phone: regPhone.trim(),
+        password: regPassword,
+      });
       setRegSuccess(true);
+      goToRolePanel(account.role);
+    } catch (error) {
+      setRegErrors({ server: error instanceof Error ? error.message : 'No fue posible crear la cuenta.' });
     }
   };
 
@@ -1088,7 +1119,7 @@ export default function App() {
                 <div className="p-4 rounded-2xl bg-[#E8C5C8]/40 border border-[#E8C5C8] text-xs text-[#5C1D24] space-y-2">
                   <div className="flex items-center gap-2 font-bold">
                     <CheckCircle2 className="w-4 h-4 text-[#5C1D24] shrink-0" />
-                    <span>Inicio de Sesión Correcto (Demostración)</span>
+                    <span>Inicio de sesión correcto</span>
                   </div>
                   <p className="text-[#3D1E16]/80 leading-relaxed">
                     {loginSimulationMessage}
@@ -1103,6 +1134,8 @@ export default function App() {
                   </div>
                 </div>
               )}
+
+              {loginError && <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-700" role="alert">{loginError}</p>}
 
               <form onSubmit={handleLoginSubmit} className="space-y-4">
                 <div>
@@ -1228,22 +1261,20 @@ export default function App() {
                   <CheckCircle2 className="w-12 h-12 text-[#5C1D24] mx-auto" />
                   <h2 className="text-lg font-extrabold text-[#5C1D24]">¡Registro completado con éxito!</h2>
                   <p className="text-xs text-[#3D1E16]/80 leading-relaxed">
-                    Tu cuenta de usuario ha sido creada correctamente en el sistema demostrativo. Ahora puedes proceder a iniciar sesión.
+                    Tu cuenta fue creada y la sesión quedó iniciada. Ya puedes entrar a tu panel de cliente.
                   </p>
                   <div className="pt-2">
                     <button
-                      onClick={() => {
-                        setLoginSimulationMessage(null);
-                        setCurrentView('login');
-                      }}
+                      onClick={() => user ? goToRolePanel(user.role) : setCurrentView('login')}
                       className="w-full py-3 bg-[#C85A32] text-white text-xs font-bold uppercase tracking-wider rounded-xl shadow"
                     >
-                      Ir a Iniciar Sesión
+                      Ir a mi panel
                     </button>
                   </div>
                 </div>
               ) : (
                 <form onSubmit={handleRegisterSubmit} className="space-y-4">
+                  {regErrors.server && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-700">{regErrors.server}</p>}
                   
                   {/* Nombres y Apellidos */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1282,6 +1313,18 @@ export default function App() {
                         <p className="text-[11px] text-red-600 font-bold mt-1">{regErrors.lastName}</p>
                       )}
                     </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-[#3D1E16] mb-1">Nombre de usuario *</label>
+                    <input
+                      type="text"
+                      autoComplete="username"
+                      value={regUsername}
+                      onChange={(e) => setRegUsername(e.target.value)}
+                      className={`w-full p-3 bg-[#FAF6F0] border ${regErrors.username ? 'border-red-500' : 'border-[#EFE6DC]'} rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-[#C85A32]`}
+                    />
+                    {regErrors.username && <p className="text-[11px] text-red-600 font-bold mt-1">{regErrors.username}</p>}
                   </div>
 
                   {/* Correo Electrónico y Teléfono */}
@@ -1332,7 +1375,7 @@ export default function App() {
                       <div className="relative">
                         <input
                           type={showRegPassword ? 'text' : 'password'}
-                          placeholder="Mínimo 6 caracteres"
+                          placeholder="Mínimo 8 caracteres"
                           value={regPassword}
                           onChange={(e) => setRegPassword(e.target.value)}
                           className={`w-full p-3 pr-10 bg-[#FAF6F0] border ${

@@ -5,17 +5,21 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models, transaction
 from django.http import JsonResponse
+from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
 from rest_framework import serializers, status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
+from rest_framework.exceptions import PermissionDenied
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.views import APIView
 
-from .models import Category, Craftswoman, CustomDesign, Customer, Order, OrderItem, Product
+from .models import AccessRole, Category, Craftswoman, CustomDesign, Customer, Order, OrderItem, Product, UserRole
+from .permissions import AdminOrSuperadmin, CraftswomanOnly, CustomerOnly, HasAssignedRole, OrderAccess, SuperadminOnly
+from .rbac import assign_role, role_for_user
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -64,6 +68,55 @@ class AdminProductSerializer(serializers.ModelSerializer):
             'made_to_order', 'active', 'created_at', 'updated_at',
         )
         read_only_fields = ('id', 'created_at', 'updated_at')
+
+
+class SuperadminUserSerializer(serializers.ModelSerializer):
+    full_name = serializers.SerializerMethodField()
+    role = serializers.SerializerMethodField()
+    role_name = serializers.SerializerMethodField()
+    location = serializers.SerializerMethodField()
+    active = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = ('id', 'username', 'email', 'first_name', 'last_name', 'full_name', 'role', 'role_name', 'is_active', 'active', 'location', 'date_joined')
+
+    @staticmethod
+    def assignment(user):
+        try:
+            return user.access_profile
+        except UserRole.DoesNotExist:
+            return None
+
+    def get_full_name(self, user):
+        return user.get_full_name() or user.username
+
+    def get_role(self, user):
+        assignment = self.assignment(user)
+        return assignment.role.code if assignment else 'unassigned'
+
+    def get_role_name(self, user):
+        assignment = self.assignment(user)
+        return assignment.role.name if assignment else 'Sin rol asignado'
+
+    def get_active(self, user):
+        if not user.is_active:
+            return False
+        assignment = self.assignment(user)
+        if assignment and assignment.role.code == AccessRole.Code.CRAFTSWOMAN:
+            profile = getattr(user, 'craftswoman_profile', None)
+            return bool(profile and profile.active)
+        return True
+
+    def get_location(self, user):
+        assignment = self.assignment(user)
+        if assignment and assignment.role.code == AccessRole.Code.CRAFTSWOMAN:
+            profile = getattr(user, 'craftswoman_profile', None)
+            return profile.community or profile.region if profile else ''
+        if assignment and assignment.role.code == AccessRole.Code.CUSTOMER:
+            profile = getattr(user, 'customer_profile', None)
+            return profile.city if profile else ''
+        return ''
 
 
 class ProductSummarySerializer(serializers.ModelSerializer):
@@ -145,6 +198,7 @@ class CustomerRegistrationSerializer(serializers.Serializer):
             first_name=validated_data['name'],
         )
         Customer.objects.create(user=user, name=validated_data['name'], email=validated_data['email'], phone=phone)
+        assign_role(user, AccessRole.Code.CUSTOMER)
         return user
 
 
@@ -172,6 +226,7 @@ class CraftswomanRegistrationSerializer(CustomerRegistrationSerializer):
             phone=phone,
             active=False,
         )
+        assign_role(user, AccessRole.Code.CRAFTSWOMAN)
         return user
 
 
@@ -218,16 +273,19 @@ class StatusInputSerializer(serializers.Serializer):
 
 
 def _user_payload(user):
+    role = role_for_user(user)
     payload = {
         'id': user.id,
         'username': user.username,
         'name': user.get_full_name() or user.username,
         'email': user.email,
-        'role': 'admin' if user.is_staff else 'customer',
+        'role': role.code if role else None,
         'profile': None,
     }
-    if hasattr(user, 'craftswoman_profile'):
-        profile = user.craftswoman_profile
+    if role and role.code == AccessRole.Code.CRAFTSWOMAN:
+        profile = Craftswoman.objects.filter(user=user).first()
+        if not profile:
+            return payload
         payload.update(role='craftswoman', profile={
             'id': profile.id,
             'name': profile.name,
@@ -236,14 +294,16 @@ def _user_payload(user):
             'phone': profile.phone,
             'active': profile.active,
         })
-    elif hasattr(user, 'customer_profile'):
-        payload['profile'] = ProfileSerializer(user.customer_profile).data
+    elif role and role.code == AccessRole.Code.CUSTOMER:
+        customer = Customer.objects.filter(user=user).first()
+        if customer:
+            payload['profile'] = ProfileSerializer(customer).data
     return payload
 
 
 def _customer_for(user):
-    if user.is_staff or hasattr(user, 'craftswoman_profile'):
-        from rest_framework.exceptions import PermissionDenied
+    role = role_for_user(user)
+    if not role or role.code != AccessRole.Code.CUSTOMER:
         raise PermissionDenied('Esta acción solo está disponible para clientes.')
     customer, _ = Customer.objects.get_or_create(
         user=user,
@@ -282,11 +342,17 @@ def _cart_items(request, customer):
 
 
 def _customer_orders(user):
-    if user.is_staff:
+    role = role_for_user(user)
+    if role is None:
+        return Order.objects.none()
+    if role.code in (AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN):
         return Order.objects.all()
-    if hasattr(user, 'craftswoman_profile'):
-        return Order.objects.filter(craftswoman=user.craftswoman_profile)
-    return Order.objects.filter(customer__user=user)
+    if role.code == AccessRole.Code.CRAFTSWOMAN:
+        craftswoman = Craftswoman.objects.filter(user=user).first()
+        return craftswoman.orders.all() if craftswoman else Order.objects.none()
+    if role.code == AccessRole.Code.CUSTOMER:
+        return Order.objects.filter(customer__user=user)
+    return Order.objects.none()
 
 
 @api_view(('GET',))
@@ -297,7 +363,10 @@ def api_health(request):
 
 @ensure_csrf_cookie
 def csrf_cookie(request):
-    return JsonResponse({'detail': 'CSRF cookie disponible.'})
+    return JsonResponse({
+        'detail': 'Token CSRF disponible para el origen autorizado.',
+        'csrfToken': get_token(request),
+    })
 
 
 class StandardResultsSetPagination(PageNumberPagination):
@@ -370,7 +439,7 @@ class ProductDetailView(APIView):
 
 
 class AdminProductListView(APIView):
-    permission_classes = (IsAdminUser,)
+    permission_classes = (AdminOrSuperadmin,)
 
     def get(self, request):
         products = Product.objects.select_related('category', 'craftswoman').all()
@@ -383,8 +452,37 @@ class AdminProductListView(APIView):
         return Response(AdminProductSerializer(product).data, status=status.HTTP_201_CREATED)
 
 
+class SuperadminUserListView(PaginatedAPIView):
+    permission_classes = (SuperadminOnly,)
+
+    def get(self, request):
+        role_code = request.query_params.get('role', 'all').strip()
+        valid_roles = (*AccessRole.Code.values, 'unassigned', 'all')
+        if role_code not in valid_roles:
+            raise serializers.ValidationError({'role': 'Filtro de rol desconocido.'})
+
+        users = User.objects.select_related('access_profile__role', 'craftswoman_profile', 'customer_profile')
+        if role_code == 'unassigned':
+            users = users.filter(access_profile__isnull=True)
+        elif role_code != 'all':
+            users = users.filter(access_profile__role__code=role_code)
+
+        search = request.query_params.get('search', '').strip()
+        if search:
+            users = users.filter(
+                models.Q(username__icontains=search)
+                | models.Q(first_name__icontains=search)
+                | models.Q(last_name__icontains=search)
+                | models.Q(email__icontains=search)
+                | models.Q(craftswoman_profile__community__icontains=search)
+                | models.Q(craftswoman_profile__region__icontains=search)
+                | models.Q(customer_profile__city__icontains=search)
+            ).distinct()
+        return Response(SuperadminUserSerializer(users.order_by('id'), many=True).data)
+
+
 class AdminCategoryListView(APIView):
-    permission_classes = (IsAdminUser,)
+    permission_classes = (AdminOrSuperadmin,)
 
     def get(self, request):
         return Response(AdminCategorySerializer(Category.objects.all(), many=True).data)
@@ -397,7 +495,7 @@ class AdminCategoryListView(APIView):
 
 
 class AdminCategoryDetailView(APIView):
-    permission_classes = (IsAdminUser,)
+    permission_classes = (AdminOrSuperadmin,)
 
     def patch(self, request, category_id):
         category = get_object_or_404(Category, id=category_id)
@@ -407,7 +505,7 @@ class AdminCategoryDetailView(APIView):
 
 
 class AdminProductDetailView(APIView):
-    permission_classes = (IsAdminUser,)
+    permission_classes = (AdminOrSuperadmin,)
 
     def patch(self, request, product_id):
         product = get_object_or_404(Product, id=product_id)
@@ -418,7 +516,7 @@ class AdminProductDetailView(APIView):
 
 
 class AdminOrderStatusView(APIView):
-    permission_classes = (IsAdminUser,)
+    permission_classes = (AdminOrSuperadmin,)
 
     def patch(self, request, order_id):
         order = get_object_or_404(Order, id=order_id)
@@ -463,13 +561,24 @@ class LoginView(APIView):
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        identifier = serializer.validated_data['username'].strip()
         user = authenticate(
             request,
-            username=serializer.validated_data['username'],
+            username=identifier,
             password=serializer.validated_data['password'],
         )
+        if user is None and '@' in identifier:
+            account = User.objects.filter(email__iexact=identifier).only('username').first()
+            if account:
+                user = authenticate(
+                    request,
+                    username=account.get_username(),
+                    password=serializer.validated_data['password'],
+                )
         if user is None:
             return Response({'detail': 'Usuario o contraseña incorrectos.'}, status=status.HTTP_400_BAD_REQUEST)
+        if role_for_user(user) is None:
+            return Response({'detail': 'Tu cuenta no tiene un rol de acceso asignado. Contacta a administración.'}, status=status.HTTP_403_FORBIDDEN)
         login(request, user)
         return Response({'user': _user_payload(user)})
 
@@ -483,14 +592,14 @@ class LogoutView(APIView):
 
 
 class CurrentUserView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, HasAssignedRole)
 
     def get(self, request):
         return Response({'user': _user_payload(request.user)})
 
 
 class CustomerProfileView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (CustomerOnly,)
 
     def get(self, request):
         customer = _customer_for(request.user)
@@ -508,7 +617,7 @@ class CustomerProfileView(APIView):
 
 
 class CartView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (CustomerOnly,)
 
     def get(self, request):
         customer = _customer_for(request.user)
@@ -517,7 +626,7 @@ class CartView(APIView):
 
 
 class CartItemListView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (CustomerOnly,)
 
     def post(self, request):
         _customer_for(request.user)
@@ -536,7 +645,7 @@ class CartItemListView(APIView):
 
 
 class CartItemDetailView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (CustomerOnly,)
 
     def patch(self, request, product_id):
         _customer_for(request.user)
@@ -563,7 +672,7 @@ class CartItemDetailView(APIView):
 
 
 class CheckoutView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (CustomerOnly,)
 
     def post(self, request):
         customer = _customer_for(request.user)
@@ -603,7 +712,7 @@ class CheckoutView(APIView):
 
 
 class OrderListView(PaginatedAPIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (OrderAccess,)
 
     def get(self, request):
         orders = _customer_orders(request.user).select_related('craftswoman').prefetch_related('items__product')
@@ -611,7 +720,7 @@ class OrderListView(PaginatedAPIView):
 
 
 class OrderDetailView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (OrderAccess,)
 
     def get(self, request, order_id):
         order = get_object_or_404(
@@ -622,7 +731,7 @@ class OrderDetailView(APIView):
 
 
 class CustomDesignListView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (CustomerOnly,)
 
     def get(self, request):
         customer = _customer_for(request.user)
@@ -676,7 +785,7 @@ class CustomDesignListView(APIView):
 
 
 class CraftswomanDashboardView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (CraftswomanOnly,)
 
     def get(self, request):
         craftswoman = get_object_or_404(Craftswoman, user=request.user)
@@ -694,7 +803,7 @@ class CraftswomanDashboardView(APIView):
 
 
 class AcceptOrderView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (CraftswomanOnly,)
 
     def post(self, request, order_id):
         craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
@@ -718,7 +827,7 @@ class AcceptOrderView(APIView):
 
 
 class CraftswomanOrderStatusView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (CraftswomanOnly,)
     transitions = {
         Order.Status.ACCEPTED: {Order.Status.WEAVING},
         Order.Status.WEAVING: {Order.Status.ACCEPTED, Order.Status.COMPLETED},
@@ -744,7 +853,7 @@ class CraftswomanOrderStatusView(APIView):
 
 
 class CraftswomanDesignStatusView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (CraftswomanOnly,)
     transitions = CraftswomanOrderStatusView.transitions
 
     def patch(self, request, design_id):

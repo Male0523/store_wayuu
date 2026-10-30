@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useUserSession } from './frontend/src/context/user-context';
 import {
   LayoutDashboard,
   ShoppingBag,
@@ -233,6 +234,7 @@ const RECENT_ACTIVITIES = [
 // ==========================================
 
 export default function App() {
+  const { logout } = useUserSession();
   // Navigation State
   const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard', 'catalog', 'orders', 'inventory'
 
@@ -1537,9 +1539,16 @@ export default function App() {
               </button>
 
               <button
-                onClick={() => {
+                onClick={async () => {
                   setIsLogoutModalOpen(false);
-                  showToast('Sesión cerrada correctamente.', 'info');
+                  try {
+                    await logout();
+                  } catch {
+                    showToast('No se pudo cerrar la sesión con Django.', 'error');
+                    return;
+                  }
+                  window.history.replaceState(null, '', '/');
+                  window.dispatchEvent(new PopStateEvent('popstate'));
                 }}
                 className="flex-1 py-2.5 bg-[#5C1D24] hover:bg-[#4A121A] text-white rounded-xl text-xs font-bold transition-colors shadow-md"
               >

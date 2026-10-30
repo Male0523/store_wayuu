@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useUserSession } from './frontend/src/context/user-context';
 import {
   Home,
   ShoppingBag,
@@ -251,6 +252,7 @@ const INITIAL_ORDERS = [
 // ==========================================
 
 export default function App() {
+  const { logout } = useUserSession();
   // Navigation View State (Exclusively 4 Main Options in Menu)
   // 1 = Inicio y catálogo
   // 2 = Mis favoritos
@@ -483,9 +485,16 @@ export default function App() {
     );
   };
 
-  const handleConfirmLogout = () => {
+  const handleConfirmLogout = async () => {
     setIsLogoutModalOpen(false);
-    showToast('Sesión simulada de cliente cerrada correctamente.');
+    try {
+      await logout();
+    } catch {
+      showToast('No se pudo cerrar la sesión con Django.');
+      return;
+    }
+    window.history.replaceState(null, '', '/');
+    window.dispatchEvent(new PopStateEvent('popstate'));
   };
 
   return (

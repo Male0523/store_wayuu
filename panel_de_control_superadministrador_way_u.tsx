@@ -1,4 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
+import { useUserSession } from './frontend/src/context/user-context';
+import { api, ApiError } from './frontend/src/lib/api';
+import type { SuperadminUser } from './frontend/src/types';
 import {
   Home,
   Shield,
@@ -71,7 +74,7 @@ const ROLES = [
     usersCount: 3,
   },
   {
-    id: 'admin_tienda',
+    id: 'admin',
     name: 'Administrador de tienda',
     shortName: 'Admin. tienda',
     badgeColor: 'bg-pink-100 text-pink-800 border-pink-200',
@@ -80,7 +83,7 @@ const ROLES = [
     usersCount: 8,
   },
   {
-    id: 'tejedora',
+    id: 'craftswoman',
     name: 'Tejedora',
     shortName: 'Tejedora',
     badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-200',
@@ -89,7 +92,7 @@ const ROLES = [
     usersCount: 42,
   },
   {
-    id: 'cliente',
+    id: 'customer',
     name: 'Cliente',
     shortName: 'Cliente',
     badgeColor: 'bg-amber-100 text-amber-800 border-amber-200',
@@ -215,17 +218,6 @@ const INITIAL_PERMISSIONS = {
   },
 };
 
-// DATOS DE PRUEBA (MOCK DATA)
-const INITIAL_USERS = [
-  { id: 1, name: 'Sonia Epinayú', email: 'sonia.epinayu@wayuu.co', role: 'superadmin', status: 'Activo', rancheria: 'Uribia Central', date: '2023-01-15' },
-  { id: 2, name: 'Carlos Pushaina', email: 'carlos.admin@wayuu.co', role: 'admin_tienda', status: 'Activo', rancheria: 'Manaure', date: '2023-03-22' },
-  { id: 3, name: 'Marta Uriana', email: 'marta.uriana@wayuu.co', role: 'tejedora', status: 'Activo', rancheria: 'Mayapo', date: '2023-05-10' },
-  { id: 4, name: 'Kenia Iguarán', email: 'kenia.i@gmail.com', role: 'cliente', status: 'Activo', rancheria: 'N/A (Riohacha)', date: '2023-08-01' },
-  { id: 5, name: 'Aura Barros', email: 'aura.barros@wayuu.co', role: 'tejedora', status: 'Inactivo', rancheria: 'Cabo de la Vela', date: '2023-09-12' },
-  { id: 6, name: 'Juan Gómez', email: 'jmgomez@empresa.com', role: 'cliente', status: 'Activo', rancheria: 'N/A (Bogotá)', date: '2023-10-04' },
-  { id: 7, name: 'Luz Marina Jayaliyu', email: 'luz.jayaliyu@wayuu.co', role: 'admin_tienda', status: 'Activo', rancheria: 'Maicao', date: '2024-01-08' },
-];
-
 const INITIAL_AUDIT_LOGS = [
   { id: 'LOG-8902', timestamp: '2026-10-30 08:45:12', user: 'Sonia Epinayú', role: 'Superadministrador', action: 'Actualización RBAC', resource: 'Roles y permisos', details: 'Modificó permiso "Aprobar" en Recurso "Publicación de productos"' },
   { id: 'LOG-8901', timestamp: '2026-10-30 08:12:00', user: 'Carlos Pushaina', role: 'Administrador de tienda', action: 'Cambio de Estado', resource: 'Usuarios', details: 'Activó la cuenta de Marta Uriana' },
@@ -250,6 +242,7 @@ const INITIAL_ORDERS = [
 ];
 
 export default function App() {
+  const { logout } = useUserSession();
   // Authentication State
   const [isAuthenticated, setIsAuthenticated] = useState(true);
   const [loginEmail, setLoginEmail] = useState('sonia.epinayu@wayuu.co');
@@ -267,7 +260,9 @@ export default function App() {
   const [permissions, setPermissions] = useState(INITIAL_PERMISSIONS);
   const [selectedResource, setSelectedResource] = useState('panel_principal');
   const [resourceSearch, setResourceSearch] = useState('');
-  const [users, setUsers] = useState(INITIAL_USERS);
+  const [users, setUsers] = useState<SuperadminUser[]>([]);
+  const [usersLoading, setUsersLoading] = useState(true);
+  const [usersError, setUsersError] = useState('');
   const [products, setProducts] = useState(INITIAL_PRODUCTS);
   const [orders, setOrders] = useState(INITIAL_ORDERS);
   const [auditLogs, setAuditLogs] = useState(INITIAL_AUDIT_LOGS);
@@ -279,6 +274,23 @@ export default function App() {
   const [selectedUserForEdit, setSelectedUserForEdit] = useState(null);
   const [isEditUserModalOpen, setIsEditUserModalOpen] = useState(false);
   const [selectedOrderForDetail, setSelectedOrderForDetail] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    const params = new URLSearchParams();
+    if (userSearchTerm.trim()) params.set('search', userSearchTerm.trim());
+    if (userRoleFilter !== 'all') params.set('role', userRoleFilter);
+    setUsersLoading(true);
+    setUsersError('');
+    api.superadminUsers(params)
+      .then((result) => { if (active) setUsers(result); })
+      .catch((error) => {
+        if (!active) return;
+        setUsersError(error instanceof ApiError ? error.message : 'No fue posible consultar los usuarios en Django.');
+      })
+      .finally(() => { if (active) setUsersLoading(false); });
+    return () => { active = false; };
+  }, [userSearchTerm, userRoleFilter]);
 
   // Form State: Configuración Tienda
   const [storeConfig, setStoreConfig] = useState({
@@ -302,7 +314,13 @@ export default function App() {
   };
 
   // Auth Handlers
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch {
+      showToast('No se pudo cerrar la sesión con Django.', 'info');
+      return;
+    }
     setIsAuthenticated(false);
     setAuditLogs(prev => [
       {
@@ -316,6 +334,8 @@ export default function App() {
       },
       ...prev
     ]);
+    window.history.replaceState(null, '', '/');
+    window.dispatchEvent(new PopStateEvent('popstate'));
   };
 
   const handleLogin = (e) => {
@@ -415,15 +435,7 @@ export default function App() {
     }));
   };
 
-  const filteredUsers = useMemo(() => {
-    return users.filter(u => {
-      const matchSearch = u.name.toLowerCase().includes(userSearchTerm.toLowerCase()) ||
-                          u.email.toLowerCase().includes(userSearchTerm.toLowerCase()) ||
-                          u.rancheria.toLowerCase().includes(userSearchTerm.toLowerCase());
-      const matchRole = userRoleFilter === 'all' || u.role === userRoleFilter;
-      return matchSearch && matchRole;
-    });
-  }, [users, userSearchTerm, userRoleFilter]);
+  const filteredUsers = users;
 
   // LOGIN SCREEN RENDER
   if (!isAuthenticated) {
@@ -1166,8 +1178,9 @@ export default function App() {
                 </div>
 
                 <button
-                  onClick={() => showToast('Modal para invitar o crear usuario.', 'info')}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-[#5C1D24] hover:bg-[#4A121A] text-white text-xs font-bold rounded-xl shadow-sm transition-colors"
+                  disabled
+                  title="La creación de usuarios requiere un endpoint de administración que aún no está disponible."
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-[#5C1D24] text-white text-xs font-bold rounded-xl shadow-sm opacity-50 cursor-not-allowed"
                 >
                   <UserPlus className="w-4 h-4" />
                   <span>Nuevo Usuario</span>
@@ -1180,7 +1193,7 @@ export default function App() {
                   <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
-                    placeholder="Buscar por nombre, email o ranchería..."
+                    placeholder="Buscar por nombre, username, email o ubicación..."
                     value={userSearchTerm}
                     onChange={(e) => setUserSearchTerm(e.target.value)}
                     className="w-full text-xs pl-9 pr-3 py-2 bg-[#FDFBF7] border border-stone-300 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#5C1D24]"
@@ -1203,13 +1216,15 @@ export default function App() {
                 </div>
               </div>
 
+              {usersError && <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-700" role="alert">{usersError}</p>}
+
               {/* Tabla de usuarios */}
               <div className="bg-white rounded-2xl border border-[#E2D9D5] shadow-sm overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="bg-stone-50 border-b border-[#E2D9D5] text-xs font-semibold text-stone-600">
-                        <th className="py-3.5 px-6">Usuario</th>
+                        <th className="py-3.5 px-6">Nombre / cuenta</th>
                         <th className="py-3.5 px-4">Rol Asignado</th>
                         <th className="py-3.5 px-4">Ubicación / Ranchería</th>
                         <th className="py-3.5 px-4">Estado</th>
@@ -1217,6 +1232,8 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-stone-100 text-xs">
+                      {usersLoading && <tr><td className="py-6 px-6 text-stone-500" colSpan={5}>Consultando usuarios en Django...</td></tr>}
+                      {!usersLoading && !usersError && filteredUsers.length === 0 && <tr><td className="py-6 px-6 text-stone-500" colSpan={5}>No hay usuarios para este filtro.</td></tr>}
                       {filteredUsers.map((u) => {
                         const roleObj = ROLES.find(r => r.id === u.role);
                         return (
@@ -1224,46 +1241,46 @@ export default function App() {
                             <td className="py-4 px-6">
                               <div className="flex items-center gap-3">
                                 <div className="w-8 h-8 rounded-full bg-[#5C1D24]/10 text-[#5C1D24] flex items-center justify-center font-bold text-xs uppercase">
-                                  {u.name.substring(0, 2)}
+                                  {u.full_name.substring(0, 2)}
                                 </div>
                                 <div>
-                                  <p className="font-bold text-stone-800">{u.name}</p>
-                                  <p className="text-stone-500 text-[11px]">{u.email}</p>
+                                  <p className="font-bold text-stone-800">{u.full_name}</p>
+                                  <p className="text-stone-500 text-[11px]">{u.username} · {u.email || 'Sin correo'}</p>
                                 </div>
                               </div>
                             </td>
 
                             <td className="py-4 px-4">
-                              <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold border ${roleObj?.badgeColor}`}>
-                                {roleObj?.name}
+                              <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold border ${roleObj?.badgeColor ?? 'bg-stone-100 text-stone-700 border-stone-200'}`}>
+                                {u.role_name}
                               </span>
                             </td>
 
-                            <td className="py-4 px-4 text-stone-600 font-medium">{u.rancheria}</td>
+                            <td className="py-4 px-4 text-stone-600 font-medium">{u.location || '—'}</td>
 
                             <td className="py-4 px-4">
                               <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium ${
-                                u.status === 'Activo' ? 'bg-emerald-100 text-emerald-800' : 'bg-stone-100 text-stone-600'
+                                u.active ? 'bg-emerald-100 text-emerald-800' : 'bg-stone-100 text-stone-600'
                               }`}>
-                                <span className={`w-1.5 h-1.5 rounded-full ${u.status === 'Activo' ? 'bg-emerald-600' : 'bg-stone-400'}`}></span>
-                                {u.status}
+                                <span className={`w-1.5 h-1.5 rounded-full ${u.active ? 'bg-emerald-600' : 'bg-stone-400'}`}></span>
+                                {u.active ? 'Activo' : 'Inactivo'}
                               </span>
                             </td>
 
                             <td className="py-4 px-6 text-right">
                               <div className="flex items-center justify-end gap-2">
                                 <button
-                                  onClick={() => handleToggleUserStatus(u.id)}
-                                  className={`p-1.5 rounded-lg border transition-colors ${
-                                    u.status === 'Activo' ? 'text-amber-700 border-amber-200 hover:bg-amber-50' : 'text-emerald-700 border-emerald-200 hover:bg-emerald-50'
-                                  }`}
+                                  disabled
+                                  title="El cambio de estado requiere un endpoint de administración que aún no está disponible."
+                                  className="p-1.5 rounded-lg border border-stone-200 text-stone-400 opacity-50 cursor-not-allowed"
                                 >
-                                  {u.status === 'Activo' ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
+                                  {u.is_active ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
                                 </button>
 
                                 <button
-                                  onClick={() => { setSelectedUserForEdit(u); setIsEditUserModalOpen(true); }}
-                                  className="p-1.5 text-stone-600 border border-stone-200 rounded-lg hover:bg-stone-100 transition-colors"
+                                  disabled
+                                  title="La edición requiere un endpoint de administración que aún no está disponible."
+                                  className="p-1.5 text-stone-400 border border-stone-200 rounded-lg opacity-50 cursor-not-allowed"
                                 >
                                   <Edit className="w-4 h-4" />
                                 </button>

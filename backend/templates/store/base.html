@@ -29,7 +29,11 @@
       <nav aria-label="Navegación principal">
         {% if request.user.is_authenticated %}
           {% for item in navigation_items %}
-            <a class="{% if item.route_name == 'store:cart' %}nav-cart{% elif item.route_name == 'store:logout' %}nav-subtle{% endif %}" href="{{ item.url }}" title="{{ item.description }}">{% if item.route_name == 'store:customer_dashboard' %}<img class="nav-icon" src="{% static 'store/icons/account.svg' %}" alt="">{% elif item.route_name == 'store:cart' %}<img class="nav-icon" src="{% static 'store/icons/bag.svg' %}" alt="">{% endif %}{{ item.label }}</a>
+            {% if item.route_name == 'store:logout' %}
+              <form class="nav-logout-form" action="{{ item.url }}" method="post">{% csrf_token %}<button class="nav-subtle" type="submit" title="{{ item.description }}">{{ item.label }}</button></form>
+            {% else %}
+              <a class="{% if item.route_name == 'store:cart' %}nav-cart{% endif %}" href="{{ item.url }}" title="{{ item.description }}">{% if item.route_name == 'store:customer_dashboard' %}<img class="nav-icon" src="{% static 'store/icons/account.svg' %}" alt="">{% elif item.route_name == 'store:cart' %}<img class="nav-icon" src="{% static 'store/icons/bag.svg' %}" alt="">{% endif %}{{ item.label }}</a>
+            {% endif %}
           {% endfor %}
         {% else %}
           <a href="{% url 'store:catalog' %}#catalogo">Catálogo</a>

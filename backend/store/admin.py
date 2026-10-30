@@ -5,6 +5,7 @@ from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import User
 
 from .models import AccessRole, Category, Craftswoman, CustomDesign, Customer, NavigationItem, Order, OrderItem, Product, UserRole
+from .rbac import has_role, role_for_user
 
 
 @admin.action(description='Eliminar seleccionados')
@@ -25,11 +26,11 @@ class NivelDeAccesoFilter(SimpleListFilter):
 
     def queryset(self, request, queryset):
         if self.value() == 'superadmin':
-            return queryset.filter(is_superuser=True)
+            return queryset.filter(access_profile__role__code=AccessRole.Code.SUPERADMIN)
         if self.value() == 'admin':
-            return queryset.filter(is_staff=True, is_superuser=False)
+            return queryset.filter(access_profile__role__code=AccessRole.Code.ADMIN)
         if self.value() == 'usuario':
-            return queryset.filter(is_staff=False)
+            return queryset.filter(access_profile__role__code=AccessRole.Code.CUSTOMER)
         return queryset
 
 
@@ -62,23 +63,40 @@ class WayuuUserAdmin(UserAdmin):
         }),
     )
 
-    @admin.display(description='Nivel de acceso', ordering='is_superuser')
+    @admin.display(description='Nivel de acceso', ordering='access_profile__role__priority')
     def nivel_de_acceso(self, obj):
-        if obj.is_superuser:
-            return 'Superadministrador'
-        if obj.is_staff:
-            return 'Administrador'
-        return 'Usuario / cliente'
+        role = role_for_user(obj)
+        return role.name if role else 'Sin rol asignado'
+
+    def has_module_permission(self, request):
+        return has_role(request.user, AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN)
+
+    def has_view_permission(self, request, obj=None):
+        return self.has_module_permission(request)
+
+    def has_add_permission(self, request):
+        return self.has_module_permission(request)
+
+    def has_change_permission(self, request, obj=None):
+        if has_role(request.user, AccessRole.Code.SUPERADMIN):
+            return True
+        return has_role(request.user, AccessRole.Code.ADMIN) and (
+            obj is None or has_role(obj, AccessRole.Code.CUSTOMER)
+        )
+
+    def has_delete_permission(self, request, obj=None):
+        return self.has_change_permission(request, obj)
 
     def get_queryset(self, request):
         queryset = super().get_queryset(request)
-        if request.user.is_superuser:
+        if has_role(request.user, AccessRole.Code.SUPERADMIN):
             return queryset
-        # Un administrador nunca puede editar ni eliminar cuentas administrativas.
-        return queryset.filter(is_staff=False, is_superuser=False)
+        if has_role(request.user, AccessRole.Code.ADMIN):
+            return queryset.filter(access_profile__role__code=AccessRole.Code.CUSTOMER)
+        return queryset.none()
 
     def get_fieldsets(self, request, obj=None):
-        if request.user.is_superuser:
+        if has_role(request.user, AccessRole.Code.SUPERADMIN):
             return self.add_fieldsets if obj is None else self.fieldsets
         if obj is None:
             return (
@@ -101,19 +119,19 @@ class SuperadminOnlyAdmin(admin.ModelAdmin):
     """La configuración de roles y vistas nunca queda disponible para administradores comunes."""
 
     def has_module_permission(self, request):
-        return request.user.is_superuser
+        return has_role(request.user, AccessRole.Code.SUPERADMIN)
 
     def has_view_permission(self, request, obj=None):
-        return request.user.is_superuser
+        return has_role(request.user, AccessRole.Code.SUPERADMIN)
 
     def has_add_permission(self, request):
-        return request.user.is_superuser
+        return has_role(request.user, AccessRole.Code.SUPERADMIN)
 
     def has_change_permission(self, request, obj=None):
-        return request.user.is_superuser
+        return has_role(request.user, AccessRole.Code.SUPERADMIN)
 
     def has_delete_permission(self, request, obj=None):
-        return request.user.is_superuser
+        return has_role(request.user, AccessRole.Code.SUPERADMIN)
 
 
 @admin.register(AccessRole)

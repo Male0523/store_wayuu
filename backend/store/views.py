@@ -15,7 +15,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 from django.conf import settings
 
-from .models import AccessRole, Category, Craftswoman, CustomDesign, Customer, Order, OrderItem, Product, UserRole
+from .models import AccessRole, Category, Craftswoman, CustomDesign, Customer, Order, OrderItem, Product
+from .rbac import assign_role, has_role, role_for_user
 
 
 def permission_denied(request, exception=None):
@@ -39,8 +40,7 @@ def _cart(request):
 
 def _assign_access_role(user, role_code):
     """Registra el nivel de acceso en la base de datos al crear una cuenta."""
-    role = AccessRole.objects.get(code=role_code)
-    UserRole.objects.update_or_create(user=user, defaults={'role': role})
+    return assign_role(user, role_code)
 
 
 def validate_email_safely(email):
@@ -53,7 +53,7 @@ def validate_email_safely(email):
 
 def _customer_for(request):
     """Autoriza únicamente una cuenta de cliente y devuelve su perfil."""
-    if request.user.is_staff or hasattr(request.user, 'craftswoman_profile'):
+    if not has_role(request.user, AccessRole.Code.CUSTOMER):
         raise PermissionDenied('Esta acción solo está disponible para clientes.')
     customer, _ = Customer.objects.get_or_create(
         user=request.user,
@@ -95,7 +95,8 @@ def _hero_image_from_beta():
 
 def catalog(request):
     products = Product.objects.filter(active=True).select_related('category', 'craftswoman')
-    is_craftswoman = request.user.is_authenticated and hasattr(request.user, 'craftswoman_profile')
+    role = role_for_user(request.user)
+    is_craftswoman = role is not None and role.code == AccessRole.Code.CRAFTSWOMAN
     if is_craftswoman:
         profile = request.user.craftswoman_profile
         products = products.filter(models.Q(craftswoman=profile) | models.Q(region__iexact=profile.region))
@@ -123,13 +124,19 @@ def catalog(request):
             ('multicolor', 'Multicolor', 'linear-gradient(135deg,#c49662 0 33%,#9a6252 33% 66%,#5f7166 66%)'),
         ],
         'is_craftswoman': is_craftswoman,
-        'is_customer': request.user.is_authenticated and not request.user.is_staff and not is_craftswoman,
+        'is_customer': role is not None and role.code == AccessRole.Code.CUSTOMER,
     })
 
 
 def login_view(request):
     if request.user.is_authenticated:
-        return redirect('store:customer_dashboard')
+        role = role_for_user(request.user)
+        if role and role.code == AccessRole.Code.CUSTOMER:
+            return redirect('store:customer_dashboard')
+        if role and role.code == AccessRole.Code.CRAFTSWOMAN:
+            return redirect('store:craftswoman_dashboard')
+        if role and role.code in (AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN):
+            return redirect('/admin/')
     if request.method == 'POST':
         username = request.POST.get('username', '').strip()
         password = request.POST.get('password', '')
@@ -137,10 +144,16 @@ def login_view(request):
         if user is None:
             messages.error(request, 'Usuario o contraseña incorrectos.')
         else:
-            login(request, user)
-            if user.is_staff:
-                return redirect('/admin/')
-            return redirect('store:catalog')
+            role = role_for_user(user)
+            if role is None:
+                messages.error(request, 'Tu cuenta no tiene un rol asignado. Contacta a administración.')
+            else:
+                login(request, user)
+                if role.code in (AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN):
+                    return redirect('/admin/')
+                if role.code == AccessRole.Code.CRAFTSWOMAN:
+                    return redirect('store:craftswoman_dashboard')
+                return redirect('store:catalog')
     return render(request, 'store/login_pro.html')
 
 
@@ -188,6 +201,7 @@ def register_craftswoman(request):
 
 
 @login_required
+@require_POST
 def logout_view(request):
     logout(request)
     return redirect('store:catalog')
@@ -250,11 +264,15 @@ def account_settings(request):
 
 @login_required
 def craftswoman_dashboard(request):
+    if not has_role(request.user, AccessRole.Code.CRAFTSWOMAN):
+        raise PermissionDenied('Esta cuenta no tiene rol de tejedora.')
     try:
         craftswoman = request.user.craftswoman_profile
     except Craftswoman.DoesNotExist:
         messages.error(request, 'Esta cuenta no es de tejedora.')
         return redirect('store:customer_dashboard')
+    if not craftswoman.active:
+        raise PermissionDenied('La cuenta de tejedora todavía no está activada.')
     available_orders = Order.objects.filter(craftswoman__isnull=True, status=Order.Status.PENDING).select_related('customer') if craftswoman.active else Order.objects.none()
     return render(request, 'store/craftswoman_dashboard_pro.html', {'craftswoman': craftswoman, 'orders': craftswoman.orders.select_related('customer'), 'designs': craftswoman.custom_designs.select_related('customer'), 'available_orders': available_orders})
 
@@ -262,6 +280,8 @@ def craftswoman_dashboard(request):
 @login_required
 @require_POST
 def accept_order(request, order_id):
+    if not has_role(request.user, AccessRole.Code.CRAFTSWOMAN):
+        raise PermissionDenied('Esta operación solo está disponible para tejedoras.')
     craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
     with transaction.atomic():
         order = get_object_or_404(Order.objects.select_for_update(), id=order_id, craftswoman__isnull=True, status=Order.Status.PENDING)
@@ -281,6 +301,8 @@ def accept_order(request, order_id):
 @login_required
 @require_POST
 def update_order_status(request, order_id):
+    if not has_role(request.user, AccessRole.Code.CRAFTSWOMAN):
+        raise PermissionDenied('Esta operación solo está disponible para tejedoras.')
     craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
     order = get_object_or_404(Order, id=order_id, craftswoman=craftswoman)
     transitions = {Order.Status.ACCEPTED: {Order.Status.WEAVING}, Order.Status.WEAVING: {Order.Status.ACCEPTED, Order.Status.COMPLETED}}
@@ -301,6 +323,8 @@ def update_order_status(request, order_id):
 @login_required
 @require_POST
 def update_design_status(request, design_id):
+    if not has_role(request.user, AccessRole.Code.CRAFTSWOMAN):
+        raise PermissionDenied('Esta operación solo está disponible para tejedoras.')
     craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
     design = get_object_or_404(CustomDesign, id=design_id, craftswoman=craftswoman)
     transitions = {Order.Status.ACCEPTED: {Order.Status.WEAVING}, Order.Status.WEAVING: {Order.Status.ACCEPTED, Order.Status.COMPLETED}}
@@ -314,12 +338,13 @@ def update_design_status(request, design_id):
 
 def product_detail(request, product_id):
     product = get_object_or_404(Product.objects.select_related('category', 'craftswoman'), id=product_id, active=True)
-    is_craftswoman = request.user.is_authenticated and hasattr(request.user, 'craftswoman_profile')
+    role = role_for_user(request.user)
+    is_craftswoman = role is not None and role.code == AccessRole.Code.CRAFTSWOMAN
     if is_craftswoman:
         profile = request.user.craftswoman_profile
         if product.craftswoman_id != profile.id and product.region.lower() != profile.region.lower():
             raise PermissionDenied('Las tejedoras solo pueden consultar su catálogo regional.')
-    can_shop = request.user.is_authenticated and not request.user.is_staff and not is_craftswoman
+    can_shop = role is not None and role.code == AccessRole.Code.CUSTOMER
     return render(request, 'store/product_detail_pro.html', {'product': product, 'can_shop': can_shop})
 
 
@@ -460,10 +485,15 @@ def checkout(request):
 @login_required
 def order_confirmation(request, order_id):
     order = get_object_or_404(Order.objects.prefetch_related('items__product'), id=order_id)
-    if not request.user.is_staff:
-        if hasattr(request.user, 'craftswoman_profile'):
-            if order.craftswoman_id != request.user.craftswoman_profile.id:
-                raise PermissionDenied('No tienes acceso a este pedido.')
-        elif order.customer.user_id != request.user.id:
+    role = role_for_user(request.user)
+    if role is None:
+        raise PermissionDenied('Tu cuenta no tiene un rol de acceso asignado.')
+    if role.code == AccessRole.Code.CRAFTSWOMAN:
+        craftswoman = Craftswoman.objects.filter(user=request.user).first()
+        if not craftswoman or order.craftswoman_id != craftswoman.id:
             raise PermissionDenied('No tienes acceso a este pedido.')
+    elif role.code == AccessRole.Code.CUSTOMER and order.customer.user_id != request.user.id:
+        raise PermissionDenied('No tienes acceso a este pedido.')
+    elif role.code not in (AccessRole.Code.CUSTOMER, AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN):
+        raise PermissionDenied('Tu rol no tiene acceso a este pedido.')
     return render(request, 'store/order_confirmation_pro.html', {'order': order})

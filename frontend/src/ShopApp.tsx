@@ -5,6 +5,7 @@ import {
   Plus, Search, ShoppingBag, SlidersHorizontal, Trash2, X,
 } from 'lucide-react'
 import { api, ApiError } from './lib/api'
+import { useUserSession } from './context/user-context'
 import type { AdminCategory, AdminProduct, Cart, Category, CustomDesign, CraftswomanDashboard, Order, Product, SessionUser, UserProfile } from './types'
 import './ShopApp.css'
 
@@ -33,10 +34,10 @@ function errorMessage(error: unknown) {
 }
 
 export default function ShopApp() {
+  const { user, login: loginUser, register: registerUser, logout: logoutUser } = useUserSession()
   const [screen, setScreen] = useState<Screen>('shop')
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<Category[]>([])
-  const [user, setUser] = useState<SessionUser | null>(null)
   const [cart, setCart] = useState<Cart | null>(null)
   const [orders, setOrders] = useState<Order[]>([])
   const [adminProducts, setAdminProducts] = useState<AdminProduct[]>([])
@@ -77,17 +78,22 @@ export default function ShopApp() {
   useEffect(() => {
     let active = true
     api.categories().then((data) => { if (active) setCategories(data) }).catch(() => undefined)
-    api.me().then(async ({ user: account }) => {
-      if (!active) return
-      setUser(account)
-      if (account.role === 'customer') {
-        setCheckoutAddress(account.profile?.address ?? '')
-        setCheckoutCity(account.profile?.city ?? '')
-        try { if (active) setCart(await api.cart()) } catch { if (active) setCart(null) }
-      }
-    }).catch(() => undefined)
     return () => { active = false }
   }, [])
+
+  useEffect(() => {
+    let active = true
+    if (user?.role !== 'customer') {
+      return () => { active = false }
+    }
+    api.profile().then((profile) => {
+      if (!active) return
+      setCheckoutAddress(profile.address ?? '')
+      setCheckoutCity(profile.city ?? '')
+    }).catch(() => undefined)
+    api.cart().then((nextCart) => { if (active) setCart(nextCart) }).catch(() => { if (active) setCart(null) })
+    return () => { active = false }
+  }, [user])
 
   useEffect(() => {
     let active = true
@@ -185,15 +191,14 @@ export default function ShopApp() {
     setBusy(true)
     const values = Object.fromEntries(new FormData(event.currentTarget).entries()) as Record<string, string>
     try {
-      const response = authMode === 'login'
-        ? await api.login(values.username, values.password)
-        : await api.register(values, authMode === 'craftswoman')
-      setUser(response.user)
+      const account = authMode === 'login'
+        ? await loginUser(values.username, values.password)
+        : await registerUser(values, authMode === 'craftswoman')
       setAuthOpen(false)
       setNotice(authMode === 'craftswoman' ? 'Solicitud enviada. La cuenta debe ser activada por administración.' : 'Sesión iniciada.')
-      if (response.user.role === 'customer') {
-        setCheckoutAddress(response.user.profile?.address ?? '')
-        setCheckoutCity(response.user.profile?.city ?? '')
+      if (account.role === 'customer') {
+        setCheckoutAddress(account.profile?.address ?? '')
+        setCheckoutCity(account.profile?.city ?? '')
         try { await refreshCart() } catch { setCart(null) }
         if (pendingProduct !== null) {
           const productId = pendingProduct
@@ -202,13 +207,17 @@ export default function ShopApp() {
           await refreshCart()
           setCartOpen(true)
         }
+      } else {
+        setCart(null)
       }
     } catch (error) { setNotice(errorMessage(error)) } finally { setBusy(false) }
   }
 
   async function signOut() {
-    try { await api.logout() } catch { /* La sesión pudo caducar. */ }
-    setUser(null)
+    try { await logoutUser() } catch (error) {
+      setNotice(errorMessage(error))
+      return
+    }
     setCart(null)
     setOrders([])
     setDesigns([])
@@ -226,7 +235,7 @@ export default function ShopApp() {
     }
     setBusy(true)
     try {
-      if (user.role === 'admin') {
+      if (user.role === 'admin' || user.role === 'superadmin') {
         const [orderPage, productsPage, categoryList] = await Promise.all([
           api.orders(), api.adminProducts(), api.adminCategories(),
         ])
@@ -370,7 +379,7 @@ export default function ShopApp() {
       const values = Object.fromEntries(new FormData(event.currentTarget).entries()) as Record<string, string>
       const updated = await api.updateProfile(values)
       setProfileDraft(updated)
-      setUser((current) => current ? { ...current, name: updated.name, profile: updated } : current)
+      window.dispatchEvent(new Event('wayuu:session-change'))
       setCheckoutAddress(updated.address ?? '')
       setCheckoutCity(updated.city ?? '')
       setNotice('Tus datos quedaron actualizados.')

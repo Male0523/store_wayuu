@@ -9,10 +9,11 @@ import type {
   Page,
   Product,
   SessionUser,
+  SuperadminUser,
   UserProfile,
 } from '../types'
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api/v1').replace(/\/$/, '')
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '/api/v1').replace(/\/$/, '')
 
 export class ApiError extends Error {
   status: number
@@ -32,8 +33,10 @@ function csrfCookie(): string | undefined {
 async function ensureCsrf(): Promise<string> {
   let token = csrfCookie()
   if (!token) {
-    await fetch(`${API_BASE}/csrf/`, { credentials: 'include' })
-    token = csrfCookie()
+    const response = await fetch(`${API_BASE}/csrf/`, { credentials: 'include' })
+    if (!response.ok) throw new ApiError('No fue posible obtener el token de seguridad.', response.status)
+    const payload = await response.json().catch(() => null)
+    token = typeof payload?.csrfToken === 'string' ? payload.csrfToken : csrfCookie()
   }
   if (!token) throw new ApiError('No fue posible iniciar una sesión segura. Intenta de nuevo.', 0)
   return token
@@ -51,6 +54,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers,
     credentials: 'include',
   })
+
+  if (response.status === 401 && path !== '/auth/me/') {
+    window.dispatchEvent(new Event('wayuu:session-expired'))
+  }
 
   if (response.status === 204) return undefined as T
   const payload = await response.json().catch(() => null)
@@ -102,6 +109,7 @@ export const api = {
   updateDesignStatus: (id: number, value: string) =>
     request<Pick<CustomDesign, 'id' | 'status'>>(`/craftswoman/designs/${id}/status/`, { method: 'PATCH', body: json({ status: value }) }),
   adminProducts: () => request<AdminProduct[]>('/admin/products/'),
+  superadminUsers: (params: URLSearchParams) => request<SuperadminUser[]>(`/admin/users/?${params}`),
   adminCategories: () => request<AdminCategory[]>('/admin/categories/'),
   createAdminCategory: (values: Pick<AdminCategory, 'name' | 'description' | 'active'>) =>
     request<AdminCategory>('/admin/categories/', { method: 'POST', body: json(values) }),

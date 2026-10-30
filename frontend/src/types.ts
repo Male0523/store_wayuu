@@ -85,7 +85,7 @@ export interface SessionUser {
   username: string
   name: string
   email: string
-  role: 'customer' | 'craftswoman' | 'admin'
+  role: 'customer' | 'craftswoman' | 'admin' | 'superadmin'
   profile: UserProfile | null
 }
 
@@ -123,4 +123,19 @@ export interface CraftswomanDashboard {
   available_orders: Order[]
   orders: Order[]
   designs: CustomDesign[]
+}
+
+export interface SuperadminUser {
+  id: number
+  username: string
+  email: string
+  first_name: string
+  last_name: string
+  full_name: string
+  role: 'customer' | 'craftswoman' | 'admin' | 'superadmin' | 'unassigned'
+  role_name: string
+  is_active: boolean
+  active: boolean
+  location: string
+  date_joined: string
 }
