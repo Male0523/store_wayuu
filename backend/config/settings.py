@@ -85,7 +85,7 @@ CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS', default=[
 ])
 CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS', default=CORS_ALLOWED_ORIGINS)
 
-if DJANGO_ENV == 'development':
+if DJANGO_ENV in ('development', 'remote-development'):
     if CODESPACE_NAME and CODESPACES_PORT_FORWARDING_DOMAIN:
         for frontend_port in (5173, 5174):
             codespace_origin = f'https://{CODESPACE_NAME}-{frontend_port}.{CODESPACES_PORT_FORWARDING_DOMAIN}'
@@ -152,6 +152,54 @@ elif DJANGO_ENV == 'production':
     DATABASES = {'default': dj_database_url.config(default=DATABASE_URL, conn_max_age=600)}
     if DATABASES['default']['ENGINE'] != 'django.db.backends.postgresql':
         raise ImproperlyConfigured('DATABASE_URL de producción debe apuntar a PostgreSQL.')
+elif DJANGO_ENV == 'remote-development':
+    REMOTE_DATABASE_URL = env('REMOTE_DATABASE_URL', default='').strip()
+
+    if DATABASE_URL or DEV_DATABASE_URL:
+        raise ImproperlyConfigured(
+            'remote-development no permite DATABASE_URL ni DEV_DATABASE_URL.'
+        )
+
+    if not REMOTE_DATABASE_URL:
+        raise ImproperlyConfigured(
+            'REMOTE_DATABASE_URL es obligatoria en remote-development.'
+        )
+
+    parsed_remote_url = urlsplit(REMOTE_DATABASE_URL)
+
+    if parsed_remote_url.scheme not in ('postgres', 'postgresql'):
+        raise ImproperlyConfigured(
+            'REMOTE_DATABASE_URL debe usar PostgreSQL.'
+        )
+
+    if not parsed_remote_url.hostname or not parsed_remote_url.hostname.endswith('.render.com'):
+        raise ImproperlyConfigured(
+            'REMOTE_DATABASE_URL debe apuntar a un servidor PostgreSQL de Render.'
+        )
+
+    if parsed_remote_url.path.lstrip('/') != 'wayuu_store':
+        raise ImproperlyConfigured(
+            'REMOTE_DATABASE_URL debe apuntar a la base wayuu_store.'
+        )
+
+    if parsed_remote_url.username != 'wayuu_store_user':
+        raise ImproperlyConfigured(
+            'REMOTE_DATABASE_URL debe utilizar wayuu_store_user.'
+        )
+
+    DATABASES = {
+        'default': dj_database_url.config(
+            default=REMOTE_DATABASE_URL,
+            conn_max_age=0,
+            ssl_require=True,
+        )
+    }
+
+    if DATABASES['default']['ENGINE'] != 'django.db.backends.postgresql':
+        raise ImproperlyConfigured(
+            'REMOTE_DATABASE_URL no se interpretó como PostgreSQL.'
+        )
+
 elif DJANGO_ENV == 'development':
     if DATABASE_URL:
         raise ImproperlyConfigured(
@@ -194,7 +242,9 @@ elif DJANGO_ENV == 'development':
     else:
         raise ImproperlyConfigured('DB_ENGINE debe ser sqlite, postgresql o mysql en desarrollo.')
 else:
-    raise ImproperlyConfigured('DJANGO_ENV debe ser development o production.')
+    raise ImproperlyConfigured(
+        'DJANGO_ENV debe ser development, remote-development o production.'
+    )
 
 
 # Password validation
@@ -241,7 +291,7 @@ if not DEBUG:
     CSRF_COOKIE_SECURE = True
     SESSION_COOKIE_SAMESITE = 'None'
     CSRF_COOKIE_SAMESITE = 'None'
-elif DJANGO_ENV == 'development' and CODESPACE_NAME and CODESPACES_PORT_FORWARDING_DOMAIN:
+elif DJANGO_ENV in ('development', 'remote-development') and CODESPACE_NAME and CODESPACES_PORT_FORWARDING_DOMAIN:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
 

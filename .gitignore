@@ -18,3 +18,5 @@ STORE_WAYUU_*.zip
 STORE_WAYUU_*.tar.gz.enc
 STORE_WAYUU_*.dump
 STORE_WAYUU_*.bundle
+# Respaldos de bases de datos: nunca subir a GitHub
+backups/
