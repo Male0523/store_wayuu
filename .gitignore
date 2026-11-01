@@ -20,3 +20,11 @@ STORE_WAYUU_*.dump
 STORE_WAYUU_*.bundle
 # Respaldos de bases de datos: nunca subir a GitHub
 backups/
+# Archivos estáticos recopilados por Django
+backend/staticfiles/
+
+# Configuración local de VS Code
+.vscode/
+
+# Copias locales de configuración
+backend/config/settings.py.before-render
