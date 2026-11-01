@@ -1,7 +1,8 @@
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
-from django.db import models
+from django.db import models, transaction
 from django.contrib.auth.models import User
 
 
@@ -18,11 +19,34 @@ class AccessRole(models.Model):
     name = models.CharField('nombre', max_length=80)
     description = models.TextField('descripción', blank=True)
     priority = models.PositiveSmallIntegerField('prioridad', default=10)
+    active = models.BooleanField('activo', default=True)
 
     class Meta:
         verbose_name = 'rol de acceso'
         verbose_name_plural = 'roles de acceso'
         ordering = ('priority', 'name')
+
+    def save(self, *args, **kwargs):
+            if self.code not in self.Code.values:
+                raise ValidationError('Solo se permiten los cuatro roles fijos del sistema.')
+            with transaction.atomic():
+                if self.pk:
+                    previous = AccessRole.objects.select_for_update().filter(pk=self.pk).first()
+                    if previous and previous.code != self.code:
+                        raise ValidationError('El código de un rol existente no se puede cambiar.')
+                    if previous and previous.active and not self.active and UserRole.objects.filter(
+                        role=self,
+                        user__is_active=True,
+                    ).exists():
+                        raise ValidationError('No se puede desactivar un rol con cuentas activas asignadas.')
+                super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if self.code in self.Code.values:
+            raise ValidationError('Los roles fijos no se pueden eliminar.')
+        if self.users.exists():
+            raise ValidationError('No se puede eliminar un rol que tenga usuarios asignados.')
+        return super().delete(*args, **kwargs)
 
     def __str__(self):
         return self.name
@@ -41,16 +65,148 @@ class UserRole(models.Model):
 
     def save(self, *args, **kwargs):
         """El rol almacenado gobierna los privilegios base de Django."""
-        super().save(*args, **kwargs)
-        is_superadmin = self.role.code == AccessRole.Code.SUPERADMIN
-        is_admin = self.role.code == AccessRole.Code.ADMIN
-        User.objects.filter(pk=self.user_id).update(
-            is_staff=is_superadmin or is_admin,
-            is_superuser=is_superadmin,
-        )
+        with transaction.atomic():
+            if not self.role.active:
+                raise ValidationError('No se puede asignar un rol inactivo.')
+            previous = UserRole.objects.select_for_update().select_related('role').filter(user_id=self.user_id).first()
+            if previous and previous.role.code == AccessRole.Code.SUPERADMIN and self.role.code != AccessRole.Code.SUPERADMIN:
+                if self.user.is_active and not UserRole.objects.select_for_update().filter(
+                    role__code=AccessRole.Code.SUPERADMIN,
+                    role__active=True,
+                    user__is_active=True,
+                ).exclude(user_id=self.user_id).exists():
+                    raise ValidationError('No se puede retirar el rol del último superadministrador activo.')
+            if (
+                previous
+                and previous.role.code == AccessRole.Code.ADMIN
+                and self.role.code != AccessRole.Code.ADMIN
+            ):
+                revoke_admin_scope(self.user_id)
+            super().save(*args, **kwargs)
+            is_superadmin = self.role.code == AccessRole.Code.SUPERADMIN
+            is_admin = self.role.code == AccessRole.Code.ADMIN
+            User.objects.filter(pk=self.user_id).update(
+                is_staff=is_superadmin or is_admin,
+                is_superuser=is_superadmin,
+            )
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError('La asignación de rol no se elimina; debe cambiarse por otra asignación.')
 
     def __str__(self):
         return f'{self.user.username} · {self.role.name}'
+
+
+class RolePermission(models.Model):
+    role = models.ForeignKey(AccessRole, on_delete=models.CASCADE, related_name='permission_grants')
+    permission = models.ForeignKey('auth.Permission', on_delete=models.CASCADE, related_name='wayuu_role_grants')
+    granted_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='role_permission_changes')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=('role', 'permission'), name='unique_role_permission_grant')]
+        ordering = ('role__code', 'permission__content_type__app_label', 'permission__codename')
+
+
+class UserPermissionGrant(models.Model):
+    class Effect(models.TextChoices):
+        ALLOW = 'allow', 'Permitir'
+        DENY = 'deny', 'Denegar'
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='wayuu_permission_grants')
+    permission = models.ForeignKey('auth.Permission', on_delete=models.CASCADE, related_name='wayuu_user_grants')
+    delegation = models.ForeignKey(
+        'PermissionDelegation',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='user_grants',
+    )
+    effect = models.CharField(max_length=5, choices=Effect.choices)
+    granted_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='individual_permission_changes')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=('user', 'permission'), name='unique_user_permission_grant')]
+        ordering = ('user__username', 'permission__content_type__app_label', 'permission__codename')
+
+
+class PermissionDelegation(models.Model):
+    admin = models.ForeignKey(User, on_delete=models.CASCADE, related_name='permission_delegations')
+    permission = models.ForeignKey('auth.Permission', on_delete=models.CASCADE, related_name='wayuu_delegations')
+    granted_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name='delegations_created')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=('admin', 'permission'), name='unique_admin_permission_delegation')]
+        ordering = ('admin__username', 'permission__content_type__app_label', 'permission__codename')
+
+    def save(self, *args, **kwargs):
+        if not UserRole.objects.filter(
+            user=self.admin,
+            role__code=AccessRole.Code.ADMIN,
+            role__active=True,
+            user__is_active=True,
+        ).exists():
+            raise ValidationError('Solo se puede delegar a una cuenta admin activa.')
+        return super().save(*args, **kwargs)
+
+
+class AuditEvent(models.Model):
+    class Result(models.TextChoices):
+        SUCCESS = 'success', 'Correcto'
+        DENIED = 'denied', 'Denegado'
+
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='wayuu_audit_actions')
+    action = models.CharField(max_length=80)
+    resource = models.CharField(max_length=80)
+    affected_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='wayuu_audit_events')
+    object_type = models.CharField(max_length=80, blank=True)
+    object_id = models.CharField(max_length=80, blank=True)
+    result = models.CharField(max_length=10, choices=Result.choices, default=Result.SUCCESS)
+    details = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('-created_at',)
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError('Los registros de auditoría son inmutables.')
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError('Los registros de auditoría no se pueden eliminar.')
+
+
+def revoke_admin_scope(admin_user_id):
+    grants = list(
+        UserPermissionGrant.objects.filter(granted_by_id=admin_user_id).select_related(
+            'user', 'permission__content_type',
+        )
+    )
+    for grant in grants:
+        AuditEvent.objects.create(
+            action='revoke_user_permission',
+            resource='permissions',
+            affected_user=grant.user,
+            details={
+                'permission': grant.permission.codename,
+                'effect': grant.effect,
+                'reason': 'admin_scope_revoked',
+            },
+        )
+    delegations = list(PermissionDelegation.objects.filter(admin_id=admin_user_id))
+    for delegation in delegations:
+        AuditEvent.objects.create(
+            action='revoke_permission_delegation',
+            resource='delegations',
+            affected_user_id=admin_user_id,
+            details={'permission_id': delegation.permission_id, 'reason': 'admin_scope_revoked'},
+        )
+    UserPermissionGrant.objects.filter(granted_by_id=admin_user_id).delete()
+    PermissionDelegation.objects.filter(admin_id=admin_user_id).delete()
 
 
 class NavigationItem(models.Model):
@@ -61,6 +217,14 @@ class NavigationItem(models.Model):
     anchor = models.CharField('sección opcional', max_length=80, blank=True, help_text='Ejemplo: catalogo o historia')
     description = models.CharField('descripción', max_length=220, blank=True)
     roles = models.ManyToManyField(AccessRole, verbose_name='roles que pueden verla', related_name='navigation_items')
+    permission = models.ForeignKey(
+        'auth.Permission',
+        verbose_name='permiso requerido',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='navigation_items',
+    )
     order = models.PositiveSmallIntegerField('orden', default=10)
     active = models.BooleanField('visible', default=True)
 
@@ -185,6 +349,12 @@ class Order(models.Model):
         verbose_name = 'pedido'
         verbose_name_plural = 'pedidos'
         ordering = ['-created_at']
+        permissions = [
+            ('view_cart', 'Can view shopping cart'),
+            ('add_cart', 'Can add items to shopping cart'),
+            ('change_cart', 'Can change shopping cart'),
+            ('delete_cart', 'Can remove items from shopping cart'),
+        ]
 
     @property
     def total(self):

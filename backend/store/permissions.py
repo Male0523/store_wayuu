@@ -1,7 +1,7 @@
 from rest_framework.permissions import BasePermission
 
 from .models import AccessRole, Craftswoman
-from .rbac import role_for_user
+from .rbac import has_permission as has_rbac_permission, record_audit, role_for_user
 
 
 class RolePermission(BasePermission):
@@ -12,7 +12,30 @@ class RolePermission(BasePermission):
         if not request.user or not request.user.is_authenticated:
             return False
         role = role_for_user(request.user)
-        return role is not None and role.code in self.role_codes
+        if role is None or role.code not in self.role_codes:
+            return False
+        resource = getattr(view, 'rbac_resource', None)
+        if resource:
+            default_action = {
+                'GET': 'view',
+                'HEAD': 'view',
+                'OPTIONS': 'view',
+                'POST': 'add',
+                'PUT': 'change',
+                'PATCH': 'change',
+                'DELETE': 'delete',
+            }.get(request.method)
+            action = getattr(view, 'rbac_actions', {}).get(request.method, default_action)
+            allowed = action is not None and has_rbac_permission(request.user, resource, action)
+            if not allowed:
+                record_audit(
+                    request.user,
+                    f'denied_{request.method.lower()}',
+                    resource,
+                    result='denied',
+                )
+            return allowed
+        return True
 
 
 class HasAssignedRole(RolePermission):
@@ -58,3 +81,17 @@ class AdminOrSuperadmin(RolePermission):
 class SuperadminOnly(RolePermission):
     role_codes = (AccessRole.Code.SUPERADMIN,)
     message = 'Esta operación solo está disponible para superadministración.'
+
+    def has_permission(self, request, view):
+        if super().has_permission(request, view):
+            return True
+        if request.user and request.user.is_authenticated:
+            role = role_for_user(request.user)
+            if role is None or role.code not in self.role_codes:
+                record_audit(
+                    request.user,
+                    f'denied_{request.method.lower()}',
+                    getattr(view, 'rbac_resource', 'superadmin'),
+                    result='denied',
+                )
+        return False

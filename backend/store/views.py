@@ -15,8 +15,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 from django.conf import settings
 
-from .models import AccessRole, Category, Craftswoman, CustomDesign, Customer, Order, OrderItem, Product
-from .rbac import assign_role, has_role, role_for_user
+from .models import AccessRole, AuditEvent, Category, Craftswoman, CustomDesign, Customer, Order, OrderItem, Product
+from .rbac import assign_role, has_permission as has_rbac_permission, has_role, record_audit, role_for_user
 
 
 def permission_denied(request, exception=None):
@@ -63,6 +63,17 @@ def _customer_for(request):
         },
     )
     return customer
+
+
+def _require_permission(request, resource, action):
+    if not has_rbac_permission(request.user, resource, action):
+        record_audit(
+            request.user,
+            f'denied_{action}',
+            resource,
+            result=AuditEvent.Result.DENIED,
+        )
+        raise PermissionDenied('Tu rol no tiene permiso para esta operación.')
 
 
 def _cart_items(request):
@@ -209,6 +220,8 @@ def logout_view(request):
 
 @login_required
 def customer_dashboard(request):
+    _require_permission(request, 'orders', 'view')
+    _require_permission(request, 'designs', 'view')
     customer = _customer_for(request)
     return render(request, 'store/customer_dashboard_pro.html', {'customer': customer, 'orders': customer.orders.prefetch_related('items__product'), 'designs': customer.custom_designs.all()})
 
@@ -216,6 +229,7 @@ def customer_dashboard(request):
 @login_required
 def account_settings(request):
     """Perfil de cliente: los datos se actualizan sin salir de su cuenta."""
+    _require_permission(request, 'customers', 'change' if request.method == 'POST' else 'view')
     customer = _customer_for(request)
     user = request.user
     if request.method == 'POST':
@@ -266,6 +280,8 @@ def account_settings(request):
 def craftswoman_dashboard(request):
     if not has_role(request.user, AccessRole.Code.CRAFTSWOMAN):
         raise PermissionDenied('Esta cuenta no tiene rol de tejedora.')
+    _require_permission(request, 'orders', 'view')
+    _require_permission(request, 'designs', 'view')
     try:
         craftswoman = request.user.craftswoman_profile
     except Craftswoman.DoesNotExist:
@@ -282,6 +298,8 @@ def craftswoman_dashboard(request):
 def accept_order(request, order_id):
     if not has_role(request.user, AccessRole.Code.CRAFTSWOMAN):
         raise PermissionDenied('Esta operación solo está disponible para tejedoras.')
+    _require_permission(request, 'orders', 'change')
+    _require_permission(request, 'designs', 'change')
     craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
     with transaction.atomic():
         order = get_object_or_404(Order.objects.select_for_update(), id=order_id, craftswoman__isnull=True, status=Order.Status.PENDING)
@@ -294,6 +312,14 @@ def accept_order(request, order_id):
                 design.craftswoman = craftswoman
                 design.status = Order.Status.ACCEPTED
                 design.save(update_fields=['craftswoman', 'status'])
+        record_audit(
+            request.user,
+            'accept_order',
+            'orders',
+            affected_user=order.customer.user,
+            details={'status': order.status},
+            instance=order,
+        )
     messages.success(request, f'El pedido #{order.id} fue asignado a tu taller.')
     return redirect('store:craftswoman_dashboard')
 
@@ -303,19 +329,31 @@ def accept_order(request, order_id):
 def update_order_status(request, order_id):
     if not has_role(request.user, AccessRole.Code.CRAFTSWOMAN):
         raise PermissionDenied('Esta operación solo está disponible para tejedoras.')
+    _require_permission(request, 'orders', 'change')
+    _require_permission(request, 'designs', 'change')
     craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
     order = get_object_or_404(Order, id=order_id, craftswoman=craftswoman)
     transitions = {Order.Status.ACCEPTED: {Order.Status.WEAVING}, Order.Status.WEAVING: {Order.Status.ACCEPTED, Order.Status.COMPLETED}}
     status = request.POST.get('status')
     if status in transitions.get(order.status, set()):
-        order.status = status
-        order.save(update_fields=['status', 'updated_at'])
-        for item in order.items.select_related('product__custom_design'):
-            if item.product.custom_design_id:
-                design = item.product.custom_design
-                if design.craftswoman_id == craftswoman.id:
-                    design.status = status
-                    design.save(update_fields=['status'])
+        previous_status = order.status
+        with transaction.atomic():
+            order.status = status
+            order.save(update_fields=['status', 'updated_at'])
+            for item in order.items.select_related('product__custom_design'):
+                if item.product.custom_design_id:
+                    design = item.product.custom_design
+                    if design.craftswoman_id == craftswoman.id:
+                        design.status = status
+                        design.save(update_fields=['status'])
+            record_audit(
+                request.user,
+                'craftswoman_change_order_status',
+                'orders',
+                affected_user=order.customer.user,
+                details={'from': previous_status, 'to': status},
+                instance=order,
+            )
         messages.success(request, f'Pedido #{order.id} actualizado a “{order.get_status_display()}”.')
     return redirect('store:craftswoman_dashboard')
 
@@ -325,13 +363,24 @@ def update_order_status(request, order_id):
 def update_design_status(request, design_id):
     if not has_role(request.user, AccessRole.Code.CRAFTSWOMAN):
         raise PermissionDenied('Esta operación solo está disponible para tejedoras.')
+    _require_permission(request, 'designs', 'change')
     craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
     design = get_object_or_404(CustomDesign, id=design_id, craftswoman=craftswoman)
     transitions = {Order.Status.ACCEPTED: {Order.Status.WEAVING}, Order.Status.WEAVING: {Order.Status.ACCEPTED, Order.Status.COMPLETED}}
     status = request.POST.get('status')
     if status in transitions.get(design.status, set()):
-        design.status = status
-        design.save(update_fields=['status'])
+        previous_status = design.status
+        with transaction.atomic():
+            design.status = status
+            design.save(update_fields=['status'])
+            record_audit(
+                request.user,
+                'craftswoman_change_design_status',
+                'designs',
+                affected_user=design.customer.user,
+                details={'from': previous_status, 'to': status},
+                instance=design,
+            )
         messages.success(request, f'Diseño #{design.id} actualizado a “{design.get_status_display()}”.')
     return redirect('store:craftswoman_dashboard')
 
@@ -350,6 +399,9 @@ def product_detail(request, product_id):
 
 @login_required
 def custom_designer(request):
+    _require_permission(request, 'designs', 'add' if request.method == 'POST' else 'view')
+    if request.method == 'POST':
+        _require_permission(request, 'cart', 'add')
     customer_profile = _customer_for(request)
     prices = {'S': Decimal('100000'), 'M': Decimal('120000'), 'L': Decimal('145000'), 'XL': Decimal('175000')}
     patterns = [('rombos', 'Rombos'), ('olas', 'Olas'), ('estrellas', 'Estrellas'), ('caminos', 'Caminos')]
@@ -370,22 +422,30 @@ def custom_designer(request):
                     customer.name = name
                     customer.save(update_fields=['name'])
                 quantity = max(1, int(request.POST.get('quantity', 1)))
-                design = CustomDesign.objects.create(customer=customer, pattern=request.POST.get('pattern', 'rombos'), base_color=request.POST.get('base_color', '#F5F0EB'), accent_color_one=request.POST.get('accent_color_one', '#C67B5C'), accent_color_two=request.POST.get('accent_color_two', '#45634E'), size=size if size in prices else 'M', quantity=quantity, notes=request.POST.get('notes', '').strip(), estimated_price=prices.get(size, prices['M']) * quantity)
-                category, _ = Category.objects.get_or_create(name='Diseños personalizados', defaults={'description': 'Mantas configuradas por clientes.', 'active': True})
-                product = Product.objects.create(
-                    sku=f'DISENO-{design.pk:05d}',
-                    name=f'Manta personalizada · {design.pattern.title()}',
-                    category=category,
-                    custom_design=design,
-                    description=f'Diseño personalizado: patrón {design.pattern}, talla {design.size}. {design.notes}',
-                    color=f'Base {design.base_color}; acentos {design.accent_color_one} y {design.accent_color_two}',
-                    size=design.size,
-                    production_time={'S': '12-15 días', 'M': '18-22 días', 'L': '22-28 días', 'XL': '25-30 días'}[design.size],
-                    price=design.estimated_price,
-                    stock=1,
-                    made_to_order=True,
-                    active=False,
-                )
+                with transaction.atomic():
+                    design = CustomDesign.objects.create(customer=customer, pattern=request.POST.get('pattern', 'rombos'), base_color=request.POST.get('base_color', '#F5F0EB'), accent_color_one=request.POST.get('accent_color_one', '#C67B5C'), accent_color_two=request.POST.get('accent_color_two', '#45634E'), size=size if size in prices else 'M', quantity=quantity, notes=request.POST.get('notes', '').strip(), estimated_price=prices.get(size, prices['M']) * quantity)
+                    category, _ = Category.objects.get_or_create(name='Diseños personalizados', defaults={'description': 'Mantas configuradas por clientes.', 'active': True})
+                    product = Product.objects.create(
+                        sku=f'DISENO-{design.pk:05d}',
+                        name=f'Manta personalizada · {design.pattern.title()}',
+                        category=category,
+                        custom_design=design,
+                        description=f'Diseño personalizado: patrón {design.pattern}, talla {design.size}. {design.notes}',
+                        color=f'Base {design.base_color}; acentos {design.accent_color_one} y {design.accent_color_two}',
+                        size=design.size,
+                        production_time={'S': '12-15 días', 'M': '18-22 días', 'L': '22-28 días', 'XL': '25-30 días'}[design.size],
+                        price=design.estimated_price,
+                        stock=1,
+                        made_to_order=True,
+                        active=False,
+                    )
+                    record_audit(
+                        request.user,
+                        'create_custom_design',
+                        'designs',
+                        affected_user=request.user,
+                        instance=design,
+                    )
                 cart = _cart(request)
                 cart[str(product.id)] = 1
                 request.session.modified = True
@@ -396,6 +456,7 @@ def custom_designer(request):
 
 @login_required
 def cart(request):
+    _require_permission(request, 'cart', 'view')
     _customer_for(request)
     items, total = _cart_items(request)
     return render(request, 'store/cart_pro.html', {'items': items, 'total': total})
@@ -404,6 +465,7 @@ def cart(request):
 @require_POST
 @login_required
 def add_to_cart(request, product_id):
+    _require_permission(request, 'cart', 'add')
     _customer_for(request)
     product = get_object_or_404(Product, id=product_id, active=True)
     requested_quantity = int(request.POST.get('quantity', 1))
@@ -421,6 +483,7 @@ def add_to_cart(request, product_id):
 @require_POST
 @login_required
 def update_cart(request, product_id):
+    _require_permission(request, 'cart', 'change')
     _customer_for(request)
     cart = _cart(request)
     if str(product_id) not in cart:
@@ -438,6 +501,7 @@ def update_cart(request, product_id):
 @require_POST
 @login_required
 def remove_from_cart(request, product_id):
+    _require_permission(request, 'cart', 'delete')
     _customer_for(request)
     cart = _cart(request)
     cart.pop(str(product_id), None)
@@ -447,6 +511,11 @@ def remove_from_cart(request, product_id):
 
 @login_required
 def checkout(request):
+    if request.method == 'POST':
+        _require_permission(request, 'orders', 'add')
+        _require_permission(request, 'customers', 'change')
+    else:
+        _require_permission(request, 'cart', 'view')
     customer_profile = _customer_for(request)
     items, total = _cart_items(request)
     if not items:
@@ -462,11 +531,15 @@ def checkout(request):
             messages.error(request, 'Completa nombre, correo, ciudad y dirección de entrega.')
         else:
             with transaction.atomic():
-                customer, _ = Customer.objects.update_or_create(
-                    email=email,
-                    defaults={'name': name, 'phone': phone, 'address': address, 'city': city},
+                customer_profile.name = name
+                customer_profile.phone = phone
+                customer_profile.address = address
+                customer_profile.city = city
+                customer_profile.save(update_fields=['name', 'phone', 'address', 'city'])
+                order = Order.objects.create(
+                    customer=customer_profile,
+                    shipping_address=f'{address}, {city}',
                 )
-                order = Order.objects.create(customer=customer, shipping_address=f'{address}, {city}')
                 for item in items:
                     product = Product.objects.select_for_update().get(id=item['product'].id)
                     if product.stock < item['quantity']:
@@ -476,6 +549,14 @@ def checkout(request):
                     OrderItem.objects.create(order=order, product=product, quantity=item['quantity'], unit_price=product.price)
                     product.stock -= item['quantity']
                     product.save(update_fields=['stock', 'updated_at'])
+                record_audit(
+                    request.user,
+                    'checkout',
+                    'orders',
+                    affected_user=request.user,
+                    details={'item_count': len(items)},
+                    instance=order,
+                )
             request.session['cart'] = {}
             request.session.modified = True
             return redirect('store:order_confirmation', order_id=order.id)
@@ -484,16 +565,25 @@ def checkout(request):
 
 @login_required
 def order_confirmation(request, order_id):
-    order = get_object_or_404(Order.objects.prefetch_related('items__product'), id=order_id)
     role = role_for_user(request.user)
     if role is None:
         raise PermissionDenied('Tu cuenta no tiene un rol de acceso asignado.')
+    _require_permission(request, 'orders', 'view')
     if role.code == AccessRole.Code.CRAFTSWOMAN:
-        craftswoman = Craftswoman.objects.filter(user=request.user).first()
-        if not craftswoman or order.craftswoman_id != craftswoman.id:
-            raise PermissionDenied('No tienes acceso a este pedido.')
-    elif role.code == AccessRole.Code.CUSTOMER and order.customer.user_id != request.user.id:
-        raise PermissionDenied('No tienes acceso a este pedido.')
-    elif role.code not in (AccessRole.Code.CUSTOMER, AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN):
+        order = get_object_or_404(
+            Order.objects.prefetch_related('items__product'),
+            id=order_id,
+            craftswoman__user=request.user,
+            craftswoman__active=True,
+        )
+    elif role.code == AccessRole.Code.CUSTOMER:
+        order = get_object_or_404(
+            Order.objects.prefetch_related('items__product'),
+            id=order_id,
+            customer__user=request.user,
+        )
+    elif role.code in (AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN):
+        order = get_object_or_404(Order.objects.prefetch_related('items__product'), id=order_id)
+    else:
         raise PermissionDenied('Tu rol no tiene acceso a este pedido.')
     return render(request, 'store/order_confirmation_pro.html', {'order': order})

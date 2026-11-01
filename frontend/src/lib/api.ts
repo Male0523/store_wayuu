@@ -5,11 +5,18 @@ import type {
   Category,
   CustomDesign,
   CraftswomanDashboard,
+  AuditEvent,
   Order,
   Page,
   Product,
+  RBACAction,
+  RBACDelegation,
+  RBACPermission,
+  RBACRolePermissions,
+  RBACUserPermissions,
   SessionUser,
   SuperadminUser,
+  SuperadminUserInput,
   UserProfile,
 } from '../types'
 
@@ -110,6 +117,36 @@ export const api = {
     request<Pick<CustomDesign, 'id' | 'status'>>(`/craftswoman/designs/${id}/status/`, { method: 'PATCH', body: json({ status: value }) }),
   adminProducts: () => request<AdminProduct[]>('/admin/products/'),
   superadminUsers: (params: URLSearchParams) => request<SuperadminUser[]>(`/admin/users/?${params}`),
+  createSuperadminUser: (values: SuperadminUserInput) =>
+    request<SuperadminUser>('/admin/users/', { method: 'POST', body: json(values) }),
+  superadminUser: (userId: number) => request<SuperadminUser>(`/admin/users/${userId}/`),
+  updateSuperadminUser: (userId: number, values: Partial<SuperadminUserInput>) =>
+    request<SuperadminUser>(`/admin/users/${userId}/`, { method: 'PATCH', body: json(values) }),
+  rbacCatalog: () => request<{ permissions: RBACPermission[] }>('/admin/rbac/catalog/'),
+  rolePermissions: (role: SessionUser['role']) =>
+    request<RBACRolePermissions>(`/admin/rbac/roles/${role}/permissions/`),
+  updateRolePermissions: (role: SessionUser['role'], permissions: Pick<RBACPermission, 'resource' | 'action' | 'allowed'>[]) =>
+    request<RBACRolePermissions>(`/admin/rbac/roles/${role}/permissions/`, {
+      method: 'PUT', body: json({ permissions }),
+    }),
+  setRoleActive: (role: SessionUser['role'], active: boolean) =>
+    request<{ role: string; active: boolean }>(`/admin/rbac/roles/${role}/permissions/`, {
+      method: 'PATCH', body: json({ active }),
+    }),
+  userPermissions: (userId: number) =>
+    request<RBACUserPermissions>(`/admin/rbac/users/${userId}/permissions/`),
+  updateUserPermissions: (userId: number, permissions: Pick<RBACPermission, 'resource' | 'action' | 'effect'>[]) =>
+    request<RBACUserPermissions>(`/admin/rbac/users/${userId}/permissions/`, {
+      method: 'PUT', body: json({ permissions }),
+    }),
+  permissionDelegations: () => request<RBACDelegation[]>('/admin/rbac/delegations/'),
+  setPermissionDelegation: (values: { admin_user_id: number; resource: string; action: RBACAction; allowed: boolean }) =>
+    request<{ detail: string }>('/admin/rbac/delegations/', { method: 'POST', body: json(values) }),
+  setUserRole: (userId: number, role: SessionUser['role']) =>
+    request<{ user_id: number; role: string }>(`/admin/users/${userId}/role/`, {
+      method: 'PATCH', body: json({ role }),
+    }),
+  auditEvents: () => request<AuditEvent[]>('/admin/rbac/audit/'),
   adminCategories: () => request<AdminCategory[]>('/admin/categories/'),
   createAdminCategory: (values: Pick<AdminCategory, 'name' | 'description' | 'active'>) =>
     request<AdminCategory>('/admin/categories/', { method: 'POST', body: json(values) }),

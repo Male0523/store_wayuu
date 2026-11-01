@@ -86,6 +86,7 @@ export interface SessionUser {
   name: string
   email: string
   role: 'customer' | 'craftswoman' | 'admin' | 'superadmin'
+  permissions?: string[]
   profile: UserProfile | null
 }
 
@@ -138,4 +139,78 @@ export interface SuperadminUser {
   active: boolean
   location: string
   date_joined: string
+  profile: ManagedUserProfile | null
+}
+
+export interface ManagedUserProfile {
+  id?: number
+  name: string
+  email?: string
+  phone?: string
+  address?: string
+  city?: string
+  community?: string
+  region?: string
+  active?: boolean
+}
+
+export interface SuperadminUserInput {
+  username: string
+  email: string
+  first_name?: string
+  last_name?: string
+  role: SessionUser['role']
+  is_active?: boolean
+  password?: string
+  phone?: string
+  address?: string
+  city?: string
+  community?: string
+  region?: string
+  craftswoman_active?: boolean
+}
+
+export type RBACAction = 'view' | 'add' | 'change' | 'delete'
+
+export interface RBACPermission {
+  resource: string
+  action: RBACAction
+  codename: string
+  name: string
+  allowed?: boolean
+  effect?: 'allow' | 'deny' | null
+}
+
+export interface RBACRolePermissions {
+  role: SessionUser['role']
+  active: boolean
+  permissions: RBACPermission[]
+}
+
+export interface RBACUserPermissions {
+  user_id: number
+  username: string
+  permissions: RBACPermission[]
+}
+
+export interface RBACDelegation {
+  admin_user_id: number
+  username: string
+  resource: string
+  action: RBACAction
+  codename: string
+  granted_by: string
+}
+
+export interface AuditEvent {
+  id: number
+  actor: string | null
+  action: string
+  resource: string
+  affected_user: string | null
+  object_type: string
+  object_id: string
+  result: 'success' | 'denied'
+  details: Record<string, unknown>
+  created_at: string
 }

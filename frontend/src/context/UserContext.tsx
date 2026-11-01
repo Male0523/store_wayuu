@@ -20,6 +20,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
       } else if (error instanceof ApiError && error.status === 403) {
         setUser(null)
         setSessionError('La cuenta no tiene un rol de acceso asignado. Contacta a administración.')
+      } else if (error instanceof ApiError && error.status > 0) {
+        setSessionError(`Django respondió HTTP ${error.status}. ${error.message}`)
       } else {
         setSessionError('No fue posible verificar la sesión con Django. Revisa la conexión e inténtalo de nuevo.')
       }
