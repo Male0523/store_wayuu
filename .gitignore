@@ -6,7 +6,6 @@ backend/.local/
 # Archivos generados localmente
 __pycache__/
 *.py[cod]
-backend/db.sqlite3
 
 # Variables de entorno del frontend
 frontend/.env

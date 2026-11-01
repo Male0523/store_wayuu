@@ -68,7 +68,7 @@ class Command(BaseCommand):
             raise CommandError(f'Faltan roles persistidos requeridos: {", ".join(missing_roles)}.')
 
         plans = [self.inspect_account(account_data(name, role_code), role_rows[role_code]) for name, role_code in ACCOUNTS]
-        self.stdout.write('Destino verificado: PostgreSQL local 127.0.0.1 / wayuu_dev.')
+        self.stdout.write('Destino verificado: SQLite local backend/db.sqlite3.')
         self.stdout.write('Resumen: 1 superadmin, 2 admin, 5 tejedoras activas, 4 clientes.')
         for plan in plans:
             self.stdout.write(f'{plan["status"]}: {plan["username"]} | {plan["name"]} | {plan["role_name"]}')
@@ -118,36 +118,44 @@ class Command(BaseCommand):
                 'Falló la creación o el guardado local de credenciales; consulta el error subyacente antes de reintentar.'
             ) from error
 
-        self.stdout.write(self.style.SUCCESS(f'{len(new_accounts)} cuentas creadas en wayuu_dev.'))
+        self.stdout.write(self.style.SUCCESS(f'{len(new_accounts)} cuentas creadas en SQLite local.'))
         self.stdout.write(f'Credenciales guardadas localmente con modo 0600: {credentials_path}')
         self.stdout.write('No se imprimieron contraseñas; las cuentas existentes no se sobrescribieron.')
 
     @staticmethod
     def assert_local_database():
+        # Este comando solo puede escribir en la SQLite local de desarrollo.
         if os.environ.get('DATABASE_URL'):
-            raise CommandError('DATABASE_URL está prohibida; solo se permite DEV_DATABASE_URL local.')
-        test_database = connection.settings_dict
-        test_name = str(test_database.get('NAME', ''))
+            raise CommandError(
+                'DATABASE_URL está presente; destino rechazado por seguridad.'
+            )
+
+        if getattr(settings, 'DJANGO_ENV', None) != 'development':
+            raise CommandError('Se requiere DJANGO_ENV=development.')
+
+        if getattr(settings, 'DB_ENGINE', None) != 'sqlite':
+            raise CommandError('Se requiere DB_ENGINE=sqlite.')
+
+        if connection.settings_dict['ENGINE'] != 'django.db.backends.sqlite3':
+            raise CommandError('La conexión Django no es SQLite.')
+
+        test_name = str(connection.settings_dict['NAME'])
         if (
             'test' in sys.argv
-            and test_database.get('ENGINE', '').endswith('sqlite3')
             and (test_name == ':memory:' or 'mode=memory' in test_name)
         ):
             return
-        if getattr(settings, 'DJANGO_ENV', None) != 'development':
-            raise CommandError('Se requiere DJANGO_ENV=development.')
-        if getattr(settings, 'DB_ENGINE', None) != 'postgresql':
-            raise CommandError('Se requiere DB_ENGINE=postgresql para wayuu_dev.')
-        config = settings.DATABASES['default']
-        if config['ENGINE'] != 'django.db.backends.postgresql':
-            raise CommandError('La conexión Django no es PostgreSQL.')
-        if config['HOST'] not in ('localhost', '127.0.0.1', '::1') or config['NAME'] != 'wayuu_dev':
-            raise CommandError('Destino rechazado: se requiere host loopback y base wayuu_dev.')
-        with connection.cursor() as cursor:
-            cursor.execute('SELECT current_database(), current_user')
-            database, user = cursor.fetchone()
-        if database != 'wayuu_dev' or user != 'wayuu_dev':
-            raise CommandError('El servidor PostgreSQL no confirma identidad local wayuu_dev.')
+
+        expected_path = (Path(settings.BASE_DIR) / 'db.sqlite3').resolve()
+        actual_path = Path(test_name).resolve()
+
+        if actual_path != expected_path:
+            raise CommandError(
+                f'Destino SQLite rechazado: se esperaba {expected_path}.'
+            )
+
+        if not expected_path.is_file():
+            raise CommandError('No existe la base SQLite local esperada.')
 
     @staticmethod
     def inspect_account(data, role):
