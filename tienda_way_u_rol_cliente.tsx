@@ -42,15 +42,34 @@ import {
 
 const INITIAL_CLIENT_USER = {
   id: 'USR-WAY-8821',
-  name: 'Maria López',
-  email: 'maria.lopez@email.com',
-  phone: '+57 300 456 7890',
-  address: 'Calle 15 # 8-42, Barrio Coquivacoa',
-  city: 'Riohacha',
-  department: 'La Guajira',
-  rancheriaPreferred: 'Mayapo',
-  registeredDate: '2025-03-12'
+  name: 'Usuario',
+  email: 'usuario@wayuu.local',
+  phone: '',
+  address: '',
+  city: '',
+  department: '',
+  rancheriaPreferred: '',
+  registeredDate: ''
 };
+
+function resolveClientDisplayName(user: any) {
+  const identity = user as (any & { first_name?: string | null; last_name?: string | null }) | null | undefined;
+  const firstName = (identity?.first_name ?? '').trim();
+  const lastName = (identity?.last_name ?? '').trim();
+  const combined = [firstName, lastName].filter(Boolean).join(' ').trim();
+  if (combined) return combined;
+
+  const sessionName = (user?.name ?? '').trim();
+  if (sessionName) return sessionName;
+
+  const username = (user?.username ?? '').trim();
+  if (username) return username;
+
+  const profileName = (user?.profile?.name ?? '').trim();
+  if (profileName) return profileName;
+
+  return 'Usuario';
+}
 
 const CATEGORIES = [
   'Todas',
@@ -284,9 +303,31 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState('Todas');
   const [priceOrder, setPriceOrder] = useState('default');
 
-  // User & Orders State
+  const sessionUser = useUserSession().user;
+  const resolvedCustomerName = resolveClientDisplayName(sessionUser);
   const [userProfile, setUserProfile] = useState(INITIAL_CLIENT_USER);
   const [myOrders, setMyOrders] = useState(INITIAL_ORDERS);
+
+  useEffect(() => {
+    const nextProfile = {
+      ...INITIAL_CLIENT_USER,
+      name: resolvedCustomerName,
+      email: sessionUser?.email || INITIAL_CLIENT_USER.email,
+      phone: sessionUser?.profile?.phone || INITIAL_CLIENT_USER.phone,
+      city: sessionUser?.profile?.city || INITIAL_CLIENT_USER.city,
+      address: sessionUser?.profile?.address || INITIAL_CLIENT_USER.address,
+      department: sessionUser?.profile?.region || INITIAL_CLIENT_USER.department,
+    };
+
+    if (!sessionUser) {
+      setUserProfile(INITIAL_CLIENT_USER);
+      setEditProfileForm(INITIAL_CLIENT_USER);
+      return;
+    }
+
+    setUserProfile(nextProfile);
+    setEditProfileForm(nextProfile);
+  }, [sessionUser, resolvedCustomerName]);
 
   // Detail View Quantity State
   const [detailQuantity, setDetailQuantity] = useState(1);
@@ -309,6 +350,18 @@ export default function App() {
     department: INITIAL_CLIENT_USER.department,
     notes: ''
   });
+
+  useEffect(() => {
+    setCheckoutForm((current) => ({
+      ...current,
+      fullName: resolvedCustomerName,
+      email: sessionUser?.email || current.email || INITIAL_CLIENT_USER.email,
+      phone: sessionUser?.profile?.phone || current.phone || INITIAL_CLIENT_USER.phone,
+      address: sessionUser?.profile?.address || current.address || INITIAL_CLIENT_USER.address,
+      city: sessionUser?.profile?.city || current.city || INITIAL_CLIENT_USER.city,
+      department: sessionUser?.profile?.region || current.department || INITIAL_CLIENT_USER.department,
+    }));
+  }, [sessionUser, resolvedCustomerName]);
 
   // Notification Toast
   const [toastMessage, setToastMessage] = useState(null);

@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useUserSession } from './frontend/src/context/user-context';
+import type { SessionUser } from './frontend/src/types';
 import {
   LayoutDashboard,
   ShoppingBag,
@@ -229,12 +230,43 @@ const RECENT_ACTIVITIES = [
   { id: 4, user: 'Sistema', action: 'generó alerta de stock bajo para:', target: 'Pulsera Kanaas Relámpago (3 und)', time: 'Hace 5 horas' }
 ];
 
+function resolveSessionDisplayName(user: SessionUser | null | undefined) {
+  const identity = user as (SessionUser & { first_name?: string | null; last_name?: string | null }) | null | undefined
+  const firstName = (identity?.first_name ?? '').trim()
+  const lastName = (identity?.last_name ?? '').trim()
+  const combined = [firstName, lastName].filter(Boolean).join(' ').trim()
+  if (combined) return combined
+
+  const sessionName = (user?.name ?? '').trim()
+  if (sessionName) return sessionName
+
+  const username = (user?.username ?? '').trim()
+  if (username) return username
+
+  const profileName = (user?.profile?.name ?? '').trim()
+  if (profileName) return profileName
+
+  return 'Usuario'
+}
+
+function resolveSessionRoleLabel(role?: SessionUser['role'] | null) {
+  switch (role) {
+    case 'superadmin': return 'Superadministrador'
+    case 'admin': return 'Administrador'
+    case 'craftswoman': return 'Artesana'
+    case 'customer': return 'Cliente'
+    default: return 'Usuario'
+  }
+}
+
 // ==========================================
 // MAIN APP COMPONENT
 // ==========================================
 
 export default function App() {
-  const { logout } = useUserSession();
+  const { user, logout } = useUserSession();
+  const displayName = resolveSessionDisplayName(user);
+  const roleLabel = resolveSessionRoleLabel(user?.role ?? null);
   // Navigation State
   const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard', 'catalog', 'orders', 'inventory'
 
@@ -576,8 +608,8 @@ export default function App() {
                 AG
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-bold text-white truncate">Ana García</p>
-                <p className="text-[10px] text-rose-200/80 truncate">Administrador de tienda</p>
+                <p className="text-xs font-bold text-white truncate">{displayName}</p>
+                <p className="text-[10px] text-rose-200/80 truncate">{roleLabel}</p>
               </div>
             </div>
 
@@ -636,8 +668,8 @@ export default function App() {
                 AG
               </div>
               <div className="hidden sm:block text-left">
-                <p className="text-xs font-bold text-stone-800 leading-tight">Ana García</p>
-                <p className="text-[11px] text-stone-500">Administrador de tienda</p>
+                <p className="text-xs font-bold text-stone-800 leading-tight">{displayName}</p>
+                <p className="text-[11px] text-stone-500">{roleLabel}</p>
               </div>
 
               <button
@@ -670,7 +702,7 @@ export default function App() {
                       <span>Comercio Justo Wayúu</span>
                     </div>
                     <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight text-[#FDFBF7]">
-                      Bienvenida, Ana García
+                      Bienvenida, {displayName}
                     </h2>
                     <p className="text-xs md:text-sm text-rose-100/90 max-w-xl">
                       Supervisa la comercialización de artesanías, valida publicaciones de las tejedoras y gestiona los pedidos en tiempo real.

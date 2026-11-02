@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useUserSession } from './frontend/src/context/user-context';
+import type { SessionUser } from './frontend/src/types';
 import {
   LayoutDashboard,
   ShoppingBag,
@@ -48,6 +49,35 @@ const ARTISAN_PROFILE = {
   yearsExperience: 14,
   avatar: 'ML'
 };
+
+function resolveDisplayName(user: SessionUser | null | undefined) {
+  const identity = user as (SessionUser & { first_name?: string | null; last_name?: string | null }) | null | undefined;
+  const firstName = (identity?.first_name ?? '').trim();
+  const lastName = (identity?.last_name ?? '').trim();
+  const combined = [firstName, lastName].filter(Boolean).join(' ').trim();
+  if (combined) return combined;
+
+  const sessionName = (user?.name ?? '').trim();
+  if (sessionName) return sessionName;
+
+  const username = (user?.username ?? '').trim();
+  if (username) return username;
+
+  const profileName = (user?.profile?.name ?? '').trim();
+  if (profileName) return profileName;
+
+  return 'Usuario';
+}
+
+function resolveRoleDisplay(role?: SessionUser['role'] | null) {
+  switch (role) {
+    case 'superadmin': return 'Superadministrador';
+    case 'admin': return 'Administrador';
+    case 'craftswoman': return 'Artesana';
+    case 'customer': return 'Cliente';
+    default: return 'Usuario';
+  }
+}
 
 const CATEGORIES = [
   'Mochilas (Susu)',
@@ -188,12 +218,33 @@ const WEAVER_NOTIFICATIONS = [
 // ==========================================
 
 export default function App() {
-  const { logout } = useUserSession();
+  const { user, logout } = useUserSession();
+  const displayName = resolveDisplayName(user);
+  const roleLabel = resolveRoleDisplay(user?.role ?? null);
   // Navigation State (Exclusively 4 Main Options)
   const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard', 'products', 'inventory', 'orders'
 
   // Data States
   const [profile, setProfile] = useState(ARTISAN_PROFILE);
+
+  useEffect(() => {
+    const nextProfile = {
+      ...ARTISAN_PROFILE,
+      name: displayName || 'Usuario',
+      role: roleLabel,
+      rancheria: user?.profile?.community || user?.profile?.region || ARTISAN_PROFILE.rancheria,
+      phone: user?.profile?.phone || ARTISAN_PROFILE.phone,
+    };
+
+    if (!user) {
+      setProfile(ARTISAN_PROFILE);
+      setEditProfile(ARTISAN_PROFILE);
+      return;
+    }
+
+    setProfile(nextProfile);
+    setEditProfile(nextProfile);
+  }, [user, displayName, roleLabel]);
   const [products, setProducts] = useState(INITIAL_WEAVER_PRODUCTS);
   const [movements, setMovements] = useState(INITIAL_WEAVER_MOVEMENTS);
   const [orders, setOrders] = useState(INITIAL_WEAVER_ORDERS);
@@ -505,8 +556,8 @@ export default function App() {
                 {profile.avatar}
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-bold text-white truncate group-hover:underline">{profile.name}</p>
-                <p className="text-[10px] text-rose-200/80 truncate">{profile.role}</p>
+                <p className="text-xs font-bold text-white truncate group-hover:underline">{displayName}</p>
+                <p className="text-[10px] text-rose-200/80 truncate">{roleLabel}</p>
               </div>
             </button>
 
@@ -571,8 +622,8 @@ export default function App() {
                   {profile.avatar}
                 </div>
                 <div className="hidden sm:block">
-                  <p className="text-xs font-bold text-stone-800 leading-tight">{profile.name}</p>
-                  <p className="text-[11px] text-stone-500">{profile.role}</p>
+                  <p className="text-xs font-bold text-stone-800 leading-tight">{displayName}</p>
+                  <p className="text-[11px] text-stone-500">{roleLabel}</p>
                 </div>
               </button>
 
@@ -606,7 +657,7 @@ export default function App() {
                       <span>Süchiki Kanaas - Legado Cultural</span>
                     </div>
                     <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight text-[#FDFBF7]">
-                      Jamaya, {profile.name}!
+                      Jamaya, {displayName}!
                     </h2>
                     <p className="text-xs md:text-sm text-rose-100/90 max-w-xl italic">
                       "El tejido no solo une hilos, une el pensamiento y la memoria ancestral de nuestro pueblo Wayúu."

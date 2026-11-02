@@ -47,6 +47,30 @@ function hasEffectivePermission(user: SessionUser, permission: string) {
   return user.permissions?.includes(permission) ?? false
 }
 
+type SessionUserWithNames = SessionUser & {
+  first_name?: string
+  last_name?: string
+}
+
+function resolveUserDisplayName(user: SessionUser | null | undefined, profile: UserProfile | null | undefined = null) {
+  const sessionUser = user as SessionUserWithNames | null | undefined
+  const firstName = (sessionUser?.first_name ?? '').trim()
+  const lastName = (sessionUser?.last_name ?? '').trim()
+  const combinedName = [firstName, lastName].filter(Boolean).join(' ').trim()
+  if (combinedName) return combinedName
+
+  const sessionName = (user?.name ?? '').trim()
+  if (sessionName) return sessionName
+
+  const username = (user?.username ?? '').trim()
+  if (username) return username
+
+  const profileName = (profile?.name ?? '').trim() || (user?.profile?.name ?? '').trim()
+  if (profileName) return profileName
+
+  return 'Usuario'
+}
+
 function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
   const { user, login: loginUser, register: registerUser, logout: logoutUser } = useUserSession()
   const [screen, setScreen] = useState<Screen>(initialScreen)
@@ -89,6 +113,10 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
   const featuredProduct = products.find((product) => product.image_url) ?? products[0]
   const customPrice = ({ S: 100000, M: 120000, L: 145000, XL: 175000 }[designSize] ?? 120000) * designQuantity
   const canRequestDesign = !user || hasEffectivePermission(user, 'designs.add')
+
+  useEffect(() => {
+    setProfileDraft(null)
+  }, [user?.id, user?.email, user?.username, user?.role])
 
   const loadAdminData = useCallback(async () => {
     if (!user || (user.role !== 'admin' && user.role !== 'superadmin')) return
@@ -255,6 +283,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
       const account = authMode === 'login'
         ? await loginUser(values.username, values.password)
         : await registerUser(values, authMode === 'craftswoman')
+      setProfileDraft(null)
       setAuthOpen(false)
       setNotice(authMode === 'craftswoman' ? 'Solicitud enviada. La cuenta debe ser activada por administración.' : 'Sesión iniciada.')
       if (account.role === 'customer') {
@@ -294,6 +323,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
       setAuthOpen(true)
       return
     }
+    setProfileDraft(null)
     setBusy(true)
     try {
       if (user.role === 'admin' || user.role === 'superadmin') {
@@ -446,7 +476,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
     <header className="site-header">
       <button className="wordmark" onClick={() => setScreen('shop')} aria-label="Ir al inicio"><span className="wordmark-symbol" aria-hidden="true"><span /><span /><span /></span><span>wayuuwaa<small>TEJIDO CON ORIGEN</small></span></button>
       <nav className="main-nav" aria-label="Navegación principal"><button className={screen === 'shop' ? 'active' : ''} onClick={() => setScreen('shop')}>Colección</button>{canRequestDesign && <button className={screen === 'design' ? 'active' : ''} onClick={() => setScreen('design')}>Diseña tu manta</button>}<button className="nav-story" onClick={() => document.getElementById('origen')?.scrollIntoView({ behavior: 'smooth' })}>Nuestro origen</button></nav>
-      <div className="header-actions"><label className="header-search" aria-label="Buscar en la colección"><Search size={17} /><input value={query} onChange={(event) => { setQuery(event.target.value); setScreen('shop') }} placeholder="Buscar" /></label><button className="icon-action account-action" onClick={openAccount} title={user ? `Cuenta de ${user.name}` : 'Iniciar sesión'} aria-label={user ? 'Abrir mi cuenta' : 'Iniciar sesión'}><CircleUserRound size={20} strokeWidth={1.6} /></button><button className="icon-action bag-action" onClick={openCart} title="Abrir carrito" aria-label="Abrir carrito"><ShoppingBag size={20} strokeWidth={1.6} /><span className="bag-count">{cart?.count ?? 0}</span></button></div>
+      <div className="header-actions"><label className="header-search" aria-label="Buscar en la colección"><Search size={17} /><input value={query} onChange={(event) => { setQuery(event.target.value); setScreen('shop') }} placeholder="Buscar" /></label><button className="icon-action account-action" onClick={openAccount} title={user ? `Cuenta de ${resolveUserDisplayName(user, profileDraft)}` : 'Iniciar sesión'} aria-label={user ? 'Abrir mi cuenta' : 'Iniciar sesión'}><CircleUserRound size={20} strokeWidth={1.6} /></button><button className="icon-action bag-action" onClick={openCart} title="Abrir carrito" aria-label="Abrir carrito"><ShoppingBag size={20} strokeWidth={1.6} /><span className="bag-count">{cart?.count ?? 0}</span></button></div>
     </header>
 
     {screen === 'shop' && <>
@@ -514,13 +544,13 @@ function CustomerAccountView({ user, orders, designs, profile, section, busy, on
   onSignOut: () => void
   onShop: () => void
 }) {
-  const accountName = profile?.name || user.name
+  const accountName = resolveUserDisplayName(user, profile)
   return <main className="inner-page account-page">
-    <div className="account-heading"><div><p className="eyebrow"><span className="eyebrow-line" /> MI CUENTA</p><h1>Hola, <em>{accountName.split(' ')[0]}.</em></h1><p>Pedidos, diseños y datos de entrega en un mismo lugar.</p></div><button className="text-button" onClick={onSignOut}>Cerrar sesión <ArrowUpRight size={15} /></button></div>
+    <div className="account-heading"><div><p className="eyebrow"><span className="eyebrow-line" /> MI CUENTA</p><h1>Hola, <em>{accountName}.</em></h1><p>Pedidos, diseños y datos de entrega en un mismo lugar.</p></div><button className="text-button" onClick={onSignOut}>Cerrar sesión <ArrowUpRight size={15} /></button></div>
     <div className="account-tabs"><div className="account-tab-buttons"><button className={section === 'orders' ? 'active' : ''} onClick={() => onSection('orders')}>Mis pedidos <span>{orders.length}</span></button><button className={section === 'designs' ? 'active' : ''} onClick={() => onSection('designs')}>Mis diseños <span>{designs.length}</span></button><button className={section === 'profile' ? 'active' : ''} onClick={() => onSection('profile')}>Mis datos</button></div><span>{user.email}</span></div>
     {section === 'orders' && (orders.length ? <div className="orders-list">{orders.map((order) => <OrderCard key={order.id} order={order} />)}</div> : <div className="empty-account"><ShoppingBag size={30} strokeWidth={1.4} /><h2>Aún no tienes pedidos.</h2><p>Cuando encuentres la pieza indicada, la guardaremos aquí.</p><button className="button button-dark" onClick={onShop}>Explorar la colección <ArrowRight size={15} /></button></div>)}
     {section === 'designs' && (designs.length ? <div className="design-list">{designs.map((design) => <DesignSummary key={design.id} design={design} />)}</div> : <div className="empty-account"><Heart size={29} strokeWidth={1.4} /><h2>Aún no has creado diseños.</h2><p>Combina patrón y colores para imaginar una manta propia.</p><button className="button button-dark" onClick={onShop}>Diseñar una manta <ArrowRight size={15} /></button></div>)}
-    {section === 'profile' && <form className="profile-form" onSubmit={onProfileSubmit}><div className="profile-form-heading"><div><p className="eyebrow">DATOS DE ENTREGA</p><h2>Tu información</h2></div><p>La usaremos para preparar tus pedidos.</p></div><label className="form-label">Nombre completo<input name="name" required maxLength={150} defaultValue={profile?.name ?? user.name} autoComplete="name" /></label><label className="form-label">Correo electrónico<input value={user.email} readOnly /></label><label className="form-label">Teléfono<input name="phone" maxLength={30} defaultValue={profile?.phone ?? ''} autoComplete="tel" /></label><div className="profile-address-row"><label className="form-label">Dirección<input name="address" defaultValue={profile?.address ?? ''} autoComplete="street-address" /></label><label className="form-label">Ciudad<input name="city" maxLength={100} defaultValue={profile?.city ?? ''} autoComplete="address-level2" /></label></div><button className="button button-dark" disabled={busy}>{busy ? <LoaderCircle className="spin" size={16} /> : <Check size={15} />} Guardar datos</button></form>}
+    {section === 'profile' && <form className="profile-form" onSubmit={onProfileSubmit}><div className="profile-form-heading"><div><p className="eyebrow">DATOS DE ENTREGA</p><h2>Tu información</h2></div><p>La usaremos para preparar tus pedidos.</p></div><label className="form-label">Nombre completo<input name="name" required maxLength={150} defaultValue={resolveUserDisplayName(user, profile)} autoComplete="name" /></label><label className="form-label">Correo electrónico<input value={user.email} readOnly /></label><label className="form-label">Teléfono<input name="phone" maxLength={30} defaultValue={profile?.phone ?? ''} autoComplete="tel" /></label><div className="profile-address-row"><label className="form-label">Dirección<input name="address" defaultValue={profile?.address ?? ''} autoComplete="street-address" /></label><label className="form-label">Ciudad<input name="city" maxLength={100} defaultValue={profile?.city ?? ''} autoComplete="address-level2" /></label></div><button className="button button-dark" disabled={busy}>{busy ? <LoaderCircle className="spin" size={16} /> : <Check size={15} />} Guardar datos</button></form>}
   </main>
 }
 
@@ -534,7 +564,8 @@ function CraftswomanAccountView({ user, dashboard, onSignOut, onAcceptOrder, onO
 }) {
   const canChangeOrders = Boolean(user && hasEffectivePermission(user, 'orders.change'))
   const canChangeDesigns = Boolean(user && hasEffectivePermission(user, 'designs.change'))
-  return <main className="inner-page account-page"><div className="account-heading"><div><p className="eyebrow"><span className="eyebrow-line" /> ESPACIO DE TEJEDORA</p><h1>Buen día, <em>{user?.name.split(' ')[0]}.</em></h1><p>{dashboard.active ? 'Pedidos y diseños que acompañan el trabajo de tu taller.' : 'Tu cuenta está pendiente de activación por administración.'}</p></div><button className="text-button" onClick={onSignOut}>Cerrar sesión <ArrowUpRight size={15} /></button></div>
+  const accountName = resolveUserDisplayName(user)
+  return <main className="inner-page account-page"><div className="account-heading"><div><p className="eyebrow"><span className="eyebrow-line" /> ESPACIO DE TEJEDORA</p><h1>Buen día, <em>{accountName}.</em></h1><p>{dashboard.active ? 'Pedidos y diseños que acompañan el trabajo de tu taller.' : 'Tu cuenta está pendiente de activación por administración.'}</p></div><button className="text-button" onClick={onSignOut}>Cerrar sesión <ArrowUpRight size={15} /></button></div>
     {!dashboard.active ? <div className="empty-account"><LockKeyhole size={30} /><h2>Cuenta pendiente de activación</h2><p>La administración debe activar tu perfil antes de asignarte pedidos.</p></div> : <>
       <div className="artisan-columns"><section><div className="list-heading"><h2>Pedidos por aceptar</h2><span>{dashboard.available_orders.length}</span></div>{dashboard.available_orders.length ? dashboard.available_orders.map((order) => <div className="artisan-order" key={order.id}><OrderCard order={order} />{canChangeOrders && canChangeDesigns && <button className="button button-dark" onClick={() => onAcceptOrder(order.id)}>Aceptar pedido <ArrowRight size={15} /></button>}</div>) : <p className="muted-copy">No hay pedidos disponibles en este momento.</p>}</section><section><div className="list-heading"><h2>Pedidos de mi taller</h2><span>{dashboard.orders.length}</span></div>{dashboard.orders.length ? dashboard.orders.map((order) => <div className="artisan-order" key={order.id}><OrderCard order={order} />{canChangeOrders && canChangeDesigns && order.status === 'accepted' && <button className="button button-outline" onClick={() => onOrderStatus(order.id, 'weaving')}>Iniciar tejido <ArrowRight size={15} /></button>}{canChangeOrders && canChangeDesigns && order.status === 'weaving' && <button className="button button-outline" onClick={() => onOrderStatus(order.id, 'completed')}>Marcar como terminado <Check size={15} /></button>}</div>) : <p className="muted-copy">Tus pedidos aceptados aparecerán aquí.</p>}</section></div>
       <section className="artisan-designs"><div className="list-heading"><div><p className="eyebrow">DISEÑOS PERSONALIZADOS</p><h2>Diseños de mi taller</h2></div><span>{dashboard.designs.length}</span></div>{dashboard.designs.length ? <div className="design-list">{dashboard.designs.map((design) => <article className="artisan-design" key={design.id}><DesignSummary design={design} /><div className="design-actions">{canChangeDesigns && design.status === 'accepted' && <button className="button button-outline" onClick={() => onDesignStatus(design.id, 'weaving')}>Iniciar tejido <ArrowRight size={15} /></button>}{canChangeDesigns && design.status === 'weaving' && <button className="button button-outline" onClick={() => onDesignStatus(design.id, 'completed')}>Marcar terminado <Check size={15} /></button>}</div></article>)}</div> : <p className="muted-copy">Los diseños que te asignen aparecerán aquí.</p>}</section>
@@ -592,7 +623,8 @@ function AdminAccountView({ user, isSuperadmin, orders, products, categories, bu
     event.currentTarget.reset()
     setShowCreateForm(false)
   }
-  return <main className="inner-page account-page"><div className="account-heading"><div><p className="eyebrow"><span className="eyebrow-line" /> ADMINISTRACIÓN</p><h1>Hola, <em>{user.name.split(' ')[0]}.</em></h1><p>Resumen de la operación de Wayuuwaa.</p></div><button className="text-button" onClick={onSignOut}>Cerrar sesión <ArrowUpRight size={15} /></button></div>
+  const accountName = resolveUserDisplayName(user)
+  return <main className="inner-page account-page"><div className="account-heading"><div><p className="eyebrow"><span className="eyebrow-line" /> ADMINISTRACIÓN</p><h1>Hola, <em>{accountName}.</em></h1><p>Resumen de la operación de Wayuuwaa.</p></div><button className="text-button" onClick={onSignOut}>Cerrar sesión <ArrowUpRight size={15} /></button></div>
     {canViewOrders && <div className="admin-stats"><article><span>Pedidos</span><strong>{orders.length}</strong></article><article><span>Por aceptar</span><strong>{pendingOrders}</strong></article><article><span>En proceso</span><strong>{activeOrders}</strong></article><article><span>Valor de pedidos</span><strong>{money(revenue)}</strong></article></div>}
     {isSuperadmin && <SuperadminRBACPanel currentUser={user} />}
     <div className="admin-tools"><div><p className="eyebrow">GESTIÓN DE TIENDA</p><h2>Productos, inventario y estados</h2><p>El administrador de Django conserva los permisos y formularios de gestión.</p></div><a className="button button-dark" href={api.adminUrl} target="_blank" rel="noreferrer">Abrir administración <ArrowUpRight size={15} /></a></div>

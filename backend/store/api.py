@@ -403,12 +403,35 @@ class RoleStateInputSerializer(serializers.Serializer):
     active = serializers.BooleanField()
 
 
+def _session_display_name(user, profile_name=None):
+    first_name = (user.first_name or '').strip()
+    last_name = (user.last_name or '').strip()
+
+    if first_name and last_name:
+        return f'{first_name} {last_name}'.strip()
+
+    if profile_name and str(profile_name).strip():
+        return str(profile_name).strip()
+
+    combined_name = ' '.join(part for part in (first_name, last_name) if part and str(part).strip()).strip()
+    if combined_name:
+        return combined_name
+
+    user_name = (user.get_full_name() or '').strip()
+    if user_name:
+        return user_name
+    return user.username or 'Usuario'
+
+
 def _user_payload(user):
     role = role_for_user(user)
+    profile_name = None
     payload = {
         'id': user.id,
         'username': user.username,
         'name': user.get_full_name() or user.username,
+        'first_name': (user.first_name or '').strip(),
+        'last_name': (user.last_name or '').strip(),
         'email': user.email,
         'role': role.code if role else None,
         'permissions': effective_permission_keys(user),
@@ -417,7 +440,9 @@ def _user_payload(user):
     if role and role.code == AccessRole.Code.CRAFTSWOMAN:
         profile = Craftswoman.objects.filter(user=user).first()
         if not profile:
+            payload['name'] = _session_display_name(user)
             return payload
+        profile_name = profile.name
         payload.update(role='craftswoman', profile={
             'id': profile.id,
             'name': profile.name,
@@ -429,7 +454,9 @@ def _user_payload(user):
     elif role and role.code == AccessRole.Code.CUSTOMER:
         customer = Customer.objects.filter(user=user).first()
         if customer:
+            profile_name = customer.name
             payload['profile'] = ProfileSerializer(customer).data
+    payload['name'] = _session_display_name(user, profile_name)
     return payload
 
 

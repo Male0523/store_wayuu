@@ -264,8 +264,43 @@ const INITIAL_ORDERS = [
   { id: 'ORD-9818', customer: 'María Fernanda Ruiz', date: '2026-10-22', total: 280000, status: 'Pendiente', itemsCount: 1, artisan: 'Sonia Epinayú', rancheria: 'Uribia' },
 ];
 
+type SessionUserWithIdentity = SessionUser & {
+  first_name?: string | null
+  last_name?: string | null
+}
+
+function resolveSessionDisplayName(user: SessionUserWithIdentity | null | undefined) {
+  const firstName = (user?.first_name ?? '').trim()
+  const lastName = (user?.last_name ?? '').trim()
+  const fullNameFromNames = [firstName, lastName].filter(Boolean).join(' ').trim()
+  if (fullNameFromNames) return fullNameFromNames
+
+  const sessionName = (user?.name ?? '').trim()
+  if (sessionName) return sessionName
+
+  const username = (user?.username ?? '').trim()
+  if (username) return username
+
+  const profileName = ((user as SessionUserWithIdentity | null | undefined)?.profile?.name ?? '').trim()
+  if (profileName) return profileName
+
+  return 'Usuario'
+}
+
+function resolveSessionRoleLabel(role?: SessionUser['role'] | null) {
+  switch (role) {
+    case 'superadmin': return 'Superadministrador'
+    case 'admin': return 'Administrador'
+    case 'craftswoman': return 'Artesana'
+    case 'customer': return 'Cliente'
+    default: return 'Usuario'
+  }
+}
+
 export default function App() {
   const { user, loaded, logout } = useUserSession();
+  const displayName = resolveSessionDisplayName(user as SessionUserWithIdentity | null)
+  const roleLabel = resolveSessionRoleLabel(user?.role ?? null)
 
   // Navigation & Submenu Toggle States
   const [activeTab, setActiveTab] = useState('roles_permisos');
@@ -1016,8 +1051,8 @@ export default function App() {
                 SA
               </div>
               <div className="hidden sm:block text-left">
-                <p className="text-xs font-bold text-stone-800 leading-tight">Sonia Epinayú</p>
-                <p className="text-[11px] text-stone-500">Superadministradora</p>
+                <p className="text-xs font-bold text-stone-800 leading-tight">{displayName}</p>
+                <p className="text-[11px] text-stone-500">{roleLabel}</p>
               </div>
 
               {/* Botón rápido de cierre de sesión en Header */}
