@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
+import { useCallback, useDeferredValue, useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import {
   ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, Check, ChevronDown,
   Camera, CircleUserRound, Heart, LoaderCircle, LockKeyhole, Minus,
@@ -12,6 +12,16 @@ import './ShopApp.css'
 type Screen = 'shop' | 'orders' | 'craftswoman' | 'design' | 'admin'
 type AuthMode = 'login' | 'register' | 'craftswoman'
 type AccountSection = 'orders' | 'designs' | 'profile'
+
+type ShopAppProps = {
+  initialScreen?: Screen
+}
+
+export function ConnectedShop({ initialScreen = 'shop' }: ShopAppProps) {
+  return <ShopApp initialScreen={initialScreen} />
+}
+
+export default ConnectedShop
 
 const money = (value: string | number) => new Intl.NumberFormat('es-CO', {
   style: 'currency', currency: 'COP', maximumFractionDigits: 0,
@@ -37,9 +47,9 @@ function hasEffectivePermission(user: SessionUser, permission: string) {
   return user.permissions?.includes(permission) ?? false
 }
 
-export default function ShopApp() {
+function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
   const { user, login: loginUser, register: registerUser, logout: logoutUser } = useUserSession()
-  const [screen, setScreen] = useState<Screen>('shop')
+  const [screen, setScreen] = useState<Screen>(initialScreen)
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [cart, setCart] = useState<Cart | null>(null)
@@ -80,6 +90,36 @@ export default function ShopApp() {
   const customPrice = ({ S: 100000, M: 120000, L: 145000, XL: 175000 }[designSize] ?? 120000) * designQuantity
   const canRequestDesign = !user || hasEffectivePermission(user, 'designs.add')
 
+  const loadAdminData = useCallback(async () => {
+    if (!user || (user.role !== 'admin' && user.role !== 'superadmin')) return
+
+    const emptyOrderPage: { count: number; next: string | null; previous: string | null; results: Order[] } = {
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    }
+    const requests: [
+      Promise<{ count: number; next: string | null; previous: string | null; results: Order[] }>,
+      Promise<AdminProduct[]>,
+      Promise<AdminCategory[]>,
+    ] = [
+      hasEffectivePermission(user, 'orders.view') ? api.orders() : Promise.resolve(emptyOrderPage),
+      hasEffectivePermission(user, 'products.view') ? api.adminProducts() : Promise.resolve([]),
+      hasEffectivePermission(user, 'categories.view') ? api.adminCategories() : Promise.resolve([]),
+    ]
+
+    try {
+      const [orderPage, productsPage, categoryList] = await Promise.all(requests)
+      const nextOrders = Array.isArray(orderPage?.results) ? orderPage.results : []
+      setOrders(nextOrders)
+      setAdminProducts(Array.isArray(productsPage) ? productsPage : [])
+      setAdminCategories(Array.isArray(categoryList) ? categoryList : [])
+    } catch (error) {
+      setNotice(errorMessage(error))
+    }
+  }, [user])
+
   useEffect(() => {
     let active = true
     api.categories().then((data) => { if (active) setCategories(data) }).catch(() => undefined)
@@ -99,6 +139,22 @@ export default function ShopApp() {
     api.cart().then((nextCart) => { if (active) setCart(nextCart) }).catch(() => { if (active) setCart(null) })
     return () => { active = false }
   }, [user])
+
+  useEffect(() => {
+    if (initialScreen !== 'admin' || !user || (user.role !== 'admin' && user.role !== 'superadmin')) return
+
+    let cancelled = false
+    const run = async () => {
+      try {
+        await loadAdminData()
+      } catch (error) {
+        if (!cancelled) setNotice(errorMessage(error))
+      }
+    }
+
+    void run()
+    return () => { cancelled = true }
+  }, [initialScreen, loadAdminData, user])
 
   useEffect(() => {
     let active = true
@@ -241,15 +297,7 @@ export default function ShopApp() {
     setBusy(true)
     try {
       if (user.role === 'admin' || user.role === 'superadmin') {
-        const emptyOrderPage = { results: [] as Order[] }
-        const [orderPage, productsPage, categoryList] = await Promise.all([
-          hasEffectivePermission(user, 'orders.view') ? api.orders() : Promise.resolve(emptyOrderPage),
-          hasEffectivePermission(user, 'products.view') ? api.adminProducts() : Promise.resolve([]),
-          hasEffectivePermission(user, 'categories.view') ? api.adminCategories() : Promise.resolve([]),
-        ])
-        setOrders(orderPage.results)
-        setAdminProducts(productsPage)
-        setAdminCategories(categoryList)
+        await loadAdminData()
         setScreen('admin')
       } else if (user.role === 'craftswoman') {
         setDashboard(await api.craftswomanDashboard())

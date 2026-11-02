@@ -8,7 +8,7 @@ const CustomerPanel = lazy(() => legacyViews['../../tienda_way_u_rol_cliente.tsx
 const CraftswomanPanel = lazy(() => legacyViews['../../wayuu_tejedora_panel.tsx']().then((module) => ({ default: module })))
 const AdministratorPanel = lazy(() => legacyViews['../../way_u_store_administrator_panel.tsx']().then((module) => ({ default: module })))
 const SuperadministratorPanel = lazy(() => legacyViews['../../panel_de_control_superadministrador_way_u.tsx']().then((module) => ({ default: module })))
-const ConnectedShop = lazy(() => import('./ShopApp'))
+const ConnectedShop = lazy(() => import('./ShopApp').then((module) => ({ default: module.ConnectedShop })))
 
 type Role = SessionUser['role']
 
@@ -107,12 +107,8 @@ export default function App() {
 	async function login(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault()
 		const values = new FormData(event.currentTarget)
-		const account = await loginUser(String(values.get('username')), String(values.get('password')))
-		const destination = roleRoutes.find((route) => route.role === account.role)
-		if (destination) {
-			window.history.pushState(null, '', destination.path)
-			setPath(destination.path)
-		}
+		await loginUser(String(values.get('username')), String(values.get('password')))
+		setPath('/')
 	}
 
 	async function logout() {
@@ -136,10 +132,10 @@ export default function App() {
 	switch (path.replace(/\/$/, '') || '/') {
 		case '/': page = <><DemoNotice /><PublicSite /></>; break
 		case '/cliente': page = protectedPage('customer', <CustomerPanel />); break
+		case '/tienda': page = <ConnectedShop key="tienda" initialScreen="shop" />; break
 		case '/tejedora': page = protectedPage('craftswoman', <CraftswomanPanel />); break
 		case '/admin': page = protectedPage('admin', <AdministratorPanel />); break
 		case '/superadmin': page = protectedPage('superadmin', <SuperadministratorPanel />); break
-		case '/tienda': page = <ConnectedShop />; break
 		default: page = <section className="access-panel"><h1>Página no encontrada</h1><a className="primary-link" href="/" onClick={(event) => navigate(event, '/')}>Volver al inicio</a></section>
 	}
 

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useUserSession } from './frontend/src/context/user-context';
 import { api, ApiError } from './frontend/src/lib/api';
-import type { SuperadminUser } from './frontend/src/types';
+import type { RBACPermission, RBACRolePermissions, SessionUser, SuperadminUser } from './frontend/src/types';
 import {
   Home,
   Shield,
@@ -58,8 +58,7 @@ import {
   Calendar,
   RefreshCw,
   ExternalLink,
-  LogOut,
-  KeyRound
+  LogOut
 } from 'lucide-react';
 
 // --- DEFINICIONES DE ROLES ---
@@ -120,15 +119,39 @@ const RESOURCES = [
   { id: 'perfil_personal', name: 'Perfil personal', description: 'Datos del usuario autenticado, preferencias y clave.', icon: Cog, slug: '/perfil' },
 ];
 
-// --- LAS 6 ACCIONES RBAC ---
+// --- ACCIONES RBAC REALES DEL BACKEND ---
 const ACTIONS = [
-  { id: 'ver', label: 'Ver', code: 'V', icon: Eye },
-  { id: 'crear', label: 'Crear', code: 'C', icon: Plus },
-  { id: 'editar', label: 'Editar', code: 'E', icon: Edit },
-  { id: 'eliminar', label: 'Eliminar', code: 'X', icon: Trash2 },
-  { id: 'aprobar', label: 'Aprobar', code: 'A', icon: ShieldCheck },
-  { id: 'gestionar', label: 'Gestionar', code: 'G', icon: Cog },
+  { id: 'view', label: 'Ver', code: 'V', icon: Eye },
+  { id: 'add', label: 'Crear', code: 'C', icon: Plus },
+  { id: 'change', label: 'Editar', code: 'E', icon: Edit },
+  { id: 'delete', label: 'Eliminar', code: 'X', icon: Trash2 },
 ];
+
+function buildRolePermissionsMatrix(
+  catalog: RBACPermission[],
+  roleResponses: RBACRolePermissions[]
+): Record<string, Record<string, Record<string, boolean>>> {
+  const matrix: Record<string, Record<string, Record<string, boolean>>> = {};
+
+  for (const resource of Array.from(new Set(catalog.map((permission) => permission.resource)))) {
+    matrix[resource] = {};
+    for (const role of ROLES) {
+      matrix[resource][role.id] = {};
+    }
+  }
+
+  for (const permission of catalog) {
+    for (const role of ROLES) {
+      const matchingRole = roleResponses.find((entry) => entry.role === role.id);
+      const matchingPermission = matchingRole?.permissions.find(
+        (entry) => entry.resource === permission.resource && entry.action === permission.action,
+      );
+      matrix[permission.resource][role.id][permission.action] = Boolean(matchingPermission?.allowed ?? false);
+    }
+  }
+
+  return matrix;
+}
 
 // MATRIZ INICIAL RBAC
 const INITIAL_PERMISSIONS = {
@@ -242,11 +265,7 @@ const INITIAL_ORDERS = [
 ];
 
 export default function App() {
-  const { logout } = useUserSession();
-  // Authentication State
-  const [isAuthenticated, setIsAuthenticated] = useState(true);
-  const [loginEmail, setLoginEmail] = useState('sonia.epinayu@wayuu.co');
-  const [loginPassword, setLoginPassword] = useState('••••••••••••');
+  const { user, loaded, logout } = useUserSession();
 
   // Navigation & Submenu Toggle States
   const [activeTab, setActiveTab] = useState('roles_permisos');
@@ -257,8 +276,10 @@ export default function App() {
   const [isConfigOpen, setIsConfigOpen] = useState(false);
 
   // Core Data States
-  const [permissions, setPermissions] = useState(INITIAL_PERMISSIONS);
-  const [selectedResource, setSelectedResource] = useState('panel_principal');
+  const [permissions, setPermissions] = useState<Record<string, Record<string, Record<string, boolean>>>>({});
+  const [catalog, setCatalog] = useState<RBACPermission[]>([]);
+  const [selectedRole, setSelectedRole] = useState<SessionUser['role']>('admin');
+  const [selectedResource, setSelectedResource] = useState('');
   const [resourceSearch, setResourceSearch] = useState('');
   const [users, setUsers] = useState<SuperadminUser[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
@@ -273,24 +294,84 @@ export default function App() {
   const [userRoleFilter, setUserRoleFilter] = useState('all');
   const [selectedUserForEdit, setSelectedUserForEdit] = useState(null);
   const [isEditUserModalOpen, setIsEditUserModalOpen] = useState(false);
+  const [isCreateUserModalOpen, setIsCreateUserModalOpen] = useState(false);
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
+  const [createUserError, setCreateUserError] = useState('');
+  const [newUserDraft, setNewUserDraft] = useState({
+    username: '',
+    email: '',
+    password: '',
+    first_name: '',
+    last_name: '',
+    role: 'admin' as Exclude<SessionUser['role'], 'superadmin'>,
+    phone: '',
+    address: '',
+    city: '',
+    community: '',
+    region: '',
+    craftswoman_active: true,
+    is_active: true,
+  });
   const [selectedOrderForDetail, setSelectedOrderForDetail] = useState(null);
+
+  const loadUsers = async (nextSearch = userSearchTerm, nextRole = userRoleFilter) => {
+    const params = new URLSearchParams();
+    if (nextSearch.trim()) params.set('search', nextSearch.trim());
+    if (nextRole !== 'all') params.set('role', nextRole);
+    setUsersLoading(true);
+    setUsersError('');
+    try {
+      const result = await api.superadminUsers(params);
+      setUsers(result);
+    } catch (error) {
+      setUsersError(error instanceof ApiError ? error.message : 'No fue posible consultar los usuarios en Django.');
+    } finally {
+      setUsersLoading(false);
+    }
+  };
 
   useEffect(() => {
     let active = true;
-    const params = new URLSearchParams();
-    if (userSearchTerm.trim()) params.set('search', userSearchTerm.trim());
-    if (userRoleFilter !== 'all') params.set('role', userRoleFilter);
+    const fetchUsers = async () => {
+      const params = new URLSearchParams();
+      if (userSearchTerm.trim()) params.set('search', userSearchTerm.trim());
+      if (userRoleFilter !== 'all') params.set('role', userRoleFilter);
+      setUsersLoading(true);
+      setUsersError('');
+      try {
+        const result = await api.superadminUsers(params);
+        if (active) setUsers(result);
+      } catch (error) {
+        if (active) setUsersError(error instanceof ApiError ? error.message : 'No fue posible consultar los usuarios en Django.');
+      } finally {
+        if (active) setUsersLoading(false);
+      }
+    };
+
+    void fetchUsers();
+    return () => { active = false; };
+  }, [userSearchTerm, userRoleFilter]);
+
+  useEffect(() => {
+    let active = true;
     setUsersLoading(true);
-    setUsersError('');
-    api.superadminUsers(params)
-      .then((result) => { if (active) setUsers(result); })
+    Promise.all([
+      api.rbacCatalog(),
+      ...ROLES.map((role) => api.rolePermissions(role.id as SessionUser['role'])),
+    ])
+      .then(([catalogResponse, ...roleResponses]) => {
+        if (!active) return;
+        setCatalog(catalogResponse.permissions);
+        setPermissions(buildRolePermissionsMatrix(catalogResponse.permissions, roleResponses));
+        setSelectedResource((current) => current || catalogResponse.permissions[0]?.resource || 'users');
+      })
       .catch((error) => {
         if (!active) return;
-        setUsersError(error instanceof ApiError ? error.message : 'No fue posible consultar los usuarios en Django.');
+        setUsersError(error instanceof ApiError ? error.message : 'No fue posible consultar permisos en Django.');
       })
       .finally(() => { if (active) setUsersLoading(false); });
     return () => { active = false; };
-  }, [userSearchTerm, userRoleFilter]);
+  }, []);
 
   // Form State: Configuración Tienda
   const [storeConfig, setStoreConfig] = useState({
@@ -321,106 +402,196 @@ export default function App() {
       showToast('No se pudo cerrar la sesión con Django.', 'info');
       return;
     }
-    setIsAuthenticated(false);
-    setAuditLogs(prev => [
-      {
-        id: `LOG-${Math.floor(1000 + Math.random() * 9000)}`,
-        timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-        user: 'Sonia Epinayú',
-        role: 'Superadministrador',
-        action: 'Cierre de Sesión',
-        resource: 'Autenticación',
-        details: 'El usuario cerró sesión de forma segura.'
-      },
-      ...prev
-    ]);
     window.history.replaceState(null, '', '/');
     window.dispatchEvent(new PopStateEvent('popstate'));
   };
 
-  const handleLogin = (e) => {
-    e.preventDefault();
-    setIsAuthenticated(true);
-    showToast('¡Sesión iniciada como Superadministradora!');
-    setAuditLogs(prev => [
-      {
-        id: `LOG-${Math.floor(1000 + Math.random() * 9000)}`,
-        timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-        user: 'Sonia Epinayú',
-        role: 'Superadministrador',
-        action: 'Inicio de Sesión',
-        resource: 'Autenticación',
-        details: 'Inicio de sesión exitoso en el panel superadministrador.'
-      },
-      ...prev
-    ]);
-  };
+  const resources = useMemo(() => {
+    if (catalog.length > 0) {
+      return Array.from(new Map(catalog.map((permission) => {
+        const resourceName = permission.name || permission.resource;
+        return [permission.resource, { id: permission.resource, name: resourceName, description: permission.resource, icon: Layers }];
+      })).values());
+    }
+
+    return RESOURCES.map((resource) => ({ ...resource }));
+  }, [catalog]);
 
   // Filtered resources for search
   const filteredResources = useMemo(() => {
-    return RESOURCES.filter(r =>
-      r.name.toLowerCase().includes(resourceSearch.toLowerCase()) ||
-      r.description.toLowerCase().includes(resourceSearch.toLowerCase())
+    return resources.filter((resource) =>
+      resource.name.toLowerCase().includes(resourceSearch.toLowerCase()) ||
+      resource.description.toLowerCase().includes(resourceSearch.toLowerCase())
     );
-  }, [resourceSearch]);
+  }, [resourceSearch, resources]);
 
   const currentResourceObj = useMemo(() => {
-    return RESOURCES.find(r => r.id === selectedResource) || RESOURCES[0];
-  }, [selectedResource]);
+    return resources.find((resource) => resource.id === selectedResource) || resources[0] || RESOURCES[0];
+  }, [resources, selectedResource]);
 
   // Permission Matrix Handler
   const handlePermissionToggle = (roleId, actionId) => {
-    setPermissions(prev => ({
+    if (roleId === 'superadmin' || selectedRole === 'superadmin') {
+      showToast('La matriz global del rol superadmin es informativa y no puede modificarse.', 'info');
+      return;
+    }
+    if (!selectedResource || !permissions[selectedResource]?.[roleId]) return;
+    setPermissions((prev) => ({
       ...prev,
       [selectedResource]: {
         ...prev[selectedResource],
         [roleId]: {
           ...prev[selectedResource][roleId],
-          [actionId]: !prev[selectedResource]?.[roleId]?.[actionId]
-        }
-      }
+          [actionId]: !prev[selectedResource]?.[roleId]?.[actionId],
+        },
+      },
     }));
   };
 
-  const handleResetPermissions = () => {
-    setPermissions(INITIAL_PERMISSIONS);
-    showToast('Matriz de permisos restablecida a los valores iniciales.', 'info');
+  const handleResetPermissions = async () => {
+    if (selectedRole === 'superadmin') {
+      showToast('La matriz del superadmin es informativa y no puede sobrescribirse.', 'info');
+      return;
+    }
+
+    try {
+      const roleResponses = await Promise.all(ROLES.map((role) => api.rolePermissions(role.id as SessionUser['role'])));
+      setPermissions(buildRolePermissionsMatrix(catalog, roleResponses));
+      showToast('Matriz de permisos recargada desde Django.', 'info');
+    } catch (error) {
+      showToast(error instanceof ApiError ? error.message : 'No fue posible recargar la matriz de permisos.', 'info');
+    }
   };
 
-  const handleSavePermissions = () => {
-    showToast('Matriz de permisos guardada exitosamente (Simulado Backend Django).');
-    setAuditLogs(prev => [
-      {
-        id: `LOG-${Math.floor(1000 + Math.random() * 9000)}`,
-        timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-        user: 'Sonia Epinayú',
-        role: 'Superadministrador',
-        action: 'Modificación Matriz RBAC',
-        resource: currentResourceObj.name,
-        details: `Actualizó accesos para el recurso: ${currentResourceObj.name}`
-      },
-      ...prev
-    ]);
+  const handleSavePermissions = async () => {
+    if (selectedRole === 'superadmin') {
+      showToast('La matriz del rol superadmin es informativa y no se guarda por API.', 'info');
+      return;
+    }
+
+    const entries = Object.entries(permissions[selectedResource]?.[selectedRole] ?? {}).map(([action, allowed]) => ({
+      resource: selectedResource,
+      action,
+      allowed,
+    }));
+
+    if (!entries.length) {
+      showToast('No hay permisos reales para guardar en este recurso.', 'info');
+      return;
+    }
+
+    try {
+      await api.updateRolePermissions(selectedRole, entries);
+      const refreshed = await Promise.all(ROLES.map((role) => api.rolePermissions(role.id as SessionUser['role'])));
+      setPermissions(buildRolePermissionsMatrix(catalog, refreshed));
+      showToast('Matriz de permisos guardada en Django.', 'success');
+    } catch (error) {
+      showToast(error instanceof ApiError ? error.message : 'No fue posible guardar la matriz de permisos.', 'info');
+    }
   };
 
   // User Actions
-  const handleToggleUserStatus = (userId) => {
-    setUsers(prev => prev.map(u => {
-      if (u.id === userId) {
-        const nextStatus = u.status === 'Activo' ? 'Inactivo' : 'Activo';
-        showToast(`Estado del usuario ${u.name} cambiado a ${nextStatus}.`);
-        return { ...u, status: nextStatus };
-      }
-      return u;
-    }));
+  const handleToggleUserStatus = async (userId: number) => {
+    const target = users.find((user) => user.id === userId);
+    if (!target) return;
+
+    try {
+      const updated = await api.updateSuperadminUser(userId, { is_active: !target.is_active, active: !target.active });
+      await loadUsers();
+      showToast(`Estado del usuario ${updated.full_name || updated.username} actualizado.`, 'success');
+    } catch (error) {
+      showToast(error instanceof ApiError ? error.message : 'No fue posible cambiar el estado del usuario.', 'info');
+    }
   };
 
-  const handleSaveUserModal = (e) => {
+  const handleCreateUser = async (e) => {
+    e.preventDefault();
+    const username = newUserDraft.username.trim();
+    const email = newUserDraft.email.trim();
+    const firstName = newUserDraft.first_name.trim();
+    const lastName = newUserDraft.last_name.trim();
+    const password = newUserDraft.password.trim();
+
+    if (!username || !email || !password || !newUserDraft.role) {
+      setCreateUserError('Completa usuario, correo, contraseña y rol antes de guardar.');
+      return;
+    }
+
+    if (!email.includes('@')) {
+      setCreateUserError('El correo electrónico no tiene un formato válido.');
+      return;
+    }
+
+    const payload = {
+      username,
+      email,
+      first_name: firstName,
+      last_name: lastName,
+      role: newUserDraft.role,
+      password,
+      is_active: newUserDraft.is_active,
+      phone: newUserDraft.phone.trim(),
+      address: newUserDraft.address.trim(),
+      city: newUserDraft.city.trim(),
+      community: newUserDraft.community.trim(),
+      region: newUserDraft.region.trim(),
+      craftswoman_active: newUserDraft.role === 'craftswoman' ? newUserDraft.craftswoman_active : false,
+    };
+
+    setIsCreatingUser(true);
+    try {
+      setCreateUserError('');
+      const created = await api.createSuperadminUser(payload);
+      setIsCreateUserModalOpen(false);
+      setNewUserDraft({
+        username: '',
+        email: '',
+        password: '',
+        first_name: '',
+        last_name: '',
+        role: 'admin',
+        phone: '',
+        address: '',
+        city: '',
+        community: '',
+        region: '',
+        craftswoman_active: true,
+        is_active: true,
+      });
+      await loadUsers();
+      showToast(`Usuario ${created.full_name || created.username} creado correctamente.`, 'success');
+    } catch (error) {
+      setCreateUserError(error instanceof ApiError ? error.message : 'No fue posible crear el usuario en Django.');
+    } finally {
+      setIsCreatingUser(false);
+    }
+  };
+
+  const handleSaveUserModal = async (e) => {
     e.preventDefault();
     if (!selectedUserForEdit) return;
-    setUsers(prev => prev.map(u => u.id === selectedUserForEdit.id ? selectedUserForEdit : u));
-    setIsEditUserModalOpen(false);
-    showToast(`Datos del usuario ${selectedUserForEdit.name} actualizados.`);
+
+    const fullName = (selectedUserForEdit.full_name || '').trim();
+    const parts = fullName ? fullName.split(/\s+/) : [];
+    const firstName = parts.shift() || selectedUserForEdit.first_name || '';
+    const lastName = parts.join(' ') || selectedUserForEdit.last_name || '';
+
+    try {
+      const updated = await api.updateSuperadminUser(selectedUserForEdit.id, {
+        username: selectedUserForEdit.username,
+        email: selectedUserForEdit.email,
+        first_name: firstName,
+        last_name: lastName,
+        role: selectedUserForEdit.role,
+        is_active: selectedUserForEdit.is_active,
+        active: selectedUserForEdit.active,
+      });
+      await loadUsers();
+      setIsEditUserModalOpen(false);
+      showToast(`Datos del usuario ${updated.full_name || updated.username} actualizados.`, 'success');
+    } catch (error) {
+      showToast(error instanceof ApiError ? error.message : 'No fue posible guardar los datos del usuario.', 'info');
+    }
   };
 
   // Product Approval
@@ -437,88 +608,32 @@ export default function App() {
 
   const filteredUsers = users;
 
-  // LOGIN SCREEN RENDER
-  if (!isAuthenticated) {
+  if (!loaded) {
     return (
-      <div className="min-h-screen bg-[#FDFBF7] flex items-center justify-center p-4 selection:bg-[#5C1D24] selection:text-white">
-        <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl border border-[#E2D9D5] overflow-hidden">
-          
-          {/* Header Banner */}
-          <div className="bg-[#5C1D24] text-white p-8 text-center relative overflow-hidden">
-            <div className="absolute -right-10 -top-10 w-32 h-32 bg-white/5 rounded-full blur-xl pointer-events-none"></div>
-            <div className="absolute -left-10 -bottom-10 w-32 h-32 bg-rose-500/10 rounded-full blur-xl pointer-events-none"></div>
+      <div className="min-h-screen bg-[#FDFBF7] flex items-center justify-center p-4 text-[#3D1E16]">
+        <div className="rounded-2xl border border-[#E2D9D5] bg-white px-6 py-4 text-sm font-medium shadow-sm">
+          Cargando sesión…
+        </div>
+      </div>
+    );
+  }
 
-            <div className="inline-flex p-3 bg-white/10 rounded-2xl border border-white/20 mb-3 shadow-inner">
-              <svg className="w-8 h-8 text-[#FDFBF7]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-              </svg>
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight text-[#FDFBF7]">Tienda Wayúu</h1>
-            <p className="text-xs text-rose-200/90 mt-1 uppercase tracking-wider font-semibold">Panel de Superadministrador</p>
-          </div>
-
-          {/* Form Content */}
-          <form onSubmit={handleLogin} className="p-8 space-y-5">
-            <div className="text-center mb-2">
-              <h2 className="text-lg font-bold text-[#3D1E16]">Bienvenido de nuevo</h2>
-              <p className="text-xs text-stone-500">Ingresa tus credenciales para acceder al sistema</p>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-stone-700">Correo Electrónico</label>
-              <div className="relative">
-                <Users className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="email"
-                  value={loginEmail}
-                  onChange={(e) => setLoginEmail(e.target.value)}
-                  className="w-full text-xs pl-9 pr-3 py-2.5 bg-[#FDFBF7] border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#5C1D24] text-stone-800"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-stone-700">Contraseña</label>
-              <div className="relative">
-                <KeyRound className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="password"
-                  value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
-                  className="w-full text-xs pl-9 pr-3 py-2.5 bg-[#FDFBF7] border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#5C1D24] text-stone-800"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between text-[11px] pt-1">
-              <label className="flex items-center gap-2 text-stone-600 cursor-pointer">
-                <input type="checkbox" defaultChecked className="rounded accent-[#5C1D24]" />
-                <span>Recordar sesión</span>
-              </label>
-              <a href="#forgot" onClick={(e) => { e.preventDefault(); showToast('Opción de recuperación enviada a su correo.', 'info'); }} className="text-[#5C1D24] font-semibold hover:underline">
-                ¿Olvidaste tu clave?
-              </a>
-            </div>
-
-            <button
-              type="submit"
-              className="w-full py-3 bg-[#5C1D24] hover:bg-[#4A121A] text-white text-xs font-bold rounded-xl transition-colors shadow-md flex items-center justify-center gap-2"
-            >
-              <ShieldCheck className="w-4 h-4" />
-              <span>Iniciar Sesión</span>
-            </button>
-
-            <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-[11px] text-[#5C1D24] text-center mt-4">
-              <p className="font-semibold">Credenciales de Superadministrador:</p>
-              <p className="text-stone-600">sonia.epinayu@wayuu.co (Acceso Libre)</p>
-            </div>
-          </form>
-
-          <div className="p-4 border-t border-stone-100 bg-stone-50/50 text-center text-[10px] text-stone-400">
-            Artesanía que transforma • Sistema RBAC Wayúu
-          </div>
+  if (!user || user.role !== 'superadmin') {
+    return (
+      <div className="min-h-screen bg-[#FDFBF7] flex items-center justify-center p-4 text-[#3D1E16]">
+        <div className="w-full max-w-md rounded-3xl border border-[#E2D9D5] bg-white p-8 text-center shadow-xl">
+          <h1 className="text-xl font-bold text-[#3D1E16]">Acceso no autorizado</h1>
+          <p className="mt-3 text-sm text-stone-600">Esta vista solo está disponible para usuarios con rol superadministrador.</p>
+          <button
+            type="button"
+            onClick={() => {
+              window.history.replaceState(null, '', '/');
+              window.dispatchEvent(new PopStateEvent('popstate'));
+            }}
+            className="mt-6 inline-flex items-center justify-center rounded-xl bg-[#5C1D24] px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-[#4A121A]"
+          >
+            Volver al sitio público
+          </button>
         </div>
       </div>
     );
@@ -1010,7 +1125,14 @@ export default function App() {
               {/* Role Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {ROLES.map(role => (
-                  <div key={role.id} className="bg-white border border-[#E2D9D5] rounded-2xl p-4 shadow-sm hover:shadow-md transition-shadow">
+                  <button
+                    key={role.id}
+                    type="button"
+                    onClick={() => setSelectedRole(role.id as SessionUser['role'])}
+                    className={`w-full text-left bg-white border rounded-2xl p-4 shadow-sm transition-shadow ${
+                      selectedRole === role.id ? 'border-[#5C1D24] ring-1 ring-[#5C1D24] bg-[#FDFBF7]' : 'border-[#E2D9D5] hover:shadow-md'
+                    }`}
+                  >
                     <div className="flex items-start gap-3">
                       <div className="p-2.5 rounded-xl bg-rose-50 text-[#5C1D24] border border-rose-100">
                         <Users className="w-5 h-5" />
@@ -1020,7 +1142,7 @@ export default function App() {
                         <p className="text-[11px] text-stone-500 mt-0.5 line-clamp-2">{role.description}</p>
                       </div>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
 
@@ -1178,9 +1300,27 @@ export default function App() {
                 </div>
 
                 <button
-                  disabled
-                  title="La creación de usuarios requiere un endpoint de administración que aún no está disponible."
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-[#5C1D24] text-white text-xs font-bold rounded-xl shadow-sm opacity-50 cursor-not-allowed"
+                  type="button"
+                  onClick={() => {
+                    setCreateUserError('');
+                    setNewUserDraft({
+                      username: '',
+                      email: '',
+                      password: '',
+                      first_name: '',
+                      last_name: '',
+                      role: 'admin',
+                      phone: '',
+                      address: '',
+                      city: '',
+                      community: '',
+                      region: '',
+                      craftswoman_active: true,
+                      is_active: true,
+                    });
+                    setIsCreateUserModalOpen(true);
+                  }}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-[#5C1D24] text-white text-xs font-bold rounded-xl shadow-sm hover:bg-[#4A121A] transition-colors"
                 >
                   <UserPlus className="w-4 h-4" />
                   <span>Nuevo Usuario</span>
@@ -1270,17 +1410,22 @@ export default function App() {
                             <td className="py-4 px-6 text-right">
                               <div className="flex items-center justify-end gap-2">
                                 <button
-                                  disabled
-                                  title="El cambio de estado requiere un endpoint de administración que aún no está disponible."
-                                  className="p-1.5 rounded-lg border border-stone-200 text-stone-400 opacity-50 cursor-not-allowed"
+                                  type="button"
+                                  onClick={() => void handleToggleUserStatus(u.id)}
+                                  title={u.is_active ? 'Desactivar usuario' : 'Activar usuario'}
+                                  className="p-1.5 rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-100 transition-colors"
                                 >
                                   {u.is_active ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
                                 </button>
 
                                 <button
-                                  disabled
-                                  title="La edición requiere un endpoint de administración que aún no está disponible."
-                                  className="p-1.5 text-stone-400 border border-stone-200 rounded-lg opacity-50 cursor-not-allowed"
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedUserForEdit(u);
+                                    setIsEditUserModalOpen(true);
+                                  }}
+                                  title="Editar usuario"
+                                  className="p-1.5 text-stone-600 border border-stone-200 rounded-lg hover:bg-stone-100 transition-colors"
                                 >
                                   <Edit className="w-4 h-4" />
                                 </button>
@@ -1293,6 +1438,200 @@ export default function App() {
                   </table>
                 </div>
               </div>
+
+              {isCreateUserModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#3D1E16]/45 p-4">
+                  <div className="w-full max-w-2xl rounded-3xl border border-[#E2D9D5] bg-white p-6 shadow-2xl">
+                    <div className="flex items-center justify-between gap-4 pb-4 border-b border-[#E2D9D5]">
+                      <div>
+                        <h3 className="text-base font-black text-[#3D1E16]">Crear usuario</h3>
+                        <p className="text-[11px] text-stone-500 mt-1">Registra una cuenta real en Django para el rol seleccionado.</p>
+                      </div>
+                      <button type="button" onClick={() => { setIsCreateUserModalOpen(false); setCreateUserError(''); }} className="p-2 rounded-lg border border-stone-200 text-stone-500 hover:bg-stone-100">
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <form onSubmit={handleCreateUser} className="mt-5 space-y-4">
+                      {createUserError && (
+                        <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-700" role="alert">{createUserError}</div>
+                      )}
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <label className="space-y-1.5 text-[11px] font-semibold text-stone-700">
+                          <span>Usuario</span>
+                          <input
+                            type="text"
+                            value={newUserDraft.username}
+                            onChange={(e) => setNewUserDraft((current) => ({ ...current, username: e.target.value }))}
+                            className="w-full rounded-xl border border-stone-300 bg-[#FDFBF7] px-3 py-2 text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-[#5C1D24]"
+                            placeholder="ej. kenia.wayuu"
+                            required
+                          />
+                        </label>
+
+                        <label className="space-y-1.5 text-[11px] font-semibold text-stone-700">
+                          <span>Correo electrónico</span>
+                          <input
+                            type="email"
+                            value={newUserDraft.email}
+                            onChange={(e) => setNewUserDraft((current) => ({ ...current, email: e.target.value }))}
+                            className="w-full rounded-xl border border-stone-300 bg-[#FDFBF7] px-3 py-2 text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-[#5C1D24]"
+                            placeholder="usuario@wayuuwaa.co"
+                            required
+                          />
+                        </label>
+
+                        <label className="space-y-1.5 text-[11px] font-semibold text-stone-700">
+                          <span>Nombre</span>
+                          <input
+                            type="text"
+                            value={newUserDraft.first_name}
+                            onChange={(e) => setNewUserDraft((current) => ({ ...current, first_name: e.target.value }))}
+                            className="w-full rounded-xl border border-stone-300 bg-[#FDFBF7] px-3 py-2 text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-[#5C1D24]"
+                            placeholder="Nombre"
+                          />
+                        </label>
+
+                        <label className="space-y-1.5 text-[11px] font-semibold text-stone-700">
+                          <span>Apellido</span>
+                          <input
+                            type="text"
+                            value={newUserDraft.last_name}
+                            onChange={(e) => setNewUserDraft((current) => ({ ...current, last_name: e.target.value }))}
+                            className="w-full rounded-xl border border-stone-300 bg-[#FDFBF7] px-3 py-2 text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-[#5C1D24]"
+                            placeholder="Apellido"
+                          />
+                        </label>
+
+                        <label className="space-y-1.5 text-[11px] font-semibold text-stone-700">
+                          <span>Contraseña</span>
+                          <input
+                            type="password"
+                            value={newUserDraft.password}
+                            onChange={(e) => setNewUserDraft((current) => ({ ...current, password: e.target.value }))}
+                            className="w-full rounded-xl border border-stone-300 bg-[#FDFBF7] px-3 py-2 text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-[#5C1D24]"
+                            placeholder="********"
+                            required
+                          />
+                        </label>
+
+                        <label className="space-y-1.5 text-[11px] font-semibold text-stone-700">
+                          <span>Rol</span>
+                          <select
+                            value={newUserDraft.role}
+                            onChange={(e) => setNewUserDraft((current) => ({ ...current, role: e.target.value as Exclude<SessionUser['role'], 'superadmin'> }))}
+                            className="w-full rounded-xl border border-stone-300 bg-[#FDFBF7] px-3 py-2 text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-[#5C1D24]"
+                          >
+                            <option value="admin">Administrador</option>
+                            <option value="craftswoman">Artesana</option>
+                            <option value="customer">Cliente</option>
+                          </select>
+                        </label>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <label className="space-y-1.5 text-[11px] font-semibold text-stone-700">
+                          <span>Teléfono</span>
+                          <input
+                            type="text"
+                            value={newUserDraft.phone}
+                            onChange={(e) => setNewUserDraft((current) => ({ ...current, phone: e.target.value }))}
+                            className="w-full rounded-xl border border-stone-300 bg-[#FDFBF7] px-3 py-2 text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-[#5C1D24]"
+                            placeholder="300 123 4567"
+                          />
+                        </label>
+
+                        <label className="space-y-1.5 text-[11px] font-semibold text-stone-700">
+                          <span>Ciudad</span>
+                          <input
+                            type="text"
+                            value={newUserDraft.city}
+                            onChange={(e) => setNewUserDraft((current) => ({ ...current, city: e.target.value }))}
+                            className="w-full rounded-xl border border-stone-300 bg-[#FDFBF7] px-3 py-2 text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-[#5C1D24]"
+                            placeholder="Riohacha"
+                          />
+                        </label>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <label className="space-y-1.5 text-[11px] font-semibold text-stone-700">
+                          <span>Dirección</span>
+                          <input
+                            type="text"
+                            value={newUserDraft.address}
+                            onChange={(e) => setNewUserDraft((current) => ({ ...current, address: e.target.value }))}
+                            className="w-full rounded-xl border border-stone-300 bg-[#FDFBF7] px-3 py-2 text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-[#5C1D24]"
+                            placeholder="Calle o barrio"
+                          />
+                        </label>
+
+                        {newUserDraft.role === 'craftswoman' ? (
+                          <label className="space-y-1.5 text-[11px] font-semibold text-stone-700">
+                            <span>Región</span>
+                            <input
+                              type="text"
+                              value={newUserDraft.region}
+                              onChange={(e) => setNewUserDraft((current) => ({ ...current, region: e.target.value }))}
+                              className="w-full rounded-xl border border-stone-300 bg-[#FDFBF7] px-3 py-2 text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-[#5C1D24]"
+                              placeholder="Guajira"
+                            />
+                          </label>
+                        ) : (
+                          <label className="space-y-1.5 text-[11px] font-semibold text-stone-700">
+                            <span>Región</span>
+                            <input
+                              type="text"
+                              value={newUserDraft.region}
+                              onChange={(e) => setNewUserDraft((current) => ({ ...current, region: e.target.value }))}
+                              className="w-full rounded-xl border border-stone-300 bg-[#FDFBF7] px-3 py-2 text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-[#5C1D24]"
+                              placeholder="Región"
+                            />
+                          </label>
+                        )}
+                      </div>
+
+                      {newUserDraft.role === 'craftswoman' && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <label className="space-y-1.5 text-[11px] font-semibold text-stone-700">
+                            <span>Comunidad</span>
+                            <input
+                              type="text"
+                              value={newUserDraft.community}
+                              onChange={(e) => setNewUserDraft((current) => ({ ...current, community: e.target.value }))}
+                              className="w-full rounded-xl border border-stone-300 bg-[#FDFBF7] px-3 py-2 text-xs text-stone-800 focus:outline-none focus:ring-1 focus:ring-[#5C1D24]"
+                              placeholder="Comunidad de la tejedora"
+                            />
+                          </label>
+
+                          <label className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-[11px] font-medium text-stone-700 self-end">
+                            <input
+                              type="checkbox"
+                              checked={newUserDraft.craftswoman_active}
+                              onChange={(e) => setNewUserDraft((current) => ({ ...current, craftswoman_active: e.target.checked }))}
+                              className="h-4 w-4 rounded border-stone-300 text-[#5C1D24] focus:ring-[#5C1D24]"
+                            />
+                            Artesana activa
+                          </label>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-end gap-3 border-t border-[#E2D9D5] pt-4">
+                        <button type="button" onClick={() => { setIsCreateUserModalOpen(false); setCreateUserError(''); }} className="px-4 py-2 rounded-xl border border-stone-300 bg-white text-xs font-semibold text-stone-700 hover:bg-stone-100">
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={isCreatingUser}
+                          className={`px-5 py-2 rounded-xl text-xs font-bold text-white transition-colors ${isCreatingUser ? 'bg-[#7D4B4F] cursor-not-allowed' : 'bg-[#5C1D24] hover:bg-[#4A121A]'}`}
+                        >
+                          {isCreatingUser ? 'Guardando...' : 'Guardar usuario'}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
