@@ -354,7 +354,12 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
         await loadAdminData()
         setScreen('admin')
       } else if (user.role === 'craftswoman') {
-        setDashboard(await api.craftswomanDashboard())
+        const [craftswomanDashboard, ownProducts] = await Promise.all([
+          api.craftswomanDashboard(),
+          api.craftswomanProducts(),
+        ])
+        setDashboard(craftswomanDashboard)
+        setCraftswomanProducts(ownProducts)
         setScreen('craftswoman')
       } else {
         const [orderPage, customerDesigns, customerProfile] = await Promise.all([
