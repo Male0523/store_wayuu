@@ -568,3 +568,43 @@
 .craftswoman-workspace .artisan-order { margin-bottom: 14px; }
 @media (max-width: 1050px) { .craftswoman-sidebar { width: 220px; flex-basis: 220px; } .craftswoman-stats { grid-template-columns: repeat(3,minmax(0,1fr)); } .craftswoman-stats article:nth-child(3) { border-right: 0; } .craftswoman-stats article:nth-child(n+4) { border-top: 1px solid #eee7e3; } }
 @media (max-width: 760px) { .craftswoman-workspace { display: block; } .craftswoman-sidebar { width: 100%; } .craftswoman-brand { min-height: 65px; } .craftswoman-nav { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 4px; padding: 12px; } .craftswoman-nav > p { grid-column: 1/-1; } .craftswoman-nav button { margin: 0; } .craftswoman-sidebar-profile, .craftswoman-sidebar-foot { display: none; } .craftswoman-topbar { min-height: 55px; padding: 10px 15px; } .craftswoman-top-user { display: none; } .craftswoman-content { padding: 18px 14px 40px; } .craftswoman-welcome { align-items: flex-start; flex-direction: column; padding: 22px; } .craftswoman-welcome h1 { font-size: 29px; } .craftswoman-welcome-actions { width: 100%; grid-template-columns: 1fr 1fr; } .craftswoman-stats { grid-template-columns: repeat(2,minmax(0,1fr)); } .craftswoman-stats article { border-top: 1px solid #eee7e3; } .craftswoman-stats article:nth-child(odd) { border-right: 1px solid #eee7e3; } .craftswoman-stats article:nth-child(even) { border-right: 0; } .craftswoman-columns, .craftswoman-orders { grid-template-columns: 1fr; } .craftswoman-product-form { grid-template-columns: repeat(2,minmax(0,1fr)); } .craftswoman-product-list article { grid-template-columns: minmax(0,1fr) auto; } .craftswoman-product-list article > span:nth-of-type(1) { display: none; } .craftswoman-products-section .craftswoman-panel-heading { align-items: flex-start; flex-direction: column; } }
+
+
+/* Ajustes de continuidad visual y acción principal del portal de tejedora */
+.craftswoman-topbar { background: #f7f0eb; border-bottom-color: #e8dcd5; }
+.craftswoman-main { background: #fdfbf7; }
+.craftswoman-submit-review,
+.craftswoman-product-form > .craftswoman-submit-review {
+  min-height: 44px;
+  padding: 0 22px;
+  border: 1px solid #5c1d24;
+  border-radius: 9px;
+  background: #5c1d24;
+  color: #fff;
+  box-shadow: 0 5px 12px rgba(92,29,36,.2);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: .01em;
+  cursor: pointer;
+  transition: background .18s ease, transform .18s ease, box-shadow .18s ease;
+}
+.craftswoman-submit-review:hover:not(:disabled) {
+  background: #7a2832;
+  box-shadow: 0 7px 16px rgba(92,29,36,.25);
+  transform: translateY(-1px);
+}
+.craftswoman-submit-review:focus-visible {
+  outline: 3px solid #d9a7ad;
+  outline-offset: 3px;
+}
+.craftswoman-submit-review:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.craftswoman-product-form .form-label:has(input:required),
+.craftswoman-product-form .form-label:has(select:required),
+.craftswoman-product-form .form-label:has(textarea:required) { color: #5c1d24; }
+.craftswoman-product-form input:required,
+.craftswoman-product-form select:required,
+.craftswoman-product-form textarea:required { border-color: #d9c4c1; }
