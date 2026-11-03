@@ -300,6 +300,17 @@ class ProfileSerializer(serializers.ModelSerializer):
         read_only_fields = ('email',)
 
 
+class CraftswomanProductWriteSerializer(serializers.ModelSerializer):
+    category = serializers.PrimaryKeyRelatedField(queryset=Category.objects.filter(active=True))
+
+    class Meta:
+        model = Product
+        fields = (
+            'sku', 'name', 'category', 'description', 'region', 'color', 'size',
+            'production_time', 'price', 'stock', 'image_url', 'made_to_order',
+        )
+
+
 class CartItemInputSerializer(serializers.Serializer):
     product_id = serializers.IntegerField(min_value=1)
     quantity = serializers.IntegerField(min_value=1, max_value=100)
@@ -1385,6 +1396,54 @@ class CustomDesignListView(APIView):
             {**CustomDesignSerializer(design).data, 'product_id': product.id},
             status=status.HTTP_201_CREATED,
         )
+
+
+class CraftswomanProductsView(APIView):
+    permission_classes = (CraftswomanOnly,)
+    rbac_resource = 'products'
+
+    def get(self, request):
+        craftswoman = get_object_or_404(Craftswoman, user=request.user)
+        products = Product.objects.filter(craftswoman=craftswoman).select_related('category', 'craftswoman')
+        return Response(ProductSerializer(products, many=True).data)
+
+    def post(self, request):
+        if not has_rbac_permission(request.user, 'products', 'add'):
+            raise PermissionDenied('No tienes permiso para registrar productos.')
+        craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
+        serializer = CraftswomanProductWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        product = serializer.save(craftswoman=craftswoman, active=False)
+        record_audit(
+            request.user,
+            'craftswoman_submit_product',
+            'products',
+            details={'product_name': product.name, 'publication_status': 'pending'},
+            instance=product,
+        )
+        return Response(ProductSerializer(product).data, status=status.HTTP_201_CREATED)
+
+
+class CraftswomanProductDetailView(APIView):
+    permission_classes = (CraftswomanOnly,)
+    rbac_resource = 'products'
+
+    def patch(self, request, product_id):
+        if not has_rbac_permission(request.user, 'products', 'change'):
+            raise PermissionDenied('No tienes permiso para corregir tus productos.')
+        craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
+        product = get_object_or_404(Product, id=product_id, craftswoman=craftswoman)
+        serializer = CraftswomanProductWriteSerializer(product, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        product = serializer.save(active=False)
+        record_audit(
+            request.user,
+            'craftswoman_resubmit_product',
+            'products',
+            details={'product_name': product.name, 'publication_status': 'pending_review'},
+            instance=product,
+        )
+        return Response(ProductSerializer(product).data)
 
 
 class CraftswomanDashboardView(APIView):
