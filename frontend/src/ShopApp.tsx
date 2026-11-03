@@ -703,6 +703,7 @@ function AdminAccountView({ user, isSuperadmin, orders, products, categories, bu
   onCategoryActive: (categoryId: number, active: boolean) => void
   onOrderStatus: (orderId: number, status: string) => void
 }) {
+  const [activeSection, setActiveSection] = useState<'dashboard' | 'products' | 'orders' | 'categories'>('dashboard')
   const [showCreateForm, setShowCreateForm] = useState(false)
   function submitNewCategory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -710,6 +711,20 @@ function AdminAccountView({ user, isSuperadmin, orders, products, categories, bu
     onCreateCategory({ name: values.name.trim(), description: values.description.trim(), active: true })
     event.currentTarget.reset()
   }
+  function submitNewProduct(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const values = Object.fromEntries(new FormData(event.currentTarget).entries()) as Record<string, string>
+    onCreateProduct({
+      sku: values.sku.trim(), name: values.name.trim(), category: Number(values.category),
+      price: values.price, stock: Number(values.stock), size: values.size || 'M',
+      region: values.region.trim(), image_url: values.image_url.trim(),
+      active: values.active === 'on', made_to_order: values.made_to_order === 'on',
+    })
+    event.currentTarget.reset()
+    setShowCreateForm(false)
+  }
+  const pendingProducts = products.filter((product) => !product.active)
+  const publishedProducts = products.filter((product) => product.active)
   const pendingOrders = orders.filter((order) => order.status === 'pending').length
   const activeOrders = orders.filter((order) => ['accepted', 'weaving', 'preparing', 'shipped'].includes(order.status)).length
   const revenue = orders.filter((order) => order.status !== 'cancelled').reduce((total, order) => total + Number(order.total), 0)
@@ -721,36 +736,52 @@ function AdminAccountView({ user, isSuperadmin, orders, products, categories, bu
   const canViewCategories = hasEffectivePermission(user, 'categories.view')
   const canAddCategories = hasEffectivePermission(user, 'categories.add')
   const canChangeCategories = hasEffectivePermission(user, 'categories.change')
-  function submitNewProduct(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const values = Object.fromEntries(new FormData(event.currentTarget).entries()) as Record<string, string>
-    onCreateProduct({
-      sku: values.sku.trim(),
-      name: values.name.trim(),
-      category: Number(values.category),
-      price: values.price,
-      stock: Number(values.stock),
-      size: values.size,
-      region: values.region.trim(),
-      image_url: values.image_url.trim(),
-      active: values.active === 'on',
-      made_to_order: values.made_to_order === 'on',
-    })
-    event.currentTarget.reset()
-    setShowCreateForm(false)
-  }
   const accountName = resolveUserDisplayName(user)
-  return <main className="inner-page account-page"><div className="account-heading"><div><p className="eyebrow"><span className="eyebrow-line" /> ADMINISTRACIÓN</p><h1>Hola, <em>{accountName}.</em></h1><p>Resumen de la operación de Wayuuwaa.</p></div><button className="text-button" onClick={onSignOut}>Cerrar sesión <ArrowUpRight size={15} /></button></div>
-    {canViewOrders && <div className="admin-stats"><article><span>Pedidos</span><strong>{orders.length}</strong></article><article><span>Por aceptar</span><strong>{pendingOrders}</strong></article><article><span>En proceso</span><strong>{activeOrders}</strong></article><article><span>Valor de pedidos</span><strong>{money(revenue)}</strong></article></div>}
-    {isSuperadmin && <SuperadminRBACPanel currentUser={user} />}
-    <div className="admin-tools"><div><p className="eyebrow">GESTIÓN DE TIENDA</p><h2>Productos, inventario y estados</h2><p>El administrador de Django conserva los permisos y formularios de gestión.</p></div><a className="button button-dark" href={api.adminUrl} target="_blank" rel="noreferrer">Abrir administración <ArrowUpRight size={15} /></a></div>
-    {(canViewCategories || canAddCategories) && <section className="admin-inventory admin-categories"><div className="admin-orders-heading"><div><h2>Categorías</h2>{canViewCategories && <span>{categories.length} en total</span>}</div></div>{canAddCategories && <form className="admin-category-form" onSubmit={submitNewCategory}><label className="form-label">Nombre de categoría<input name="name" required maxLength={100} placeholder="Ej. Tejidos especiales" /></label><label className="form-label">Descripción<input name="description" maxLength={500} placeholder="Descripción breve" /></label><button className="button button-outline" disabled={busy}>{busy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} Crear categoría</button></form>}{canViewCategories && <div className="admin-category-list">{categories.map((category) => <div className="admin-category-row" key={category.id}><div><strong>{category.name}</strong><small>{category.description || 'Sin descripción'}</small></div><span className={category.active ? 'category-state active' : 'category-state'}>{category.active ? 'Activa' : 'Inactiva'}</span>{canChangeCategories && <button className="text-button" disabled={busy} onClick={() => onCategoryActive(category.id, !category.active)}>{category.active ? 'Desactivar' : 'Activar'}</button>}</div>)}</div>}</section>}
-    {(canViewProducts || canAddProducts) && <section className="admin-inventory"><div className="admin-orders-heading"><h2>Inventario</h2>{canAddProducts && <button className="button button-outline" onClick={() => setShowCreateForm((value) => !value)}>{showCreateForm ? 'Cancelar' : 'Agregar producto'} <Plus size={15} /></button>}</div>
-      {showCreateForm && <form className="admin-product-form" onSubmit={submitNewProduct}><label className="form-label">Referencia<input name="sku" required maxLength={50} /></label><label className="form-label">Nombre<input name="name" required maxLength={180} /></label><label className="form-label">Categoría<select name="category" required defaultValue=""><option value="" disabled>Selecciona una categoría</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label><label className="form-label">Precio COP<input name="price" type="number" min="0" step="1" required /></label><label className="form-label">Stock inicial<input name="stock" type="number" min="0" step="1" defaultValue="0" required /></label><label className="form-label">Talla<input name="size" maxLength={30} defaultValue="M" /></label><label className="form-label">Región<input name="region" maxLength={100} /></label><label className="form-label">URL o imagen<input name="image_url" placeholder="https://…" /></label><label className="admin-check"><input name="active" type="checkbox" /> Publicar en la tienda</label><label className="admin-check"><input name="made_to_order" type="checkbox" /> Hecho por pedido</label><button className="button button-dark" disabled={busy || !categories.length}>{busy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} Crear producto</button></form>}
-      {canViewProducts && <div className="admin-product-list">{products.map((product) => <AdminProductRow key={product.id} product={product} busy={busy} canChange={canChangeProducts} onSave={onSaveProduct} />)}</div>}
-    </section>}
-    {canViewOrders && <><div className="admin-orders-heading"><h2>Pedidos recientes</h2><span>{orders.length} en total</span></div>{orders.length ? <div className="orders-list">{orders.slice(0, 8).map((order) => <AdminOrderRow key={order.id} order={order} busy={busy} canChange={canChangeOrders} onStatus={onOrderStatus} />)}</div> : <div className="empty-account"><ShoppingBag size={28} /><h2>Aún no hay pedidos.</h2><p>Los pedidos creados desde la tienda aparecerán aquí.</p></div>}</>}
-  </main>
+  const navItems = [
+    { id: 'dashboard' as const, label: 'Panel principal', icon: <LayoutDashboard size={17} /> },
+    { id: 'products' as const, label: 'Productos y aprobación', icon: <ShoppingBag size={17} /> },
+    { id: 'orders' as const, label: 'Pedidos', icon: <ShoppingCart size={17} /> },
+    { id: 'categories' as const, label: 'Categorías', icon: <Boxes size={17} /> },
+  ]
+  return <div className="craftswoman-workspace admin-workspace">
+    <aside className="craftswoman-sidebar">
+      <div className="craftswoman-brand"><span className="craftswoman-brand-mark"><Layers size={22} /></span><span><strong>Wayúu</strong><small>ADMINISTRACIÓN DE TIENDA</small></span></div>
+      <nav className="craftswoman-nav" aria-label="Menú de administración">
+        <p>MENÚ PRINCIPAL</p>
+        {navItems.map((item) => <button key={item.id} className={activeSection === item.id ? 'active' : ''} onClick={() => setActiveSection(item.id)}>{item.icon}<span>{item.label}</span></button>)}
+      </nav>
+      <div className="craftswoman-sidebar-profile"><span className="craftswoman-avatar">{accountName.split(/\\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'AD'}</span><div><strong>{accountName}</strong><small>Administrador de tienda</small></div><button onClick={onSignOut} aria-label="Cerrar sesión" title="Cerrar sesión"><LogOut size={16} /></button></div>
+      <div className="craftswoman-sidebar-foot">SÜCHIKI KANAAS · LEGADO CULTURAL</div>
+    </aside>
+    <section className="craftswoman-main">
+      <header className="craftswoman-topbar"><div><span>ROL: ADMINISTRADOR</span><b>/</b><strong>{navItems.find((item) => item.id === activeSection)?.label}</strong></div><div className="craftswoman-top-user"><span className="craftswoman-avatar">{accountName.slice(0, 1).toUpperCase()}</span><span><strong>{accountName}</strong><small>Gestión comercial</small></span></div></header>
+      <main className="craftswoman-content admin-content">
+        {activeSection === 'dashboard' && <div className="craftswoman-dashboard">
+          <section className="craftswoman-welcome"><div><span><Sparkles size={14} /> SÜCHIKI KANAAS · GESTIÓN DE LA TIENDA</span><h1>Jamaya, {accountName}!</h1><p>Desde aquí puedes acompañar el trabajo de las tejedoras, revisar nuevas piezas y mantener organizada la tienda.</p></div><div className="craftswoman-welcome-actions"><button onClick={() => setActiveSection('products')}><Eye size={16} /> Revisar tejidos</button><button className="secondary" onClick={() => setActiveSection('orders')}><ShoppingCart size={16} /> Ver pedidos</button></div></section>
+          <section className="craftswoman-stats admin-stats">
+            <article><span>Productos registrados</span><strong>{products.length}</strong><small>En el catálogo de tienda</small></article>
+            <article><span>Por revisar</span><strong>{pendingProducts.length}</strong><small>Esperando aprobación</small></article>
+            <article><span>Publicados</span><strong>{publishedProducts.length}</strong><small>Visibles para clientes</small></article>
+            <article><span>Pedidos pendientes</span><strong>{pendingOrders}</strong><small>Requieren seguimiento</small></article>
+            <article><span>Pedidos activos</span><strong>{activeOrders}</strong><small>En preparación o envío</small></article>
+          </section>
+          <div className="craftswoman-columns">
+            <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>REVISIÓN DE CATÁLOGO</small><h2>Tejidos por aprobar</h2></div><span>{pendingProducts.length}</span></div>{pendingProducts.slice(0,4).map((product) => <div className="admin-review-mini" key={product.id}><div><strong>{product.name}</strong><small>{product.sku} · Taller #{product.craftswoman ?? 'sin asignar'}</small></div><button disabled={busy || !canChangeProducts} onClick={() => onSaveProduct(product.id, { active: true })}>Aprobar</button></div>)}{!pendingProducts.length && <p className="muted-copy">No hay tejidos pendientes de revisión.</p>}<button className="admin-text-link" onClick={() => setActiveSection('products')}>Ir a productos <ArrowRight size={14} /></button></section>
+            <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>OPERACIÓN</small><h2>Pedidos recientes</h2></div><span>{orders.length}</span></div>{orders.slice(0,3).map((order) => <div className="admin-review-mini" key={order.id}><div><strong>Pedido #{order.id}</strong><small>{dateLabel(order.created_at)} · {money(order.total)}</small></div><em>{statusLabel(order.status)}</em></div>)}{!orders.length && <p className="muted-copy">Los pedidos aparecerán aquí cuando los clientes compren.</p>}<button className="admin-text-link" onClick={() => setActiveSection('orders')}>Consultar pedidos <ArrowRight size={14} /></button></section>
+          </div>
+          {isSuperadmin && <SuperadminRBACPanel currentUser={user} />}
+        </div>}
+        {activeSection === 'products' && <section className="craftswoman-panel craftswoman-products-section">
+          <div className="craftswoman-panel-heading"><div><small>CATÁLOGO Y CONTROL DE PUBLICACIÓN</small><h1>Productos y tejidos</h1><p>Los tejidos enviados por las artesanas llegan aquí como pendientes. Aprueba su publicación cuando la información esté completa.</p></div>{canAddProducts && <button className="craftswoman-primary-action" onClick={() => setShowCreateForm((visible) => !visible)}><Plus size={16} /> {showCreateForm ? 'Cerrar formulario' : 'Agregar producto'}</button>}</div>
+          {showCreateForm && <form className="craftswoman-product-form" onSubmit={submitNewProduct}><label className="form-label">Referencia *<input name="sku" required maxLength={50} /></label><label className="form-label">Nombre de la pieza *<input name="name" required maxLength={180} /></label><label className="form-label">Categoría *<select name="category" required defaultValue=""><option value="" disabled>Selecciona una categoría</option>{categories.filter((category) => category.active).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label><label className="form-label">Precio COP *<input name="price" type="number" min="0" step="1" required /></label><label className="form-label">Stock inicial *<input name="stock" type="number" min="0" step="1" defaultValue="0" required /></label><label className="form-label">Talla<input name="size" maxLength={30} defaultValue="M" /></label><label className="form-label">Región<input name="region" maxLength={100} /></label><label className="form-label">Imagen (URL)<input name="image_url" type="url" placeholder="https://…" /></label><label className="admin-check"><input name="active" type="checkbox" /> Publicar directamente</label><label className="admin-check"><input name="made_to_order" type="checkbox" /> Elaborar por pedido</label><button className="button button-dark craftswoman-submit-review" disabled={busy || !categories.some((category) => category.active)}>{busy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} Guardar producto</button></form>}
+          {canViewProducts && <><div className="admin-section-subheading"><h2>Pendientes de aprobación</h2><span>{pendingProducts.length}</span></div>{pendingProducts.length ? <div className="admin-review-list">{pendingProducts.map((product) => <article className="admin-review-card" key={product.id}><div className="admin-review-card-main">{product.image_url ? <img src={product.image_url} alt={product.name} /> : <span className="admin-review-placeholder"><ShoppingBag size={22} /></span>}<div><strong>{product.name}</strong><small>{product.sku} · {categories.find((category) => category.id === product.category)?.name ?? 'Categoría'}</small><small>Taller vinculado: {product.craftswoman ? `#${product.craftswoman}` : 'No asignado'} · Stock: {product.stock}</small><p>{product.description || 'Sin descripción registrada.'}</p></div></div><div className="admin-review-actions"><span className="admin-review-pending">Pendiente de revisión</span>{canChangeProducts && <button className="craftswoman-submit-review" disabled={busy} onClick={() => onSaveProduct(product.id, { active: true })}><Check size={15} /> Aprobar y publicar</button>}</div></article>)}</div> : <p className="muted-copy">No hay tejidos pendientes. Cuando una tejedora envíe una pieza, aparecerá en esta sección.</p>}</>}
+          {canViewProducts && <><div className="admin-section-subheading"><h2>Productos publicados y catálogo</h2><span>{publishedProducts.length}</span></div><div className="admin-product-list">{publishedProducts.map((product) => <AdminProductRow key={product.id} product={product} busy={busy} canChange={canChangeProducts} onSave={onSaveProduct} />)}</div></>}
+        </section>}
+        {activeSection === 'orders' && <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>SEGUIMIENTO COMERCIAL</small><h1>Pedidos de clientes</h1><p>Consulta las compras registradas y actualiza su estado según el avance real.</p></div><span>{orders.length} pedidos</span></div>{canViewOrders ? orders.length ? <div className="orders-list">{orders.map((order) => <AdminOrderRow key={order.id} order={order} busy={busy} canChange={canChangeOrders} onStatus={onOrderStatus} />)}</div> : <p className="muted-copy">Todavía no hay pedidos registrados.</p> : <p className="muted-copy">Tu rol no tiene permiso para consultar pedidos.</p>}</section>}
+        {activeSection === 'categories' && <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>ORGANIZACIÓN DEL CATÁLOGO</small><h1>Categorías</h1><p>Mantén las categorías disponibles para ordenar las piezas de la tienda.</p></div></div>{canAddCategories && <form className="admin-category-form" onSubmit={submitNewCategory}><label className="form-label">Nombre de categoría *<input name="name" required maxLength={100} placeholder="Ej. Mantas Wayúu" /></label><label className="form-label">Descripción<input name="description" maxLength={500} placeholder="Descripción breve" /></label><button className="button button-dark" disabled={busy}>{busy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} Crear categoría</button></form>}{canViewCategories && <div className="admin-category-list">{categories.map((category) => <div className="admin-category-row" key={category.id}><div><strong>{category.name}</strong><small>{category.description || 'Sin descripción'}</small></div><span className={category.active ? 'category-state active' : 'category-state'}>{category.active ? 'Activa' : 'Inactiva'}</span>{canChangeCategories && <button className="text-button" disabled={busy} onClick={() => onCategoryActive(category.id, !category.active)}>{category.active ? 'Desactivar' : 'Activar'}</button>}</div>)}</div>}</section>}
+      </main>
+    </section>
+  </div>
 }
 
 function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
