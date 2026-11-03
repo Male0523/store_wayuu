@@ -620,3 +620,67 @@
 .app-shell > .site-header .wordmark small { color: #806b68; }
 .app-shell > .site-header .main-nav button,
 .app-shell > .site-header .header-actions { color: #50383a; }
+
+
+/* Panel del administrador: misma identidad artesanal que el portal de tejedora */
+.admin-workspace .craftswoman-brand small { max-width: 150px; }
+.admin-workspace .craftswoman-nav button { min-height: 46px; }
+.admin-content { background: #fdfbf7; }
+.admin-workspace .admin-stats article strong { color: #5c1d24; }
+.admin-workspace .craftswoman-welcome { background: linear-gradient(112deg, #63232b 0%, #512027 62%, #3e211d 100%); }
+.admin-workspace .craftswoman-panel { border-color: #eadfd8; box-shadow: 0 8px 24px rgba(70,35,29,.035); }
+.admin-review-mini {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 13px 0; border-bottom: 1px solid #f0e8e2;
+}
+.admin-review-mini > div { display: grid; gap: 4px; min-width: 0; }
+.admin-review-mini strong { color: #4b2929; font-size: 13px; }
+.admin-review-mini small { color: #97857e; font-size: 11px; }
+.admin-review-mini em { color: #896b50; font-size: 11px; font-style: normal; }
+.admin-review-mini button,
+.admin-text-link {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  border: 1px solid #e5c9c5; border-radius: 8px; padding: 8px 12px;
+  background: #fbf1ef; color: #68252d; font-size: 11px; font-weight: 700; cursor: pointer;
+}
+.admin-text-link { margin-top: 14px; border: 0; padding-left: 0; background: transparent; }
+.admin-section-subheading {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 28px 0 12px; padding-bottom: 10px; border-bottom: 1px solid #eee3dd;
+}
+.admin-section-subheading h2 { margin: 0; color: #51252a; font-family: Georgia,serif; font-size: 19px; font-weight: 500; }
+.admin-section-subheading > span {
+  min-width: 28px; padding: 5px 9px; border-radius: 20px;
+  background: #f8eeec; color: #762d35; text-align: center; font-size: 11px; font-weight: 700;
+}
+.admin-review-list { display: grid; gap: 12px; }
+.admin-review-card {
+  display: flex; align-items: center; justify-content: space-between; gap: 18px;
+  padding: 16px; border: 1px solid #eadfd8; border-radius: 12px; background: #fff;
+}
+.admin-review-card-main { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.admin-review-card-main > img,
+.admin-review-placeholder {
+  display: grid; place-items: center; flex: 0 0 76px; width: 76px; height: 76px;
+  border-radius: 9px; background: #f5eee8; object-fit: cover; color: #87525a;
+}
+.admin-review-card-main > div { display: grid; gap: 4px; min-width: 0; }
+.admin-review-card-main strong { color: #4b2929; font-size: 14px; }
+.admin-review-card-main small { color: #927f78; font-size: 11px; }
+.admin-review-card-main p { margin: 4px 0 0; color: #6f625d; font-size: 12px; line-height: 1.5; }
+.admin-review-actions { display: flex; flex: 0 0 auto; align-items: flex-end; flex-direction: column; gap: 9px; }
+.admin-review-pending {
+  padding: 5px 9px; border-radius: 20px; background: #fbf0df; color: #855a27;
+  font-size: 10px; font-weight: 700;
+}
+.admin-review-actions .craftswoman-submit-review { display: inline-flex; align-items: center; gap: 7px; }
+.admin-workspace .admin-category-form { margin: 16px 0 22px; }
+.admin-workspace .admin-category-row { background: #fff; border-color: #eee4de; }
+.admin-workspace .admin-product-list { margin-top: 12px; }
+.admin-workspace .admin-product-row { background: #fff; border-color: #eee4de; }
+.admin-workspace .admin-orders-heading h2 { color: #51252a; }
+@media (max-width: 760px) {
+  .admin-review-card { align-items: stretch; flex-direction: column; }
+  .admin-review-actions { align-items: flex-start; }
+  .admin-review-card-main { align-items: flex-start; }
+}
