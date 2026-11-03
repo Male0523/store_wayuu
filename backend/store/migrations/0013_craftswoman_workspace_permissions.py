@@ -31,23 +31,9 @@ def grant_craftswoman_workspace_permissions(apps, schema_editor):
             RolePermission.objects.get_or_create(role=role, permission=permission)
 
 
-def revoke_craftswoman_workspace_permissions(apps, schema_editor):
-    AccessRole = apps.get_model('store', 'AccessRole')
-    RolePermission = apps.get_model('store', 'RolePermission')
-    Permission = apps.get_model('auth', 'Permission')
-
-    role = AccessRole.objects.filter(code='craftswoman').first()
-    if not role:
-        return
-    permissions = Permission.objects.filter(
-        content_type__app_label='store',
-        codename__in=(
-            'view_product', 'add_product', 'change_product',
-            'view_order', 'change_order',
-            'view_customdesign', 'change_customdesign',
-        ),
-    )
-    RolePermission.objects.filter(role=role, permission__in=permissions).delete()
+def reverse_craftswoman_workspace_permissions(apps, schema_editor):
+    # Keep any role-permission adjustments made after this migration.
+    pass
 
 
 class Migration(migrations.Migration):
@@ -60,6 +46,6 @@ class Migration(migrations.Migration):
     operations = [
         migrations.RunPython(
             grant_craftswoman_workspace_permissions,
-            revoke_craftswoman_workspace_permissions,
+            reverse_craftswoman_workspace_permissions,
         ),
     ]
