@@ -83,7 +83,7 @@ class ProductSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'sku', 'name', 'category', 'craftswoman', 'description', 'region',
             'color', 'size', 'production_time', 'price', 'stock', 'image_url',
-            'made_to_order', 'created_at', 'updated_at',
+            'made_to_order', 'active', 'created_at', 'updated_at',
         )
 
 
