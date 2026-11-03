@@ -8,6 +8,7 @@ const CraftswomanPanel = lazy(() => legacyViews['../../wayuu_tejedora_panel.tsx'
 const AdministratorPanel = lazy(() => legacyViews['../../way_u_store_administrator_panel.tsx']().then((module) => ({ default: module })))
 const SuperadministratorPanel = lazy(() => legacyViews['../../panel_de_control_superadministrador_way_u.tsx']().then((module) => ({ default: module })))
 const CustomerPanel = lazy(() => import('./CustomerPanel'))
+const ConnectedShop = lazy(() => import('./ShopApp').then((module) => ({ default: module.ConnectedShop })))
 
 type Role = SessionUser['role']
 
