@@ -430,6 +430,7 @@ class StoreAPITests(TestCase):
             'color': 'Borgoña y crema',
             'size': 'M',
             'production_time': '20 días',
+            'image_url': 'https://example.com/manta-wayuu.jpg',
             'price': '280000',
             'stock': 2,
         }, content_type='application/json')
