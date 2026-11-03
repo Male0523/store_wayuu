@@ -34,6 +34,20 @@ export default function CustomerPanel() {
   const [profileEditing, setProfileEditing] = useState(false)
 
   useEffect(() => {
+    if (!user?.id) {
+      setFavorites([])
+      return
+    }
+    try {
+      const saved = window.localStorage.getItem(`wayuu:favorites:${user.id}`)
+      const parsed: unknown = saved ? JSON.parse(saved) : []
+      setFavorites(Array.isArray(parsed) ? parsed.filter((id): id is number => Number.isInteger(id)) : [])
+    } catch {
+      setFavorites([])
+    }
+  }, [user?.id])
+
+  useEffect(() => {
     let active = true
     const params = new URLSearchParams({ page_size: '100', ordering: 'name' })
     Promise.all([api.products(params), api.categories()]).then(([page, list]) => {
@@ -73,6 +87,20 @@ export default function CustomerPanel() {
   async function refreshCart() {
     const value = await api.cart()
     setCart(value)
+  }
+
+  function toggleFavorite(productId: number) {
+    const next = favorites.includes(productId)
+      ? favorites.filter((id) => id !== productId)
+      : [...favorites, productId]
+    setFavorites(next)
+    if (user?.id) {
+      try {
+        window.localStorage.setItem(`wayuu:favorites:${user.id}`, JSON.stringify(next))
+      } catch {
+        setNotice('No se pudieron guardar los favoritos en este navegador.')
+      }
+    }
   }
 
   async function addItem(product: Product, quantity = 1) {
@@ -175,12 +203,12 @@ export default function CustomerPanel() {
         <section className="customer-products-section">
           <div className="customer-section-heading"><div><span className="customer-kicker">{view === 'favorites' ? 'TU SELECCIÓN' : 'COLECCIÓN DISPONIBLE'}</span><h2>{view === 'favorites' ? 'Piezas que guardaste' : 'Encuentra tu próxima pieza'}</h2></div><span>{(view === 'favorites' ? favoriteProducts : filtered).length} productos</span></div>
           {view === 'catalog' && <div className="customer-filters"><div className="customer-category-tabs"><button className={category === 'Todas' ? 'active' : ''} onClick={() => setCategory('Todas')}>Todas</button>{categories.map((item) => <button key={item.id} className={category === item.name ? 'active' : ''} onClick={() => setCategory(item.name)}>{item.name}</button>)}</div><select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Ordenar productos"><option value="default">Orden alfabético</option><option value="low">Menor precio</option><option value="high">Mayor precio</option></select></div>}
-          {view === 'favorites' && <p className="customer-muted">Los favoritos se conservan durante esta sesión; todavía no existe sincronización de favoritos en Django.</p>}
+          {view === 'favorites' && <p className="customer-muted">Tus favoritos se guardan en este navegador y se mantienen al cerrar y volver a iniciar sesión con esta cuenta.</p>}
           {view === 'catalog' && !products.length && <p className="customer-empty">No hay productos disponibles en el catálogo todavía.</p>}
           {view === 'favorites' && !favoriteProducts.length && <p className="customer-empty">Aún no has guardado favoritos en esta sesión.</p>}
           <div className="customer-product-grid">{(view === 'favorites' ? favoriteProducts : filtered).map((item) => <article className="customer-product-card" key={item.id}>
-            <button className="customer-product-image" onClick={() => { setSelected(item); setPreviousView(view) }}><img src={item.image_url || ''} alt={item.name} onError={(event) => { event.currentTarget.style.display = 'none' }}/><span>{item.category?.name || 'Artesanía'}</span></button>
-            <div className="customer-product-copy"><small>{item.region || 'La Guajira'}</small><h3>{item.name}</h3><p>{money(item.price)}</p><div><button onClick={() => { setSelected(item); setPreviousView(view) }}>Ver detalle</button><button aria-label="Agregar a favoritos" className={favorites.includes(item.id) ? 'saved' : ''} onClick={() => setFavorites((old) => old.includes(item.id) ? old.filter((id) => id !== item.id) : [...old, item.id])}><Heart size={17} fill={favorites.includes(item.id) ? 'currentColor' : 'none'}/></button></div></div>
+            <button className="customer-product-image" onClick={() => { setSelected(item); setPreviousView(view); setView('detail') }}><img src={item.image_url || ''} alt={item.name} onError={(event) => { event.currentTarget.style.display = 'none' }}/><span>{item.category?.name || 'Artesanía'}</span></button>
+            <div className="customer-product-copy"><small>{item.region || 'La Guajira'}</small><h3>{item.name}</h3><p>{money(item.price)}</p><div><button onClick={() => { setSelected(item); setPreviousView(view); setView('detail') }}>Ver detalle</button><button aria-label="Agregar al carrito" title="Agregar al carrito" onClick={() => void addItem(item)} disabled={busy || item.stock < 1}><ShoppingBag size={17}/></button><button aria-label="Agregar a favoritos" className={favorites.includes(item.id) ? 'saved' : ''} onClick={() => toggleFavorite(item.id)}><Heart size={17} fill={favorites.includes(item.id) ? 'currentColor' : 'none'}/></button></div></div>
           </article>)}</div>
         </section>
       </>}
