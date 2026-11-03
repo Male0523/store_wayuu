@@ -3,6 +3,7 @@ import {
   ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, Check, ChevronDown,
   Camera, CircleUserRound, Heart, LoaderCircle, LockKeyhole, Minus,
   Plus, Search, ShoppingBag, SlidersHorizontal, Trash2, X,
+  LayoutDashboard, Boxes, Layers, LogOut, Sparkles,
 } from 'lucide-react'
 import { api, ApiError } from './lib/api'
 import { useUserSession } from './context/user-context'
