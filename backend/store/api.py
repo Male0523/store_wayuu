@@ -24,6 +24,7 @@ from .models import (
     Craftswoman,
     CustomDesign,
     Customer,
+    CustomerCartItem,
     Order,
     OrderItem,
     PermissionDelegation,
@@ -516,24 +517,47 @@ def _customer_for(user):
     return customer
 
 
-def _cart_for(request):
-    cart = request.session.get('cart')
-    if not isinstance(cart, dict):
-        cart = {}
-        request.session['cart'] = cart
-    return cart
+def _sync_legacy_session_cart(request, customer):
+    """Migra una sola vez los carritos de sesión existentes al almacenamiento por cuenta."""
+    legacy_cart = request.session.get('cart')
+    if isinstance(legacy_cart, dict):
+        for product_id, raw_quantity in legacy_cart.items():
+            if not str(product_id).isdigit():
+                continue
+            try:
+                quantity = max(0, int(raw_quantity))
+            except (TypeError, ValueError):
+                continue
+            if not quantity:
+                continue
+            product = Product.objects.filter(id=int(product_id), active=True).first()
+            if not product:
+                continue
+            item, created = CustomerCartItem.objects.get_or_create(
+                customer=customer,
+                product=product,
+                defaults={'quantity': min(quantity, product.stock)},
+            )
+            if not created:
+                item.quantity = min(item.quantity + quantity, product.stock)
+                item.save(update_fields=('quantity', 'updated_at'))
+        request.session.pop('cart', None)
+        request.session.modified = True
 
 
 def _cart_items(request, customer):
-    cart = _cart_for(request)
-    product_ids = [int(key) for key in cart if str(key).isdigit()]
-    products = Product.objects.filter(id__in=product_ids).select_related('category', 'craftswoman', 'custom_design', 'custom_design__customer')
+    _sync_legacy_session_cart(request, customer)
+    cart_rows = CustomerCartItem.objects.filter(customer=customer).select_related(
+        'product__category', 'product__craftswoman', 'product__custom_design',
+        'product__custom_design__customer',
+    )
     items = []
     total = Decimal('0')
-    for product in products:
+    for row in cart_rows:
+        product = row.product
         if not product.active and (not product.custom_design_id or product.custom_design.customer_id != customer.id):
             continue
-        quantity = min(max(int(cart.get(str(product.id), 0)), 0), product.stock)
+        quantity = min(row.quantity, product.stock)
         if not quantity:
             continue
         subtotal = product.price * quantity
@@ -1180,18 +1204,24 @@ class CartItemListView(APIView):
     rbac_resource = 'cart'
 
     def post(self, request):
-        _customer_for(request.user)
+        customer = _customer_for(request.user)
         serializer = CartItemInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         product = get_object_or_404(Product, id=serializer.validated_data['product_id'], active=True)
         quantity = serializer.validated_data['quantity']
-        cart = _cart_for(request)
-        key = str(product.id)
-        new_quantity = int(cart.get(key, 0)) + quantity
-        if product.stock < new_quantity:
-            return Response({'detail': 'No hay suficientes unidades disponibles.'}, status=status.HTTP_400_BAD_REQUEST)
-        cart[key] = new_quantity
-        request.session.modified = True
+        _sync_legacy_session_cart(request, customer)
+        with transaction.atomic():
+            row, created = CustomerCartItem.objects.select_for_update().get_or_create(
+                customer=customer, product=product, defaults={'quantity': quantity},
+            )
+            new_quantity = row.quantity if created else row.quantity + quantity
+            if product.stock < new_quantity:
+                if created:
+                    row.delete()
+                return Response({'detail': 'No hay suficientes unidades disponibles.'}, status=status.HTTP_400_BAD_REQUEST)
+            if not created:
+                row.quantity = new_quantity
+                row.save(update_fields=('quantity', 'updated_at'))
         return Response({'detail': 'Producto agregado.', 'product_id': product.id, 'quantity': new_quantity}, status=status.HTTP_201_CREATED)
 
 
@@ -1200,26 +1230,23 @@ class CartItemDetailView(APIView):
     rbac_resource = 'cart'
 
     def patch(self, request, product_id):
-        _customer_for(request.user)
-        cart = _cart_for(request)
-        key = str(product_id)
-        if key not in cart:
-            return Response({'detail': 'El producto no está en el carrito.'}, status=status.HTTP_404_NOT_FOUND)
+        customer = _customer_for(request.user)
         serializer = CartQuantitySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         product = get_object_or_404(Product, id=product_id, active=True)
         quantity = serializer.validated_data['quantity']
+        _sync_legacy_session_cart(request, customer)
         if quantity > product.stock:
             return Response({'detail': 'No hay suficientes unidades disponibles.'}, status=status.HTTP_400_BAD_REQUEST)
-        cart[key] = quantity
-        request.session.modified = True
+        updated = CustomerCartItem.objects.filter(customer=customer, product=product).update(quantity=quantity)
+        if not updated:
+            return Response({'detail': 'El producto no está en el carrito.'}, status=status.HTTP_404_NOT_FOUND)
         return Response({'detail': 'Carrito actualizado.', 'product_id': product.id, 'quantity': quantity})
 
     def delete(self, request, product_id):
-        _customer_for(request.user)
-        cart = _cart_for(request)
-        cart.pop(str(product_id), None)
-        request.session.modified = True
+        customer = _customer_for(request.user)
+        _sync_legacy_session_cart(request, customer)
+        CustomerCartItem.objects.filter(customer=customer, product_id=product_id).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -1268,7 +1295,8 @@ class CheckoutView(APIView):
                 details={'item_count': len(items)},
                 instance=order,
             )
-        request.session['cart'] = {}
+        CustomerCartItem.objects.filter(customer=customer).delete()
+        request.session.pop('cart', None)
         request.session.modified = True
         order = Order.objects.prefetch_related('items__product').select_related('craftswoman').get(id=order.id)
         return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
