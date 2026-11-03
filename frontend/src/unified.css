@@ -59,3 +59,14 @@ a { color: inherit; }
   .unified-header nav { order: 3; flex-basis: 100%; gap: 16px; padding-bottom: 2px; }
   .session-button { margin-left: auto; }
 }
+/* La navegación global también forma parte del portal: continuidad con la paleta Wayuu */
+.unified-header {
+  background: #f7f0eb;
+  border-bottom-color: #e5d5ce;
+  color: #493235;
+}
+.unified-header nav a { color: #655154; }
+.unified-header nav a:hover,
+.unified-header nav a:focus-visible { color: #8a3b45; }
+.unified-header .unified-brand,
+.unified-header .session-button { color: #5c1d24; }
