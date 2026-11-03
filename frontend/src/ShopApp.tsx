@@ -520,7 +520,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
   }
 
   return <div className="app-shell">
-    {screen !== 'craftswoman' && <header className="site-header">
+    {screen !== 'craftswoman' && screen !== 'admin' && <header className="site-header">
       <button className="wordmark" onClick={() => setScreen('shop')} aria-label="Ir al inicio"><span className="wordmark-symbol" aria-hidden="true"><span /><span /><span /></span><span>wayuuwaa<small>TEJIDO CON ORIGEN</small></span></button>
       <nav className="main-nav" aria-label="Navegación principal"><button className={screen === 'shop' ? 'active' : ''} onClick={() => setScreen('shop')}>Colección</button>{canRequestDesign && <button className={screen === 'design' ? 'active' : ''} onClick={() => setScreen('design')}>Diseña tu manta</button>}<button className="nav-story" onClick={() => document.getElementById('origen')?.scrollIntoView({ behavior: 'smooth' })}>Nuestro origen</button></nav>
       <div className="header-actions"><label className="header-search" aria-label="Buscar en la colección"><Search size={17} /><input value={query} onChange={(event) => { setQuery(event.target.value); setScreen('shop') }} placeholder="Buscar" /></label><button className="icon-action account-action" onClick={openAccount} title={user ? `Cuenta de ${resolveUserDisplayName(user, profileDraft)}` : 'Iniciar sesión'} aria-label={user ? 'Abrir mi cuenta' : 'Iniciar sesión'}><CircleUserRound size={20} strokeWidth={1.6} /></button><button className="icon-action bag-action" onClick={openCart} title="Abrir carrito" aria-label="Abrir carrito"><ShoppingBag size={20} strokeWidth={1.6} /><span className="bag-count">{cart?.count ?? 0}</span></button></div>
@@ -546,7 +546,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
 
     {screen === 'admin' && user && (user.role === 'admin' || user.role === 'superadmin') && <AdminAccountView user={user} isSuperadmin={user.role === 'superadmin'} orders={orders} products={adminProducts} categories={adminCategories} busy={busy} onSignOut={signOut} onSaveProduct={saveAdminProduct} onCreateProduct={createAdminProduct} onCreateCategory={createAdminCategory} onCategoryActive={updateAdminCategory} onOrderStatus={saveAdminOrderStatus} />}
 
-    {screen !== 'shop' && <Footer onInstagram={() => setNotice('Pronto encontrarás nuestras novedades en Instagram.')} />}
+    {screen !== 'shop' && screen !== 'admin' && <Footer onInstagram={() => setNotice('Pronto encontrarás nuestras novedades en Instagram.')} />}
     {selectedProduct && <ProductDialog product={selectedProduct} busy={busy} onClose={() => setSelectedProduct(null)} onAdd={() => addToCart(selectedProduct.id)} />}
     {cartOpen && <CartDrawer cart={cart} checkoutOpen={checkoutOpen} busy={busy} address={checkoutAddress} city={checkoutCity} paymentMethod={paymentMethod} notes={checkoutNotes} onClose={() => { setCartOpen(false); setCheckoutOpen(false) }} onCheckout={() => setCheckoutOpen(true)} onBack={() => setCheckoutOpen(false)} onQuantity={changeQuantity} onAddress={setCheckoutAddress} onCity={setCheckoutCity} onPayment={setPaymentMethod} onNotes={setCheckoutNotes} onSubmit={submitCheckout} />}
     {authOpen && <AuthDialog mode={authMode} busy={busy} onMode={setAuthMode} onClose={() => { setAuthOpen(false); setPendingProduct(null) }} onSubmit={submitAuth} />}
