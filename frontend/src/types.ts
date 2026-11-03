@@ -39,6 +39,7 @@ export interface Product {
 export interface AdminProduct extends Omit<Product, 'category' | 'craftswoman'> {
   category: number
   craftswoman: number | null
+  craftswoman_name?: string | null
   active: boolean
 }
 
