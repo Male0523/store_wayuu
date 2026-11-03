@@ -109,6 +109,14 @@ export const api = {
   designs: () => request<CustomDesign[]>('/designs/'),
   createDesign: (values: Record<string, string | number>) =>
     request('/designs/', { method: 'POST', body: json(values) }),
+  craftswomanProducts: () => request<Product[]>('/craftswoman/products/'),
+  createCraftswomanProduct: (values: {
+    sku: string; name: string; category: number; description?: string; region?: string;
+    color?: string; size?: string; production_time?: string; price: string | number;
+    stock: number; image_url?: string; made_to_order?: boolean;
+  }) => request<Product>('/craftswoman/products/', { method: 'POST', body: json(values) }),
+  updateCraftswomanProduct: (id: number, values: Record<string, string | number | boolean>) =>
+    request<Product>(`/craftswoman/products/${id}/`, { method: 'PATCH', body: json(values) }),
   craftswomanDashboard: () => request<CraftswomanDashboard>('/craftswoman/dashboard/'),
   acceptOrder: (id: number) => request<Order>(`/craftswoman/orders/${id}/accept/`, { method: 'POST' }),
   updateOrderStatus: (id: number, value: string) =>
