@@ -71,17 +71,18 @@ function AccessGate({ user, onLogin }: {
 	)
 }
 
-function RolePage({ user, role, onLogin, children }: {
+function RolePage({ user, role, onLogin, children, connected = false }: {
 	user: SessionUser | null
 	role: Role
 	onLogin: (event: FormEvent<HTMLFormElement>) => Promise<void>
 	children: ReactNode
+	connected?: boolean
 }) {
 	if (user?.role !== role) return <AccessGate user={user} onLogin={onLogin} />
 	if (role === 'craftswoman' && user.profile?.active === false) {
 		return <section className="access-panel"><h1>Cuenta pendiente de activación</h1><p>La administración debe activar el perfil antes de habilitar el panel de tejedora.</p></section>
 	}
-	return <><DemoNotice />{children}</>
+	return connected ? <>{children}</> : <><DemoNotice />{children}</>
 }
 
 export default function App() {
@@ -107,8 +108,10 @@ export default function App() {
 	async function login(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault()
 		const values = new FormData(event.currentTarget)
-		await loginUser(String(values.get('username')), String(values.get('password')))
-		setPath('/')
+		const account = await loginUser(String(values.get('username')), String(values.get('password')))
+		const destination = roleRoutes.find((route) => route.role === account.role)?.path ?? '/tienda'
+		window.history.pushState(null, '', destination)
+		setPath(destination)
 	}
 
 	async function logout() {
@@ -123,15 +126,15 @@ export default function App() {
 		setPath('/')
 	}
 
-	function protectedPage(role: Role, page: ReactNode) {
+	function protectedPage(role: Role, page: ReactNode, connected = false) {
 		if (!sessionLoaded) return <div className="route-loading" role="status">Comprobando sesión…</div>
-		return <RolePage user={user} role={role} onLogin={login}>{page}</RolePage>
+		return <RolePage user={user} role={role} onLogin={login} connected={connected}>{page}</RolePage>
 	}
 
 	let page: ReactNode
 	switch (path.replace(/\/$/, '') || '/') {
 		case '/': page = <><DemoNotice /><PublicSite /></>; break
-		case '/cliente': page = protectedPage('customer', <CustomerPanel />); break
+		case '/cliente': page = protectedPage('customer', <ConnectedShop initialScreen="shop" />, true); break
 		case '/tienda': page = <ConnectedShop key="tienda" initialScreen="shop" />; break
 		case '/tejedora': page = protectedPage('craftswoman', <CraftswomanPanel />); break
 		case '/admin': page = protectedPage('admin', <AdministratorPanel />); break
