@@ -542,7 +542,7 @@ def _sync_legacy_session_cart(request, customer):
             if not quantity:
                 continue
             product = Product.objects.filter(id=int(product_id), active=True).first()
-            if not product:
+            if not product or product.stock < 1:
                 continue
             item, created = CustomerCartItem.objects.get_or_create(
                 customer=customer,
