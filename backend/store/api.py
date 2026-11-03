@@ -27,6 +27,7 @@ from .models import (
     CustomerCartItem,
     Order,
     OrderItem,
+    NavigationItem,
     PermissionDelegation,
     Product,
     RolePermission,
@@ -415,6 +416,40 @@ class SuperadminUserWriteSerializer(serializers.Serializer):
                 validate_password(password, user=instance)
             except DjangoValidationError as error:
                 raise serializers.ValidationError({'password': list(error.messages)}) from error
+        return attrs
+
+
+class NavigationItemWriteSerializer(serializers.Serializer):
+    label = serializers.CharField(max_length=80)
+    route_name = serializers.CharField(max_length=120)
+    anchor = serializers.CharField(max_length=80, required=False, allow_blank=True)
+    description = serializers.CharField(max_length=220, required=False, allow_blank=True)
+    role_codes = serializers.ListField(
+        child=serializers.ChoiceField(choices=AccessRole.Code.choices),
+        allow_empty=False,
+    )
+    permission_resource = serializers.ChoiceField(
+        choices=tuple((key, key) for key in PERMISSION_RESOURCES),
+        required=False,
+        allow_null=True,
+    )
+    permission_action = serializers.ChoiceField(
+        choices=tuple((action, action) for action in PERMISSION_ACTIONS),
+        required=False,
+        allow_null=True,
+    )
+    order = serializers.IntegerField(min_value=0, max_value=32767, required=False, default=10)
+    active = serializers.BooleanField(required=False, default=True)
+
+    def validate(self, attrs):
+        resource = attrs.get('permission_resource')
+        action = attrs.get('permission_action')
+        if bool(resource) != bool(action):
+            raise serializers.ValidationError('Selecciona tanto el recurso como la acción requerida, o deja ambos vacíos.')
+        if resource and permission_for(resource, action) is None:
+            raise serializers.ValidationError('El permiso seleccionado no existe.')
+        if len(attrs['role_codes']) != len(set(attrs['role_codes'])):
+            raise serializers.ValidationError({'role_codes': 'No repitas roles.'})
         return attrs
 
 
@@ -1052,6 +1087,80 @@ class SuperadminAuditView(APIView):
             'details': event.details,
             'created_at': event.created_at,
         } for event in events])
+
+
+class SuperadminNavigationView(APIView):
+    permission_classes = (SuperadminOnly,)
+    rbac_resource = 'navigation'
+
+    def get(self, request):
+        items = NavigationItem.objects.prefetch_related('roles').select_related('permission__content_type')
+        return Response([self.serialize_item(item) for item in items])
+
+    @staticmethod
+    def serialize_item(item):
+        key = permission_key(item.permission) if item.permission_id else None
+        return {
+            'id': item.id,
+            'label': item.label,
+            'route_name': item.route_name,
+            'anchor': item.anchor,
+            'description': item.description,
+            'role_codes': list(item.roles.values_list('code', flat=True)),
+            'permission_resource': key[0] if key else None,
+            'permission_action': key[1] if key else None,
+            'order': item.order,
+            'active': item.active,
+        }
+
+    def post(self, request):
+        serializer = NavigationItemWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        role_codes = values.pop('role_codes')
+        resource = values.pop('permission_resource', None)
+        action = values.pop('permission_action', None)
+        item = NavigationItem.objects.create(
+            **values,
+            permission=permission_for(resource, action) if resource else None,
+        )
+        item.roles.set(AccessRole.objects.filter(code__in=role_codes))
+        record_audit(request.user, 'create_navigation_item', 'navigation', instance=item)
+        return Response(self.serialize_item(item), status=status.HTTP_201_CREATED)
+
+
+class SuperadminNavigationDetailView(APIView):
+    permission_classes = (SuperadminOnly,)
+    rbac_resource = 'navigation'
+
+    def patch(self, request, item_id):
+        item = get_object_or_404(NavigationItem, pk=item_id)
+        serializer = NavigationItemWriteSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        role_codes = values.pop('role_codes', None)
+        resource = values.pop('permission_resource', serializers.empty)
+        action = values.pop('permission_action', serializers.empty)
+        if resource is not serializers.empty or action is not serializers.empty:
+            current_resource, current_action = permission_key(item.permission) if item.permission_id else (None, None)
+            next_resource = current_resource if resource is serializers.empty else resource
+            next_action = current_action if action is serializers.empty else action
+            if bool(next_resource) != bool(next_action):
+                raise serializers.ValidationError('Selecciona tanto el recurso como la acción requerida, o deja ambos vacíos.')
+            item.permission = permission_for(next_resource, next_action) if next_resource else None
+        for field, value in values.items():
+            setattr(item, field, value)
+        item.save()
+        if role_codes is not None:
+            item.roles.set(AccessRole.objects.filter(code__in=role_codes))
+        record_audit(request.user, 'update_navigation_item', 'navigation', instance=item)
+        return Response(SuperadminNavigationView.serialize_item(item))
+
+    def delete(self, request, item_id):
+        item = get_object_or_404(NavigationItem, pk=item_id)
+        record_audit(request.user, 'delete_navigation_item', 'navigation', instance=item)
+        item.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class AdminCategoryListView(APIView):
