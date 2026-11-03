@@ -302,6 +302,12 @@ class ProfileSerializer(serializers.ModelSerializer):
 
 class CraftswomanProductWriteSerializer(serializers.ModelSerializer):
     category = serializers.PrimaryKeyRelatedField(queryset=Category.objects.filter(active=True))
+    description = serializers.CharField(required=True, allow_blank=False, min_length=10, max_length=2000)
+    region = serializers.CharField(required=True, allow_blank=False, max_length=100)
+    color = serializers.CharField(required=True, allow_blank=False, max_length=150)
+    size = serializers.CharField(required=True, allow_blank=False, max_length=30)
+    production_time = serializers.CharField(required=True, allow_blank=False, max_length=100)
+    image_url = serializers.URLField(required=True, allow_blank=False)
 
     class Meta:
         model = Product
