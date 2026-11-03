@@ -1367,6 +1367,7 @@ class StoreAPITests(TestCase):
                 ('cart', 'view'), ('cart', 'add'), ('cart', 'change'), ('cart', 'delete'),
             },
             AccessRole.Code.CRAFTSWOMAN: {
+                ('products', 'view'), ('products', 'add'), ('products', 'change'),
                 ('orders', 'view'), ('orders', 'change'),
                 ('designs', 'view'), ('designs', 'change'),
             },
