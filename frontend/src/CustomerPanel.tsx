@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { ArrowLeft, Heart, Home, LogOut, Minus, Package, Plus, Search, ShoppingBag, ShoppingCart, UserRound, X } from 'lucide-react'
+import { ArrowLeft, Heart, Home, LogOut, Minus, Plus, Search, ShoppingBag, ShoppingCart, UserRound, X } from 'lucide-react'
 import { api, ApiError } from './lib/api'
 import { useUserSession } from './context/user-context'
 import type { Cart, Category, Order, Product, UserProfile } from './types'
