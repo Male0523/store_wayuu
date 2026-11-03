@@ -520,11 +520,11 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
   }
 
   return <div className="app-shell">
-    <header className="site-header">
+    {screen !== 'craftswoman' && <header className="site-header">
       <button className="wordmark" onClick={() => setScreen('shop')} aria-label="Ir al inicio"><span className="wordmark-symbol" aria-hidden="true"><span /><span /><span /></span><span>wayuuwaa<small>TEJIDO CON ORIGEN</small></span></button>
       <nav className="main-nav" aria-label="Navegación principal"><button className={screen === 'shop' ? 'active' : ''} onClick={() => setScreen('shop')}>Colección</button>{canRequestDesign && <button className={screen === 'design' ? 'active' : ''} onClick={() => setScreen('design')}>Diseña tu manta</button>}<button className="nav-story" onClick={() => document.getElementById('origen')?.scrollIntoView({ behavior: 'smooth' })}>Nuestro origen</button></nav>
       <div className="header-actions"><label className="header-search" aria-label="Buscar en la colección"><Search size={17} /><input value={query} onChange={(event) => { setQuery(event.target.value); setScreen('shop') }} placeholder="Buscar" /></label><button className="icon-action account-action" onClick={openAccount} title={user ? `Cuenta de ${resolveUserDisplayName(user, profileDraft)}` : 'Iniciar sesión'} aria-label={user ? 'Abrir mi cuenta' : 'Iniciar sesión'}><CircleUserRound size={20} strokeWidth={1.6} /></button><button className="icon-action bag-action" onClick={openCart} title="Abrir carrito" aria-label="Abrir carrito"><ShoppingBag size={20} strokeWidth={1.6} /><span className="bag-count">{cart?.count ?? 0}</span></button></div>
-    </header>
+    </header>}
 
     {screen === 'shop' && <>
       <main>
