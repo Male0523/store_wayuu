@@ -84,6 +84,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
   const [profileDraft, setProfileDraft] = useState<UserProfile | null>(null)
   const [accountSection, setAccountSection] = useState<AccountSection>('orders')
   const [dashboard, setDashboard] = useState<CraftswomanDashboard | null>(null)
+  const [craftswomanProducts, setCraftswomanProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [catalogError, setCatalogError] = useState('')
   const [notice, setNotice] = useState('')
@@ -174,9 +175,13 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
     let cancelled = false
     const loadDashboard = async () => {
       try {
-        const data = await api.craftswomanDashboard()
+        const [data, ownProducts] = await Promise.all([
+          api.craftswomanDashboard(),
+          api.craftswomanProducts(),
+        ])
         if (cancelled) return
         setDashboard(data)
+        setCraftswomanProducts(ownProducts)
         setScreen('craftswoman')
       } catch (error) {
         if (!cancelled) setNotice(errorMessage(error))
@@ -405,6 +410,23 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
     } catch (error) { setNotice(errorMessage(error)) } finally { setBusy(false) }
   }
 
+  async function createCraftswomanProduct(values: {
+    sku: string; name: string; category: number; description?: string; region?: string;
+    color?: string; size?: string; production_time?: string; price: string | number;
+    stock: number; image_url?: string; made_to_order?: boolean;
+  }) {
+    setBusy(true)
+    try {
+      const created = await api.createCraftswomanProduct(values)
+      setCraftswomanProducts((current) => [created, ...current])
+      setNotice('Producto enviado a revisión. El administrador debe aprobar su publicación.')
+    } catch (error) {
+      setNotice(errorMessage(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function acceptOrder(orderId: number) {
     try {
       await api.acceptOrder(orderId)
@@ -514,7 +536,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
 
     {screen === 'orders' && user && <CustomerAccountView user={user} orders={orders} designs={designs} profile={profileDraft} section={accountSection} busy={busy} onSection={setAccountSection} onProfileSubmit={saveProfile} onSignOut={signOut} onShop={() => setScreen('shop')} />}
 
-    {screen === 'craftswoman' && dashboard && <CraftswomanAccountView user={user} dashboard={dashboard} onSignOut={signOut} onAcceptOrder={acceptOrder} onOrderStatus={updateOrder} onDesignStatus={updateDesignStatus} />}
+    {screen === 'craftswoman' && dashboard && <CraftswomanAccountView user={user} dashboard={dashboard} products={craftswomanProducts} categories={categories} busy={busy} onCreateProduct={createCraftswomanProduct} onSignOut={signOut} onAcceptOrder={acceptOrder} onOrderStatus={updateOrder} onDesignStatus={updateDesignStatus} />}
 
     {screen === 'admin' && user && (user.role === 'admin' || user.role === 'superadmin') && <AdminAccountView user={user} isSuperadmin={user.role === 'superadmin'} orders={orders} products={adminProducts} categories={adminCategories} busy={busy} onSignOut={signOut} onSaveProduct={saveAdminProduct} onCreateProduct={createAdminProduct} onCreateCategory={createAdminCategory} onCategoryActive={updateAdminCategory} onOrderStatus={saveAdminOrderStatus} />}
 
@@ -573,9 +595,17 @@ function CustomerAccountView({ user, orders, designs, profile, section, busy, on
   </main>
 }
 
-function CraftswomanAccountView({ user, dashboard, onSignOut, onAcceptOrder, onOrderStatus, onDesignStatus }: {
+function CraftswomanAccountView({ user, dashboard, products, categories, busy, onCreateProduct, onSignOut, onAcceptOrder, onOrderStatus, onDesignStatus }: {
   user: SessionUser | null
   dashboard: CraftswomanDashboard
+  products: Product[]
+  categories: Category[]
+  busy: boolean
+  onCreateProduct: (values: {
+    sku: string; name: string; category: number; description?: string; region?: string;
+    color?: string; size?: string; production_time?: string; price: string | number;
+    stock: number; image_url?: string; made_to_order?: boolean;
+  }) => void
   onSignOut: () => void
   onAcceptOrder: (orderId: number) => void
   onOrderStatus: (orderId: number, status: string) => void
@@ -586,6 +616,41 @@ function CraftswomanAccountView({ user, dashboard, onSignOut, onAcceptOrder, onO
   const accountName = resolveUserDisplayName(user)
   return <main className="inner-page account-page"><div className="account-heading"><div><p className="eyebrow"><span className="eyebrow-line" /> ESPACIO DE TEJEDORA</p><h1>Buen día, <em>{accountName}.</em></h1><p>{dashboard.active ? 'Pedidos y diseños que acompañan el trabajo de tu taller.' : 'Tu cuenta está pendiente de activación por administración.'}</p></div><button className="text-button" onClick={onSignOut}>Cerrar sesión <ArrowUpRight size={15} /></button></div>
     {!dashboard.active ? <div className="empty-account"><LockKeyhole size={30} /><h2>Cuenta pendiente de activación</h2><p>La administración debe activar tu perfil antes de asignarte pedidos.</p></div> : <>
+      <section className="admin-inventory artisan-products">
+        <div className="admin-orders-heading"><div><h2>Mis productos e inventario</h2><span>{products.length} productos registrados</span></div></div>
+        <form className="admin-product-form" onSubmit={(event) => {
+          event.preventDefault()
+          const values = Object.fromEntries(new FormData(event.currentTarget).entries()) as Record<string, string>
+          onCreateProduct({
+            sku: values.sku.trim(), name: values.name.trim(), category: Number(values.category),
+            price: values.price, stock: Number(values.stock), size: values.size || 'M',
+            region: values.region.trim(), color: values.color.trim(),
+            production_time: values.production_time.trim(), description: values.description.trim(),
+            image_url: values.image_url.trim(), made_to_order: values.made_to_order === 'on',
+          })
+          event.currentTarget.reset()
+        }}>
+          <label className="form-label">Referencia<input name="sku" required maxLength={50} placeholder="Ej. WAY-TEJ-001" /></label>
+          <label className="form-label">Nombre de la pieza<input name="name" required maxLength={180} /></label>
+          <label className="form-label">Categoría<select name="category" required defaultValue=""><option value="" disabled>Selecciona una categoría</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+          <label className="form-label">Precio sugerido (COP)<input name="price" type="number" min="0" step="1" required /></label>
+          <label className="form-label">Stock inicial<input name="stock" type="number" min="0" step="1" defaultValue="1" required /></label>
+          <label className="form-label">Talla<input name="size" maxLength={30} defaultValue="M" /></label>
+          <label className="form-label">Región<input name="region" maxLength={100} placeholder="La Guajira" /></label>
+          <label className="form-label">Colores<input name="color" maxLength={150} /></label>
+          <label className="form-label">Tiempo de elaboración<input name="production_time" maxLength={100} /></label>
+          <label className="form-label">Imagen (URL)<input name="image_url" /></label>
+          <label className="form-label">Descripción<textarea name="description" rows={2} /></label>
+          <label className="admin-check"><input name="made_to_order" type="checkbox" /> Elaborar por pedido</label>
+          <button className="button button-dark" disabled={busy || !categories.length}>{busy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} Enviar producto a revisión</button>
+        </form>
+        <div className="admin-product-list">{products.map((product) => <div className="admin-product-row" key={product.id}>
+          <div className="admin-product-name"><span className="product-origin">{product.sku}</span><strong>{product.name}</strong><small>{product.category.name} · Talla {product.size}</small></div>
+          <span>{money(product.price)}</span><span>Stock {product.stock}</span>
+          <span className={product.active ? 'category-state active' : 'category-state'}>{product.active ? 'Publicado' : 'Pendiente de revisión'}</span>
+        </div>)}
+        {!products.length && <p className="muted-copy">Todavía no has registrado productos en tu taller.</p>}</div>
+      </section>
       <div className="artisan-columns"><section><div className="list-heading"><h2>Pedidos por aceptar</h2><span>{dashboard.available_orders.length}</span></div>{dashboard.available_orders.length ? dashboard.available_orders.map((order) => <div className="artisan-order" key={order.id}><OrderCard order={order} />{canChangeOrders && canChangeDesigns && <button className="button button-dark" onClick={() => onAcceptOrder(order.id)}>Aceptar pedido <ArrowRight size={15} /></button>}</div>) : <p className="muted-copy">No hay pedidos disponibles en este momento.</p>}</section><section><div className="list-heading"><h2>Pedidos de mi taller</h2><span>{dashboard.orders.length}</span></div>{dashboard.orders.length ? dashboard.orders.map((order) => <div className="artisan-order" key={order.id}><OrderCard order={order} />{canChangeOrders && canChangeDesigns && order.status === 'accepted' && <button className="button button-outline" onClick={() => onOrderStatus(order.id, 'weaving')}>Iniciar tejido <ArrowRight size={15} /></button>}{canChangeOrders && canChangeDesigns && order.status === 'weaving' && <button className="button button-outline" onClick={() => onOrderStatus(order.id, 'completed')}>Marcar como terminado <Check size={15} /></button>}</div>) : <p className="muted-copy">Tus pedidos aceptados aparecerán aquí.</p>}</section></div>
       <section className="artisan-designs"><div className="list-heading"><div><p className="eyebrow">DISEÑOS PERSONALIZADOS</p><h2>Diseños de mi taller</h2></div><span>{dashboard.designs.length}</span></div>{dashboard.designs.length ? <div className="design-list">{dashboard.designs.map((design) => <article className="artisan-design" key={design.id}><DesignSummary design={design} /><div className="design-actions">{canChangeDesigns && design.status === 'accepted' && <button className="button button-outline" onClick={() => onDesignStatus(design.id, 'weaving')}>Iniciar tejido <ArrowRight size={15} /></button>}{canChangeDesigns && design.status === 'weaving' && <button className="button button-outline" onClick={() => onDesignStatus(design.id, 'completed')}>Marcar terminado <Check size={15} /></button>}</div></article>)}</div> : <p className="muted-copy">Los diseños que te asignen aparecerán aquí.</p>}</section>
     </>}
