@@ -36,6 +36,7 @@ from .models import (
     CustomDesign,
     Category,
     Customer,
+    CustomerCartItem,
     NavigationItem,
     Order,
     OrderItem,
@@ -199,6 +200,23 @@ class StoreAPITests(TestCase):
         self.product.refresh_from_db()
         self.assertEqual(self.product.stock, 2)
         self.assertEqual(self.client.get('/api/v1/cart/').json()['count'], 0)
+
+    def test_customer_cart_persists_after_logout_and_new_login(self):
+        self.client.force_login(self.user)
+        added = self.client.post('/api/v1/cart/items/', {
+            'product_id': self.product.id,
+            'quantity': 2,
+        }, content_type='application/json')
+        self.assertEqual(added.status_code, 201)
+        self.assertEqual(CustomerCartItem.objects.get(customer=self.customer, product=self.product).quantity, 2)
+
+        self.client.post('/api/v1/auth/logout/')
+        self.client.force_login(self.user)
+        restored = self.client.get('/api/v1/cart/')
+
+        self.assertEqual(restored.status_code, 200)
+        self.assertEqual(restored.json()['count'], 2)
+        self.assertEqual(restored.json()['items'][0]['product']['id'], self.product.id)
 
     def test_html_checkout_uses_authenticated_customer_profile(self):
         self.client.force_login(self.user)
@@ -397,6 +415,34 @@ class StoreAPITests(TestCase):
         self.assertEqual(accepted.json()['status'], Order.Status.ACCEPTED)
         self.assertEqual(updated_design.status_code, 200)
         self.assertEqual(updated_design.json()['status'], Order.Status.WEAVING)
+
+    def test_craftswoman_can_submit_own_product_for_admin_review(self):
+        craft_user = self.create_role_user('tejedora-products-api', AccessRole.Code.CRAFTSWOMAN)
+        craftswoman = Craftswoman.objects.create(user=craft_user, name='Tejedora Productos', active=True)
+        self.client.force_login(craft_user)
+
+        created = self.client.post('/api/v1/craftswoman/products/', {
+            'sku': 'CRAFT-OWN-001',
+            'name': 'Manta de mi taller',
+            'category': self.category.id,
+            'description': 'Tejido tradicional.',
+            'region': 'La Guajira',
+            'color': 'Borgoña y crema',
+            'size': 'M',
+            'production_time': '20 días',
+            'price': '280000',
+            'stock': 2,
+        }, content_type='application/json')
+
+        self.assertEqual(created.status_code, 201)
+        self.assertFalse(created.json()['active'])
+        product = Product.objects.get(sku='CRAFT-OWN-001')
+        self.assertEqual(product.craftswoman_id, craftswoman.id)
+        self.assertEqual(
+            self.client.get('/api/v1/craftswoman/products/').json()[0]['id'],
+            product.id,
+        )
+
 
     def test_admin_can_manage_products_and_order_status(self):
         admin = self.create_role_user('admin-api', AccessRole.Code.ADMIN)
