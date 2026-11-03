@@ -136,7 +136,7 @@ export default function App() {
 		case '/tienda': page = <ConnectedShop key="tienda" initialScreen="shop" />; break
 		case '/tejedora': page = protectedPage('craftswoman', <ConnectedShop key="tejedora" initialScreen="craftswoman" />, true); break
 		case '/admin': page = protectedPage('admin', <ConnectedShop key="admin" initialScreen="admin" />, true); break
-		case '/superadmin': page = protectedPage('superadmin', <SuperadministratorPanel />); break
+		case '/superadmin': page = protectedPage('superadmin', <ConnectedShop key="superadmin" initialScreen="admin" />, true); break
 		default: page = <section className="access-panel"><h1>Página no encontrada</h1><a className="primary-link" href="/" onClick={(event) => navigate(event, '/')}>Volver al inicio</a></section>
 	}
 
