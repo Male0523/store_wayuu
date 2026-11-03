@@ -625,7 +625,7 @@ function CraftswomanAccountView({ user, dashboard, products, categories, busy, o
   const published = products.filter((product) => product.active).length
   const pending = products.length - published
   const stock = products.reduce((total, product) => total + product.stock, 0)
-  const initials = accountName.split(/\\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()
+  const initials = accountName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()
   const navItems = [
     { id: 'dashboard' as const, label: 'Panel principal', icon: <LayoutDashboard size={17} /> },
     { id: 'products' as const, label: 'Mis tejidos / productos', icon: <ShoppingBag size={17} /> },
