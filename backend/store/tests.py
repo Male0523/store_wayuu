@@ -505,6 +505,7 @@ class StoreAPITests(TestCase):
             item for item in review_list.json() if item['sku'] == 'FLOW-WAY-001'
         )
         self.assertEqual(reviewed_product['craftswoman'], craftswoman.id)
+        self.assertEqual(reviewed_product['craftswoman_name'], 'Tejedora Flujo')
         self.assertFalse(reviewed_product['active'])
 
         approved = self.client.patch(
