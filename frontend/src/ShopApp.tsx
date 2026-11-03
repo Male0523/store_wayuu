@@ -1,6 +1,6 @@
 import { useCallback, useDeferredValue, useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import {
-  ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, Check, ChevronDown,
+  ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, Check, ChevronDown, Eye,
   Camera, CircleUserRound, Heart, LoaderCircle, LockKeyhole, Minus,
   Plus, Search, ShoppingBag, SlidersHorizontal, Trash2, X,
   LayoutDashboard, Boxes, Layers, LogOut, Sparkles, ShoppingCart,
@@ -727,7 +727,6 @@ function AdminAccountView({ user, isSuperadmin, orders, products, categories, bu
   const publishedProducts = products.filter((product) => product.active)
   const pendingOrders = orders.filter((order) => order.status === 'pending').length
   const activeOrders = orders.filter((order) => ['accepted', 'weaving', 'preparing', 'shipped'].includes(order.status)).length
-  const revenue = orders.filter((order) => order.status !== 'cancelled').reduce((total, order) => total + Number(order.total), 0)
   const canViewOrders = hasEffectivePermission(user, 'orders.view')
   const canChangeOrders = hasEffectivePermission(user, 'orders.change')
   const canViewProducts = hasEffectivePermission(user, 'products.view')
