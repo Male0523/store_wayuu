@@ -7,7 +7,7 @@ const PublicSite = lazy(() => legacyViews['../../sitio_p_blico_tienda_artesanal_
 const CraftswomanPanel = lazy(() => legacyViews['../../wayuu_tejedora_panel.tsx']().then((module) => ({ default: module })))
 const AdministratorPanel = lazy(() => legacyViews['../../way_u_store_administrator_panel.tsx']().then((module) => ({ default: module })))
 const SuperadministratorPanel = lazy(() => legacyViews['../../panel_de_control_superadministrador_way_u.tsx']().then((module) => ({ default: module })))
-const ConnectedShop = lazy(() => import('./ShopApp').then((module) => ({ default: module.ConnectedShop })))
+const CustomerPanel = lazy(() => import('./CustomerPanel'))
 
 type Role = SessionUser['role']
 
@@ -133,7 +133,7 @@ export default function App() {
 	let page: ReactNode
 	switch (path.replace(/\/$/, '') || '/') {
 		case '/': page = <><DemoNotice /><PublicSite /></>; break
-		case '/cliente': page = protectedPage('customer', <ConnectedShop initialScreen="shop" />, true); break
+		case '/cliente': page = protectedPage('customer', <CustomerPanel />, true); break
 		case '/tienda': page = <ConnectedShop key="tienda" initialScreen="shop" />; break
 		case '/tejedora': page = protectedPage('craftswoman', <CraftswomanPanel />); break
 		case '/admin': page = protectedPage('admin', <AdministratorPanel />); break
