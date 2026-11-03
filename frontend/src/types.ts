@@ -216,3 +216,27 @@ export interface AuditEvent {
   details: Record<string, unknown>
   created_at: string
 }
+export interface RBACNavigationItem {
+  id: number
+  label: string
+  route_name: string
+  anchor: string
+  description: string
+  role_codes: SessionUser['role'][]
+  permission_resource: string | null
+  permission_action: RBACAction | null
+  order: number
+  active: boolean
+}
+
+export interface RBACNavigationInput {
+  label: string
+  route_name: string
+  anchor?: string
+  description?: string
+  role_codes: SessionUser['role'][]
+  permission_resource?: string | null
+  permission_action?: RBACAction | null
+  order?: number
+  active?: boolean
+}
