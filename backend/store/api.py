@@ -448,7 +448,7 @@ class NavigationItemWriteSerializer(serializers.Serializer):
             raise serializers.ValidationError('Selecciona tanto el recurso como la acción requerida, o deja ambos vacíos.')
         if resource and permission_for(resource, action) is None:
             raise serializers.ValidationError('El permiso seleccionado no existe.')
-        if len(attrs['role_codes']) != len(set(attrs['role_codes'])):
+        if 'role_codes' in attrs and len(attrs['role_codes']) != len(set(attrs['role_codes'])):
             raise serializers.ValidationError({'role_codes': 'No repitas roles.'})
         return attrs
 
