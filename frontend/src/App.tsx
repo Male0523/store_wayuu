@@ -4,7 +4,6 @@ import type { SessionUser } from './types'
 
 const legacyViews = import.meta.glob<ComponentType>('../../*.tsx', { import: 'default' })
 const PublicSite = lazy(() => legacyViews['../../sitio_p_blico_tienda_artesanal_way_u.tsx']().then((module) => ({ default: module })))
-const CraftswomanPanel = lazy(() => legacyViews['../../wayuu_tejedora_panel.tsx']().then((module) => ({ default: module })))
 const AdministratorPanel = lazy(() => legacyViews['../../way_u_store_administrator_panel.tsx']().then((module) => ({ default: module })))
 const SuperadministratorPanel = lazy(() => legacyViews['../../panel_de_control_superadministrador_way_u.tsx']().then((module) => ({ default: module })))
 const CustomerPanel = lazy(() => import('./CustomerPanel'))
