@@ -476,6 +476,46 @@ class StoreAPITests(TestCase):
         self.assertEqual(order_status.status_code, 200)
         self.assertEqual(order_status.json()['status'], Order.Status.PREPARING)
 
+    def test_admin_can_review_and_publish_product_submitted_by_craftswoman(self):
+        craft_user = self.create_role_user('weaver-review-flow', AccessRole.Code.CRAFTSWOMAN)
+        craftswoman = Craftswoman.objects.create(
+            user=craft_user, name='Tejedora Flujo', active=True,
+        )
+        self.client.force_login(craft_user)
+        submitted = self.client.post('/api/v1/craftswoman/products/', {
+            'sku': 'FLOW-WAY-001',
+            'name': 'Manta de prueba de flujo',
+            'category': self.category.id,
+            'description': 'Manta tejida para comprobar la revisión administrativa.',
+            'region': 'La Guajira',
+            'color': 'Borgoña y crema',
+            'size': 'M',
+            'production_time': '15 días',
+            'image_url': 'https://example.com/flow-wayuu.jpg',
+            'price': '280000',
+            'stock': 1,
+        }, content_type='application/json')
+        self.assertEqual(submitted.status_code, 201)
+        self.assertFalse(submitted.json()['active'])
+
+        admin = self.create_role_user('admin-review-flow', AccessRole.Code.ADMIN)
+        self.client.force_login(admin)
+        review_list = self.client.get('/api/v1/admin/products/')
+        reviewed_product = next(
+            item for item in review_list.json() if item['sku'] == 'FLOW-WAY-001'
+        )
+        self.assertEqual(reviewed_product['craftswoman'], craftswoman.id)
+        self.assertFalse(reviewed_product['active'])
+
+        approved = self.client.patch(
+            f"/api/v1/admin/products/{submitted.json()['id']}/",
+            {'active': True},
+            content_type='application/json',
+        )
+        self.assertEqual(approved.status_code, 200)
+        self.assertTrue(approved.json()['active'])
+        self.assertEqual(approved.json()['craftswoman'], craftswoman.id)
+
     def test_admin_product_routes_reject_customers(self):
         self.client.force_login(self.user)
 
