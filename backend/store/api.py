@@ -81,7 +81,7 @@ class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = (
-            'id', 'sku', 'name', 'category', 'craftswoman', 'craftswoman_name', 'description', 'region',
+            'id', 'sku', 'name', 'category', 'craftswoman', 'description', 'region',
             'color', 'size', 'production_time', 'price', 'stock', 'image_url',
             'made_to_order', 'active', 'created_at', 'updated_at',
         )
@@ -97,7 +97,7 @@ class AdminProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = (
-            'id', 'sku', 'name', 'category', 'craftswoman', 'description', 'region',
+            'id', 'sku', 'name', 'category', 'craftswoman', 'craftswoman_name', 'description', 'region',
             'color', 'size', 'production_time', 'price', 'stock', 'image_url',
             'made_to_order', 'active', 'created_at', 'updated_at',
         )
