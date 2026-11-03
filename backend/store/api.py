@@ -1389,9 +1389,11 @@ class CustomDesignListView(APIView):
                 affected_user=request.user,
                 instance=design,
             )
-        cart = _cart_for(request)
-        cart[str(product.id)] = 1
-        request.session.modified = True
+        CustomerCartItem.objects.update_or_create(
+            customer=customer,
+            product=product,
+            defaults={'quantity': 1},
+        )
         return Response(
             {**CustomDesignSerializer(design).data, 'product_id': product.id},
             status=status.HTTP_201_CREATED,
