@@ -2027,6 +2027,43 @@ class StoreAPITests(TestCase):
         self.assertFalse(inline.has_add_permission(request, order))
 
 
+    def test_superadmin_can_create_update_and_delete_navigation_items(self):
+        superadmin = self.create_role_user('rbac-navigation-superadmin', AccessRole.Code.SUPERADMIN)
+        self.client.force_login(superadmin)
+        create = self.client.post('/api/v1/admin/rbac/navigation/', {
+            'label': 'Mis pedidos',
+            'route_name': '/cliente/pedidos',
+            'description': 'Consulta tus pedidos.',
+            'role_codes': ['customer'],
+            'permission_resource': 'orders',
+            'permission_action': 'view',
+            'order': 4,
+            'active': True,
+        }, content_type='application/json')
+        self.assertEqual(create.status_code, 201)
+        item_id = create.json()['id']
+        self.assertEqual(create.json()['role_codes'], ['customer'])
+        self.assertEqual(create.json()['permission_resource'], 'orders')
+
+        update = self.client.patch(
+            f'/api/v1/admin/rbac/navigation/{item_id}/',
+            {'label': 'Historial de pedidos', 'active': False},
+            content_type='application/json',
+        )
+        self.assertEqual(update.status_code, 200)
+        self.assertEqual(update.json()['label'], 'Historial de pedidos')
+        self.assertFalse(update.json()['active'])
+
+        delete = self.client.delete(f'/api/v1/admin/rbac/navigation/{item_id}/')
+        self.assertEqual(delete.status_code, 204)
+        self.assertFalse(NavigationItem.objects.filter(pk=item_id).exists())
+
+    def test_non_superadmin_cannot_manage_navigation(self):
+        admin_user = self.create_role_user('rbac-navigation-admin', AccessRole.Code.ADMIN)
+        self.client.force_login(admin_user)
+        response = self.client.get('/api/v1/admin/rbac/navigation/')
+        self.assertEqual(response.status_code, 403)
+
 class RBACProtectionTransactionTests(TransactionTestCase):
     def create_superadmin(self, username):
         user = User.objects.create_user(username=username, password='ClaveSegura2026!')
