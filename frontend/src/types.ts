@@ -33,6 +33,7 @@ export interface Product {
   made_to_order: boolean
   created_at: string
   updated_at: string
+  active?: boolean
 }
 
 export interface AdminProduct extends Omit<Product, 'category' | 'craftswoman'> {
