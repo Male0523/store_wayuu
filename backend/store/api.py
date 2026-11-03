@@ -81,7 +81,7 @@ class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = (
-            'id', 'sku', 'name', 'category', 'craftswoman', 'description', 'region',
+            'id', 'sku', 'name', 'category', 'craftswoman', 'craftswoman_name', 'description', 'region',
             'color', 'size', 'production_time', 'price', 'stock', 'image_url',
             'made_to_order', 'active', 'created_at', 'updated_at',
         )
@@ -89,6 +89,7 @@ class ProductSerializer(serializers.ModelSerializer):
 
 class AdminProductSerializer(serializers.ModelSerializer):
     category = serializers.PrimaryKeyRelatedField(queryset=Category.objects.all())
+    craftswoman_name = serializers.CharField(source='craftswoman.name', read_only=True, allow_null=True, default=None)
     craftswoman = serializers.PrimaryKeyRelatedField(
         queryset=Craftswoman.objects.all(), required=False, allow_null=True,
     )
