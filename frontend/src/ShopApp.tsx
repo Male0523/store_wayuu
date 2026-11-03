@@ -169,6 +169,25 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
   }, [user])
 
   useEffect(() => {
+    if (initialScreen !== 'craftswoman' || user?.role !== 'craftswoman') return
+
+    let cancelled = false
+    const loadDashboard = async () => {
+      try {
+        const data = await api.craftswomanDashboard()
+        if (cancelled) return
+        setDashboard(data)
+        setScreen('craftswoman')
+      } catch (error) {
+        if (!cancelled) setNotice(errorMessage(error))
+      }
+    }
+
+    void loadDashboard()
+    return () => { cancelled = true }
+  }, [initialScreen, user])
+
+  useEffect(() => {
     if (initialScreen !== 'admin' || !user || (user.role !== 'admin' && user.role !== 'superadmin')) return
 
     let cancelled = false
