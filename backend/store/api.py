@@ -892,13 +892,15 @@ class RBACCatalogView(APIView):
     permission_classes = (AdminOrSuperadmin,)
 
     def get(self, request):
-        if is_explicitly_denied(request.user, 'permissions', 'view'):
+        if not has_rbac_permission(request.user, 'permissions', 'view'):
             record_audit(
                 request.user,
                 'denied_view',
                 'permissions',
                 result=AuditEvent.Result.DENIED,
             )
+            raise PermissionDenied('No tienes permiso para consultar el catálogo RBAC.')
+        if is_explicitly_denied(request.user, 'permissions', 'view'):
             raise PermissionDenied('No tienes permiso para consultar el catálogo RBAC.')
         entries = permission_catalog()
         role = role_for_user(request.user)
