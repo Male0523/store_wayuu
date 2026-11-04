@@ -24,7 +24,8 @@ def seed_supported_navigation_routes(apps, schema_editor):
 
     for label, route_name, description, order, role_codes in definitions:
         item = NavigationItem.objects.filter(route_name=route_name).order_by('pk').first()
-        if item is None:
+        created = item is None
+        if created:
             item = NavigationItem.objects.create(
                 label=label,
                 route_name=route_name,
@@ -37,7 +38,8 @@ def seed_supported_navigation_routes(apps, schema_editor):
             if not item.description:
                 item.description = description
                 item.save(update_fields=['description'])
-        item.roles.set(AccessRole.objects.filter(code__in=role_codes))
+        if created or not item.roles.exists():
+            item.roles.set(AccessRole.objects.filter(code__in=role_codes))
 
 
 class Migration(migrations.Migration):
