@@ -991,7 +991,10 @@ class StoreAPITests(TestCase):
         }
         initial_count = User.objects.count()
         with TemporaryDirectory() as temporary_directory:
-            with override_settings(BASE_DIR=Path(temporary_directory)):
+            with override_settings(
+                BASE_DIR=Path(temporary_directory),
+                DJANGO_ENV='development',
+            ):
                 dry_run_output = StringIO()
                 call_command('seed_rbac_test_users', stdout=dry_run_output)
                 self.assertIn('Dry-run', dry_run_output.getvalue())
@@ -2186,6 +2189,9 @@ class StoreAPITests(TestCase):
     def test_role_navigation_endpoint_filters_by_role_and_effective_permissions(self):
         craftswoman = self.create_role_user('role-menu-craftswoman', AccessRole.Code.CRAFTSWOMAN)
         role = AccessRole.objects.get(code=AccessRole.Code.CRAFTSWOMAN)
+        # Aísla la prueba de las opciones iniciales creadas por las migraciones.
+        for existing_item in NavigationItem.objects.filter(roles=role):
+            existing_item.roles.remove(role)
         RolePermission.objects.get_or_create(role=role, permission=permission_for('products', 'view'))
         visible_item = NavigationItem.objects.create(
             label='Mis tejidos',
