@@ -646,6 +646,20 @@
   background: #fbf1ef; color: #68252d; font-size: 11px; font-weight: 700; cursor: pointer;
 }
 .admin-text-link { margin-top: 14px; border: 0; padding-left: 0; background: transparent; }
+.admin-review-mini button:hover:not(:disabled) {
+  border-color: #51252a;
+  background: #51252a;
+  color: #fffaf0;
+}
+.admin-text-link:hover {
+  color: #51252a;
+  background: #f5e7e3;
+}
+.admin-review-mini button:focus-visible,
+.admin-text-link:focus-visible {
+  outline: 3px solid #b77f86;
+  outline-offset: 3px;
+}
 .admin-section-subheading {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   margin: 28px 0 12px; padding-bottom: 10px; border-bottom: 1px solid #eee3dd;
@@ -698,6 +712,14 @@
 .rbac-tabs { display:flex; gap:6px; overflow-x:auto; padding:16px 0 0; border-bottom:1px solid var(--line); }
 .rbac-tabs button { flex:0 0 auto; padding:10px 14px; border:0; border-bottom:2px solid transparent; background:transparent; color:var(--muted); font:11px var(--sans); cursor:pointer; }
 .rbac-tabs button.active { border-bottom-color:var(--clay); color:var(--ink); font-weight:700; }
+.rbac-tabs button:hover:not(.active) {
+  background: #f5e7e3;
+  color: #51252a;
+}
+.rbac-tabs button:focus-visible {
+  outline: 3px solid #b77f86;
+  outline-offset: 2px;
+}
 .rbac-main-block { padding-top:20px; }
 .rbac-block-heading { align-items:center; }
 .rbac-block-heading p { margin:5px 0 0; color:var(--muted); font-size:11px; }
