@@ -1061,15 +1061,25 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   }
 
   async function toggleNavigationItem(item: RBACNavigationItem, active: boolean) {
-    if (!canChangeNavigation) return
-    if (!active && !window.confirm(`Al ocultar “${item.label}”, dejará de aparecer para todos los roles asignados. No se borrarán sus permisos. ¿Deseas continuar?`)) return
+    if (!canChangeNavigation) {
+      setError('Tu cuenta no tiene permiso para modificar la visibilidad del menú.')
+      return
+    }
     setSaving(true)
     setError('')
+    setFeedback('')
     try {
       const updated = await api.updateNavigationItem(item.id, { active })
-      setNavigationItems((current) => current.map((entry) => entry.id === item.id ? updated : entry))
-      setFeedback('Visibilidad del menú actualizada.')
-    } catch (saveError) { setError(errorMessage(saveError)) } finally { setSaving(false) }
+      setNavigationItems((current) => current.map((entry) => entry.id === item.id ? updated : entry).sort((a, b) => a.order - b.order || a.label.localeCompare(b.label)))
+      setFeedback(active ? `“${item.label}” volvió a estar visible.` : `“${item.label}” quedó oculta para los roles asignados.`)
+    } catch (saveError) {
+      setError(errorMessage(saveError))
+      try {
+        setNavigationItems((await api.navigationItems()).sort((a, b) => a.order - b.order || a.label.localeCompare(b.label)))
+      } catch {
+        setError(`${errorMessage(saveError)} No pudimos volver a consultar el estado guardado.`)
+      }
+    } finally { setSaving(false) }
   }
 
   async function removeNavigationItem(item: RBACNavigationItem) {
@@ -1198,7 +1208,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
         <div className="rbac-guide">
           <strong>Antes de configurar, ten en cuenta</strong>
           <ol><li><b>Pantalla permitida:</b> determina qué función real abrirá la opción. No la cambies por ensayo y error.</li><li><b>Roles:</b> elige quién verá el acceso. La persona también necesita los permisos funcionales de esa pantalla.</li><li><b>Permiso adicional:</b> es un filtro extra; recurso y acción deben elegirse juntos. Si no conoces cuál necesitas, deja ambos sin requisito adicional.</li><li><b>Visible:</b> al desactivarlo, la opción deja de aparecer para todos los roles asignados, aunque sus permisos sigan activos.</li></ol>
-          <p><b>Importante:</b> ocultar una opción no concede ni revoca permisos de seguridad. El sistema valida los permisos en el servidor.</p>
+          <p><b>Importante:</b> ocultar una opción no concede ni revoca permisos de seguridad. El sistema valida los permisos en el servidor. Los accesos del cliente a pedidos, diseños y perfil se administran aquí; catálogo, favoritos y carrito son secciones fijas de la tienda.</p>
         </div>
         {canAddNavigation && <form className="rbac-user-form rbac-navigation-form" onSubmit={createNavigationItem}>
           <div className="rbac-form-section-title"><span>1</span><div><strong>Identificación de la opción</strong><small>Los campos con * son obligatorios.</small></div></div>
@@ -1208,7 +1218,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
           <div className="rbac-form-section-title"><span>2</span><div><strong>Presentación y orden</strong><small>Estos datos organizan el menú; no habilitan permisos.</small></div></div>
           <label className="form-label">Sección (opcional)<input name="anchor" maxLength={80} placeholder="Ej. pedidos" /><small>Identificador auxiliar; puedes dejarlo vacío si no sabes qué colocar.</small></label>
           <label className="form-label">Descripción (opcional)<input name="description" maxLength={220} placeholder="Ej. Consulta el avance de tus compras" /><small>Texto informativo para identificar la finalidad de la opción.</small></label>
-          <label className="form-label">Orden<input name="order" type="number" min="0" max="32767" defaultValue="10" /><small>Un número menor aparece antes. No cambia el acceso.</small></label>
+          <label className="form-label">Orden de aparición<input name="order" type="number" min="0" max="32767" defaultValue="10" /><small>Define la posición de esta opción dentro del menú de cada rol: 10 aparece antes que 20 y 30. Usa saltos de 10 para poder insertar nuevas opciones después. Si dos opciones tienen el mismo número, se ordenan alfabéticamente. No concede ni quita permisos.</small></label>
           <div className="rbac-form-section-title"><span>3</span><div><strong>Filtro adicional de permisos</strong><small>Opcional: úsalo solo si necesitas restringir más esta opción.</small></div></div>
           <label className="form-label">Permiso requerido · recurso<select name="permission_resource" value={newNavigationResource} onChange={(event) => setNewNavigationResource(event.target.value)}><option value="">Sin requisito adicional</option>{Object.entries(rbacResourceLabels).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>
           <label className="form-label">Permiso requerido · acción<select name="permission_action" value={newNavigationAction} onChange={(event) => setNewNavigationAction(event.target.value)}><option value="">Sin acción</option>{Object.entries(rbacActionLabels).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>
@@ -1218,7 +1228,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
           {!newNavigationRoles.length && <p className="rbac-warning">Selecciona al menos un rol para que esta opción pueda mostrarse.</p>}
           <button className="button button-dark" disabled={saving || !newNavigationRoles.length || (Boolean(newNavigationResource) !== Boolean(newNavigationAction))}>{saving ? 'Guardando…' : 'Añadir opción al menú'}</button>
         </form>}
-        <div className="rbac-nav-list">{navigationItems.map((item) => <article className="rbac-nav-row" key={item.id}><div><strong>{item.label}</strong><small>{item.route_name} · Orden {item.order}</small><small>Visible para: {item.role_codes.map((role) => rbacRoleLabels[role]).join(', ')}</small><small>{item.permission_resource ? 'Filtro adicional: ' + (rbacResourceLabels[item.permission_resource] ?? item.permission_resource) + ' · ' + rbacActionLabels[item.permission_action ?? 'view'] : 'Sin permiso adicional configurado'}</small></div><div className="rbac-nav-actions"><label><input type="checkbox" checked={item.active} disabled={saving || !canChangeNavigation} onChange={(event) => void toggleNavigationItem(item, event.target.checked)} /> Visible</label>{canDeleteNavigation && <button type="button" className="button button-outline" disabled={saving} onClick={() => void removeNavigationItem(item)}>Eliminar</button>}</div></article>)}</div>
+        <div className="rbac-nav-list">{[...navigationItems].sort((a, b) => a.order - b.order || a.label.localeCompare(b.label)).map((item) => <article className="rbac-nav-row" key={item.id}><div><strong>{item.label}</strong><small>{item.route_name} · Posición {item.order}</small><small>{item.order <= 10 ? 'Aparece al inicio del menú' : item.order <= 20 ? 'Aparece después de las opciones con posición 10' : 'Aparece después de las opciones con posiciones menores'}</small><small>Visible para: {item.role_codes.map((role) => rbacRoleLabels[role]).join(', ')}</small><small>{item.permission_resource ? 'Filtro adicional: ' + (rbacResourceLabels[item.permission_resource] ?? item.permission_resource) + ' · ' + rbacActionLabels[item.permission_action ?? 'view'] : 'Sin permiso adicional configurado'}</small></div><div className="rbac-nav-actions"><label><input type="checkbox" checked={item.active} disabled={saving || !canChangeNavigation} onChange={(event) => void toggleNavigationItem(item, event.target.checked)} /> Visible</label>{canDeleteNavigation && <button type="button" className="button button-outline" disabled={saving} onClick={() => void removeNavigationItem(item)}>Eliminar</button>}</div></article>)}</div>
         {navigationItems.length === 0 && <p className="muted-copy">Todavía no hay opciones de menú configuradas.</p>}
       </section>}
       {activeSection === "audit" && canViewAudit && <section className="rbac-block"><div className="rbac-block-heading"><h3>Actividad sensible</h3><span>{audit.length} eventos recientes</span></div>
