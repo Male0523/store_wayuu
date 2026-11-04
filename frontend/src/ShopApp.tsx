@@ -359,11 +359,13 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
     setProfileDraft(null)
     setBusy(true)
     try {
+      const configuredNavigation = await api.roleNavigation()
+      setRoleNavigation(configuredNavigation)
       if (user.role === 'admin' || user.role === 'superadmin') {
         await loadAdminData()
         setScreen('admin')
       } else if (user.role === 'craftswoman') {
-        const visibleRoutes = roleNavigation.map((item) => item.route_name)
+        const visibleRoutes = configuredNavigation.map((item) => item.route_name)
         const [craftswomanDashboard, ownProducts] = await Promise.all([
           visibleRoutes.includes('craftswoman.dashboard') || visibleRoutes.includes('craftswoman.orders') ? api.craftswomanDashboard() : Promise.resolve(null),
           visibleRoutes.some((route) => ['craftswoman.dashboard', 'craftswoman.products', 'craftswoman.inventory'].includes(route)) ? api.craftswomanProducts() : Promise.resolve([]),
@@ -382,7 +384,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
         setOrders(orderPage.results)
         setDesigns(customerDesigns)
         setProfileDraft(customerProfile)
-        const firstSection = roleNavigation.find((item) => item.route_name.startsWith('customer.'))?.route_name.split('.')[1] as AccountSection | undefined
+        const firstSection = configuredNavigation.find((item) => item.route_name.startsWith('customer.'))?.route_name.split('.')[1] as AccountSection | undefined
         setAccountSection(firstSection ?? 'orders')
         setScreen('orders')
       }
@@ -618,7 +620,7 @@ function CustomerAccountView({ user, navigationItems, orders, designs, profile, 
 function CraftswomanAccountView({ user, navigationItems, dashboard, products, categories, busy, onCreateProduct, onSignOut, onAcceptOrder, onOrderStatus, onDesignStatus }: {
   user: SessionUser | null
   navigationItems: RBACNavigationItem[]
-  dashboard: CraftswomanDashboard
+  dashboard: CraftswomanDashboard | null
   products: Product[]
   categories: Category[]
   busy: boolean
@@ -700,7 +702,7 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, products, ca
           {canOpenSection('inventory') && activeSection === 'inventory' && <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>CONTROL DE EXISTENCIAS</small><h1>Mi inventario</h1><p>Consulta las piezas y las unidades registradas en tu taller.</p></div><span className="craftswoman-total-stock">{stock} unidades</span></div><div className="craftswoman-product-list">{products.map((product) => <article key={product.id}><div><strong>{product.name}</strong><small>{product.sku} · {product.category.name}</small></div><span>{money(product.price)}</span><span>Disponibles: {product.stock}</span><em className={product.stock > 0 ? 'published' : ''}>{product.stock > 0 ? 'Con existencias' : 'Agotado'}</em></article>)}{!products.length && <p className="muted-copy">Tu inventario aparecerá aquí cuando registres productos.</p>}</div></section>}
           {canOpenSection('orders') && activeSection === 'orders' && <div className="craftswoman-orders"><section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>OPORTUNIDADES DE TRABAJO</small><h1>Pedidos por aceptar</h1></div><span>{dashboard.available_orders.length}</span></div>{dashboard.available_orders.length ? dashboard.available_orders.map((order) => <div className="artisan-order" key={order.id}><OrderCard order={order} />{canChangeOrders && canChangeDesigns && <button className="button button-dark" onClick={() => onAcceptOrder(order.id)}>Aceptar pedido <ArrowRight size={15} /></button>}</div>) : <p className="muted-copy">No hay pedidos disponibles.</p>}</section>
             <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>PRODUCCIÓN</small><h1>Pedidos de mi taller</h1></div><span>{dashboard.orders.length}</span></div>{dashboard.orders.length ? dashboard.orders.map((order) => <div className="artisan-order" key={order.id}><OrderCard order={order} />{canChangeOrders && canChangeDesigns && order.status === 'accepted' && <button className="button button-outline" onClick={() => onOrderStatus(order.id, 'weaving')}>Iniciar tejido <ArrowRight size={15} /></button>}{canChangeOrders && canChangeDesigns && order.status === 'weaving' && <button className="button button-outline" onClick={() => onOrderStatus(order.id, 'completed')}>Marcar como terminado <Check size={15} /></button>}</div>) : <p className="muted-copy">Tus pedidos aceptados aparecerán aquí.</p>}</section></div>}
-          {activeSection !== 'orders' && activeSection !== 'dashboard' && dashboard.designs.length > 0 && <section className="craftswoman-panel craftswoman-designs"><div className="craftswoman-panel-heading"><div><small>DISEÑOS PERSONALIZADOS</small><h2>Diseños de mi taller</h2></div><span>{dashboard.designs.length}</span></div><div className="design-list">{dashboard.designs.map((design) => <article className="artisan-design" key={design.id}><DesignSummary design={design} /><div className="design-actions">{canChangeDesigns && design.status === 'accepted' && <button className="button button-outline" onClick={() => onDesignStatus(design.id, 'weaving')}>Iniciar tejido <ArrowRight size={15} /></button>}{canChangeDesigns && design.status === 'weaving' && <button className="button button-outline" onClick={() => onDesignStatus(design.id, 'completed')}>Marcar terminado <Check size={15} /></button>}</div></article>)}</div></section>}
+          {activeSection !== 'orders' && activeSection !== 'dashboard' && (dashboard?.designs.length ?? 0) > 0 && <section className="craftswoman-panel craftswoman-designs"><div className="craftswoman-panel-heading"><div><small>DISEÑOS PERSONALIZADOS</small><h2>Diseños de mi taller</h2></div><span>{dashboard?.designs.length ?? 0}</span></div><div className="design-list">{(dashboard?.designs ?? []).map((design) => <article className="artisan-design" key={design.id}><DesignSummary design={design} /><div className="design-actions">{canChangeDesigns && design.status === 'accepted' && <button className="button button-outline" onClick={() => onDesignStatus(design.id, 'weaving')}>Iniciar tejido <ArrowRight size={15} /></button>}{canChangeDesigns && design.status === 'weaving' && <button className="button button-outline" onClick={() => onDesignStatus(design.id, 'completed')}>Marcar terminado <Check size={15} /></button>}</div></article>)}</div></section>}
         </>}
       </main>
     </section>
@@ -824,6 +826,20 @@ const rbacResourceLabels: Record<string, string> = {
   role_assignments: 'Asignación de roles', permissions: 'Permisos',
   delegations: 'Delegaciones', navigation: 'Menú y navegación', audit: 'Registro de actividad',
 }
+const navigationRouteOptions = [
+  { value: 'customer.orders', label: 'Cliente · Mis pedidos', roles: ['customer'] },
+  { value: 'customer.designs', label: 'Cliente · Mis diseños', roles: ['customer'] },
+  { value: 'customer.profile', label: 'Cliente · Mis datos', roles: ['customer'] },
+  { value: 'craftswoman.dashboard', label: 'Tejedora · Panel principal', roles: ['craftswoman'] },
+  { value: 'craftswoman.products', label: 'Tejedora · Mis tejidos', roles: ['craftswoman'] },
+  { value: 'craftswoman.inventory', label: 'Tejedora · Mi inventario', roles: ['craftswoman'] },
+  { value: 'craftswoman.orders', label: 'Tejedora · Mis pedidos', roles: ['craftswoman'] },
+  { value: 'admin.dashboard', label: 'Administrador · Panel principal', roles: ['admin', 'superadmin'] },
+  { value: 'admin.products', label: 'Administrador · Productos', roles: ['admin', 'superadmin'] },
+  { value: 'admin.orders', label: 'Administrador · Pedidos', roles: ['admin', 'superadmin'] },
+  { value: 'admin.categories', label: 'Administrador · Categorías', roles: ['admin', 'superadmin'] },
+  { value: 'admin.access', label: 'Superadministrador · Roles y permisos', roles: ['superadmin'] },
+] as const
 type RBACSection = 'roles' | 'users' | 'delegations' | 'audit' | 'navigation'
 
 function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
@@ -843,6 +859,8 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   const [activeSection, setActiveSection] = useState<RBACSection>('roles')
   const [permissionSearch, setPermissionSearch] = useState('')
   const [createUserRole, setCreateUserRole] = useState<SessionUser['role']>('customer')
+  const [newNavigationRoute, setNewNavigationRoute] = useState('customer.orders')
+  const [newNavigationRoles, setNewNavigationRoles] = useState<SessionUser['role'][]>(['customer'])
   const canViewCatalog = hasEffectivePermission(currentUser, 'permissions.view')
   const canChangePermissions = hasEffectivePermission(currentUser, 'permissions.change')
   const canViewUsers = hasEffectivePermission(currentUser, 'users.view')
@@ -1146,13 +1164,13 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
         <div className="rbac-block-heading"><div><h3>Menú y vistas por rol</h3><p>Registra opciones de navegación, define a qué roles se muestran y cuál permiso deben tener.</p></div><span>{navigationItems.length} opciones</span></div>
         {canAddNavigation && <form className="rbac-user-form" onSubmit={createNavigationItem}>
           <label className="form-label">Nombre visible<input name="label" required maxLength={80} placeholder="Ej. Mis pedidos" /></label>
-          <label className="form-label">Ruta de la vista<input name="route_name" required maxLength={120} placeholder="Ej. /cliente/pedidos" /></label>
+          <label className="form-label">Pantalla permitida<select name="route_name" required value={newNavigationRoute} onChange={(event) => { const next = event.target.value; setNewNavigationRoute(next); const option = navigationRouteOptions.find((item) => item.value === next); setNewNavigationRoles(option ? [...option.roles] as SessionUser['role'][] : []) }}>{navigationRouteOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
           <label className="form-label">Sección (opcional)<input name="anchor" maxLength={80} placeholder="Ej. pedidos" /></label>
           <label className="form-label">Descripción<input name="description" maxLength={220} placeholder="Describe qué encontrará el usuario" /></label>
           <label className="form-label">Orden<input name="order" type="number" min="0" max="32767" defaultValue="10" /></label>
           <label className="form-label">Permiso requerido · recurso<select name="permission_resource" defaultValue=""><option value="">Sin requisito adicional</option>{Object.entries(rbacResourceLabels).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>
           <label className="form-label">Permiso requerido · acción<select name="permission_action" defaultValue=""><option value="">Sin acción</option>{Object.entries(rbacActionLabels).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>
-          <fieldset className="rbac-role-picker"><legend>Mostrar a estos roles</legend>{(['superadmin', 'admin', 'craftswoman', 'customer'] as const).map((role) => <label key={role}><input type="checkbox" name="role_codes" value={role} defaultChecked={role === 'customer'} /> {rbacRoleLabels[role]}</label>)}</fieldset>
+          <fieldset className="rbac-role-picker"><legend>Mostrar a estos roles</legend>{(['superadmin', 'admin', 'craftswoman', 'customer'] as const).filter((role) => navigationRouteOptions.find((option) => option.value === newNavigationRoute)?.roles.includes(role)).map((role) => <label key={role}><input type="checkbox" name="role_codes" value={role} checked={newNavigationRoles.includes(role)} onChange={(event) => setNewNavigationRoles((current) => event.target.checked ? [...current, role] : current.filter((item) => item !== role))} /> {rbacRoleLabels[role]}</label>)}</fieldset>
           <button className="button button-dark" disabled={saving}>{saving ? 'Guardando…' : 'Añadir opción al menú'}</button>
         </form>}
         <div className="rbac-nav-list">{navigationItems.map((item) => <article className="rbac-nav-row" key={item.id}><div><strong>{item.label}</strong><small>{item.route_name} · Orden {item.order}</small><small>{item.role_codes.map((role) => rbacRoleLabels[role]).join(', ')}</small><small>{item.permission_resource ? (rbacResourceLabels[item.permission_resource] ?? item.permission_resource) + ' · ' + rbacActionLabels[item.permission_action ?? 'view'] : 'Sin permiso adicional configurado'}</small></div><div className="rbac-nav-actions"><label><input type="checkbox" checked={item.active} disabled={saving || !canChangeNavigation} onChange={(event) => void toggleNavigationItem(item, event.target.checked)} /> Visible</label>{canDeleteNavigation && <button type="button" className="button button-outline" disabled={saving} onClick={() => void removeNavigationItem(item)}>Eliminar</button>}</div></article>)}</div>
