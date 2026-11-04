@@ -299,14 +299,16 @@ def accept_order(request, order_id):
     if not has_role(request.user, AccessRole.Code.CRAFTSWOMAN):
         raise PermissionDenied('Esta operación solo está disponible para tejedoras.')
     _require_permission(request, 'orders', 'change')
-    _require_permission(request, 'designs', 'change')
     craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
     with transaction.atomic():
         order = get_object_or_404(Order.objects.select_for_update(), id=order_id, craftswoman__isnull=True, status=Order.Status.PENDING)
+        items = list(order.items.select_related('product__custom_design'))
+        if any(item.product.custom_design_id for item in items):
+            _require_permission(request, 'designs', 'change')
         order.craftswoman = craftswoman
         order.status = Order.Status.ACCEPTED
         order.save(update_fields=['craftswoman', 'status', 'updated_at'])
-        for item in order.items.select_related('product__custom_design'):
+        for item in items:
             if item.product.custom_design_id:
                 design = item.product.custom_design
                 design.craftswoman = craftswoman
