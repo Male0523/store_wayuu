@@ -1895,7 +1895,7 @@ class StoreAPITests(TestCase):
         html_dashboard = self.client.get('/panel-tejedora/')
         self.assertEqual(dashboard.status_code, 200)
         self.assertEqual(dashboard.json()['designs'], [])
-        self.assertEqual(html_dashboard.status_code, 200)
+        self.assertEqual(html_dashboard.status_code, 403)
 
         UserPermissionGrant.objects.filter(user=craft_user).delete()
         UserPermissionGrant.objects.create(
