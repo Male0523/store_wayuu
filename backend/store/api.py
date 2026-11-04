@@ -100,6 +100,11 @@ class AdminProductSerializer(serializers.ModelSerializer):
         queryset=Craftswoman.objects.all(), required=False, allow_null=True,
     )
 
+    def validate_active(self, value):
+        if value and self.instance and self.instance.custom_design_id:
+            raise serializers.ValidationError('Los diseños personalizados son privados y no se pueden publicar en el catálogo.')
+        return value
+
     class Meta:
         model = Product
         fields = (
@@ -632,7 +637,9 @@ def _cart_items(request, customer):
     total = Decimal('0')
     for row in cart_rows:
         product = row.product
-        if not product.active and (not product.custom_design_id or product.custom_design.customer_id != customer.id):
+        if product.custom_design_id and product.custom_design.customer_id != customer.id:
+            continue
+        if not product.active and not product.custom_design_id:
             continue
         quantity = min(row.quantity, product.stock)
         if not quantity:
@@ -700,7 +707,7 @@ class ProductListView(PaginatedAPIView):
     permission_classes = (AllowAny,)
 
     def get(self, request):
-        products = Product.objects.filter(active=True).select_related('category', 'craftswoman')
+        products = Product.objects.filter(active=True, custom_design__isnull=True).select_related('category', 'craftswoman')
         search = request.query_params.get('search', '').strip()
         if search:
             products = products.filter(
@@ -735,7 +742,7 @@ class ProductDetailView(APIView):
 
     def get(self, request, product_id):
         product = get_object_or_404(
-            Product.objects.select_related('category', 'craftswoman'), id=product_id, active=True,
+            Product.objects.select_related('category', 'craftswoman'), id=product_id, active=True, custom_design__isnull=True,
         )
         return Response(ProductSerializer(product).data)
 
@@ -1390,7 +1397,10 @@ class CartItemListView(APIView):
         customer = _customer_for(request.user)
         serializer = CartItemInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        product = get_object_or_404(Product, id=serializer.validated_data['product_id'], active=True)
+        product = get_object_or_404(
+            Product.objects.filter(active=True, custom_design__isnull=True),
+            id=serializer.validated_data['product_id'],
+        )
         quantity = serializer.validated_data['quantity']
         _sync_legacy_session_cart(request, customer)
         with transaction.atomic():
@@ -1418,7 +1428,7 @@ class CartItemDetailView(APIView):
         serializer.is_valid(raise_exception=True)
         product = get_object_or_404(
             Product.objects.filter(
-                models.Q(active=True) | models.Q(custom_design__customer=customer),
+                models.Q(active=True, custom_design__isnull=True) | models.Q(custom_design__customer=customer),
             ).distinct(),
             id=product_id,
         )
