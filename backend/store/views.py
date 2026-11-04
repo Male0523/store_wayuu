@@ -332,9 +332,10 @@ def update_order_status(request, order_id):
     if not has_role(request.user, AccessRole.Code.CRAFTSWOMAN):
         raise PermissionDenied('Esta operación solo está disponible para tejedoras.')
     _require_permission(request, 'orders', 'change')
-    _require_permission(request, 'designs', 'change')
     craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
     order = get_object_or_404(Order, id=order_id, craftswoman=craftswoman)
+    if order.items.filter(product__custom_design__isnull=False).exists():
+        _require_permission(request, 'designs', 'change')
     transitions = {Order.Status.ACCEPTED: {Order.Status.WEAVING}, Order.Status.WEAVING: {Order.Status.ACCEPTED, Order.Status.COMPLETED}}
     status = request.POST.get('status')
     if status in transitions.get(order.status, set()):
