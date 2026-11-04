@@ -820,3 +820,138 @@
 .order-filter-toolbar input, .order-filter-toolbar select, .order-status-filter select { min-width: 0; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 3px; background: #fffdf8; color: var(--ink); }
 .order-status-filter { max-width: 260px; margin: 14px 0; }
 @media (max-width: 700px) { .order-filter-toolbar { grid-template-columns: 1fr; } }
+
+
+/* Tienda pública: jerarquía editorial y presencia artesanal */
+.app-shell { background: #fdfbf7; }
+.app-shell > .site-header { min-height: 82px; }
+.app-shell > main > .hero {
+  min-height: 560px;
+  grid-template-columns: minmax(0, .88fr) minmax(0, 1.12fr);
+  gap: clamp(28px, 5vw, 76px);
+  padding: clamp(48px, 6vw, 82px) clamp(28px, 8vw, 120px);
+  background:
+    radial-gradient(ellipse at 8% 92%, rgba(183,127,134,.13), transparent 38%),
+    linear-gradient(112deg, #f8f1eb 0%, #f2e8e1 100%);
+}
+.app-shell > main > .hero::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 5px;
+  background: repeating-linear-gradient(90deg, #6e3039 0 34px, #c49b78 34px 50px, #8b9a8a 50px 66px, #ead8c8 66px 82px);
+  content: '';
+}
+.app-shell > main > .hero-copy { max-width: 490px; }
+.app-shell > main > .hero h1 { max-width: 600px; font-size: clamp(48px, 5.2vw, 76px); line-height: .98; letter-spacing: -.035em; }
+.app-shell > main > .hero h1 em { color: #8a4b54; }
+.app-shell > main > .hero .eyebrow { color: #86545a; letter-spacing: .13em; }
+.app-shell > main > .hero-description { max-width: 390px; margin: 24px 0 29px; color: #6f5d59; font-size: 14px; line-height: 1.9; }
+.app-shell > main > .hero .button-dark { min-height: 50px; padding: 0 23px; border-radius: 2px; background: #5c252e; box-shadow: 0 8px 20px rgba(92,37,46,.12); }
+.app-shell > main > .hero .button-dark:hover:not(:disabled) { background: #793b44; }
+.app-shell > main > .hero-art { max-width: 650px; aspect-ratio: 1.12; padding: 12px; border: 1px solid rgba(121,82,78,.22); background: rgba(255,253,250,.6); box-shadow: 20px 20px 0 rgba(126,87,80,.09); }
+.app-shell > main > .hero-art > img { object-fit: cover; }
+.app-shell > main > .hero-art-caption { right: 12px; bottom: 12px; left: 12px; min-height: 54px; padding: 0 18px; background: rgba(70,35,39,.91); }
+.image-placeholder {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(145deg, #e9d8cc, #d9c2b6 55%, #b98f86);
+}
+.placeholder-weave {
+  position: absolute;
+  inset: -12% 4% -8%;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+  transform: rotate(-9deg) scale(1.12);
+  opacity: .75;
+}
+.placeholder-weave span {
+  border: 1px solid rgba(92,37,46,.35);
+  background: repeating-linear-gradient(135deg, transparent 0 14px, rgba(92,37,46,.56) 15px 20px, transparent 21px 34px);
+}
+.placeholder-weave span:nth-child(2n) { transform: translateY(24px); background-color: rgba(255,250,245,.17); }
+.placeholder-weave span:nth-child(3n) { transform: translateY(-18px); border-color: rgba(133,94,64,.65); }
+.placeholder-copy {
+  position: absolute;
+  right: 8%;
+  bottom: 12%;
+  left: 8%;
+  display: grid;
+  gap: 11px;
+  color: #51252a;
+}
+.placeholder-copy > span, .placeholder-copy > small { font: 9px var(--mono); letter-spacing: .13em; }
+.placeholder-copy strong { font: clamp(28px, 3.4vw, 46px)/1.03 var(--serif); }
+.placeholder-copy > small { color: #76564f; }
+.app-shell > main > .collection { padding-top: 88px; padding-bottom: 82px; }
+.app-shell > main > .collection .section-heading h2,
+.app-shell > main > .artisan-directory .section-heading h2 { color: #482c2d; }
+.app-shell > main > .collection .product-image-button { background: #eee5dc; }
+.app-shell > main > .collection .product-info h3 { color: #4e3030; }
+.app-shell > main > .origin-band { grid-template-columns: 1fr 1fr; padding: 44px 10%; background: #eee3dc; }
+.app-shell > main > .origin-copy h2 { color: #4d2b2d; font-size: 42px; }
+.app-shell > main > .origin-text { max-width: 420px; font-size: 13px; }
+.app-shell > main > .artisan-directory { padding-top: 78px; padding-bottom: 86px; }
+.app-shell > main > .artisan-directory-card { min-height: 132px; border-color: #e7d9d0; background: #fffdfa; }
+.app-shell > main > .artisan-directory-card h3 { color: #4c2c30; font: 20px var(--serif); }
+.app-shell > main > .artisan-directory-card p { color: #896d68; font-size: 11px; }
+.app-shell > main > .artisan-directory-card small { margin-top: 7px; color: #71635f; font-size: 11px; }
+.app-shell > .site-footer { border-top: 1px solid #e8ddd5; background: #f6eee8; }
+
+/* Inicio de sesión dentro de la tienda */
+.app-shell .auth-dialog {
+  width: min(470px, 100%);
+  padding: 42px 42px 34px;
+  border: 1px solid #e7d8cf;
+  background: #fffaf6;
+  box-shadow: 0 28px 90px rgba(54,31,29,.28);
+}
+.app-shell .auth-dialog::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 5px;
+  background: repeating-linear-gradient(90deg, #6e3039 0 30px, #c49b78 30px 45px, #8b9a8a 45px 60px, #ead8c8 60px 75px);
+  content: '';
+}
+.app-shell .auth-mark { margin-bottom: 17px; }
+.app-shell .auth-dialog > .eyebrow { margin-bottom: 12px; color: #8a555c; letter-spacing: .14em; }
+.app-shell .auth-dialog h2 { color: #4c292e; font-size: 36px; }
+.app-shell .auth-intro { max-width: 320px; margin: 11px auto 24px; color: #786964; font-size: 12px; }
+.app-shell .auth-tabs { margin-bottom: 21px; border-color: #eaded6; }
+.app-shell .auth-tabs button { min-height: 43px; color: #8b7771; font-size: 11px; }
+.app-shell .auth-tabs button.active { border-bottom: 2px solid #743a43; color: #57252b; font-weight: 700; }
+.app-shell .auth-form { gap: 15px; }
+.app-shell .auth-form .form-label { color: #604a47; font-size: 11px; }
+.app-shell .auth-form .form-label input {
+  min-height: 46px;
+  padding: 0 13px;
+  border: 1px solid #e2d4cc;
+  border-radius: 2px;
+  background: #fffdfa;
+  color: #403432;
+  font-size: 12px;
+}
+.app-shell .auth-form .form-label input:focus {
+  border-color: #9a646b;
+  box-shadow: 0 0 0 3px rgba(154,100,107,.12);
+  outline: none;
+}
+.app-shell .auth-form .button-dark { min-height: 49px; margin-top: 5px; background: #5c252e; }
+.app-shell .auth-form .button-dark:hover:not(:disabled) { background: #793b44; }
+.app-shell .craftswoman-link { margin-top: 19px; color: #86535a; font-size: 11px; }
+.app-shell .craftswoman-link:hover { color: #57252b; }
+@media (max-width: 900px) {
+  .app-shell > main > .hero { grid-template-columns: 1fr 1fr; padding-right: 5%; padding-left: 5%; }
+  .app-shell > main > .hero h1 { font-size: clamp(42px, 6vw, 60px); }
+}
+@media (max-width: 680px) {
+  .app-shell > main > .hero { grid-template-columns: 1fr; gap: 28px; padding: 48px 22px 44px; }
+  .app-shell > main > .hero-art { justify-self: stretch; max-width: none; aspect-ratio: 1.05; }
+  .app-shell > main > .collection { padding-top: 58px; padding-bottom: 56px; }
+  .app-shell > main > .origin-band { grid-template-columns: 1fr; gap: 16px; padding: 30px 22px; }
+  .app-shell .auth-dialog { padding: 38px 24px 27px; }
+}
