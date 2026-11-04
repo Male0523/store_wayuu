@@ -210,7 +210,11 @@ class OrderSerializer(serializers.ModelSerializer):
     status_label = serializers.CharField(source='get_status_display', read_only=True)
     craftswoman = CraftswomanSummarySerializer(read_only=True)
     customer_name = serializers.CharField(source='customer.name', read_only=True)
-    customer_username = serializers.CharField(source='customer.user.username', read_only=True)
+    customer_username = serializers.SerializerMethodField()
+
+    @staticmethod
+    def get_customer_username(order):
+        return order.customer.user.username if order.customer.user_id else ''
 
     class Meta:
         model = Order
