@@ -1125,7 +1125,7 @@ class SuperadminNavigationView(APIView):
     rbac_resource = 'navigation'
 
     def get(self, request):
-        items = NavigationItem.objects.prefetch_related('roles').select_related('permission__content_type')
+        items = NavigationItem.objects.prefetch_related('roles').select_related('permission__content_type').order_by('order', 'label')
         return Response([self.serialize_item(item) for item in items])
 
     @staticmethod
