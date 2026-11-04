@@ -805,3 +805,50 @@
   .rbac-relationship-guide { grid-template-columns:1fr; }
   .rbac-relationship-flow { grid-column:auto; }
 }
+
+
+/* Filtro de pedidos por tejedora en administración */
+.admin-orders-heading { align-items: flex-end; }
+.admin-orders-heading-actions {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+.admin-orders-heading-actions > span {
+  padding: 8px 11px;
+  border: 1px solid #ead4d7;
+  border-radius: 20px;
+  background: #fbf0f1;
+  color: #5c1d24;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.admin-orders-filter {
+  display: grid;
+  gap: 5px;
+  color: #6d5658;
+  font-size: 10px;
+  font-weight: 700;
+}
+.admin-orders-filter select {
+  min-width: 190px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid #dfcbc7;
+  border-radius: 7px;
+  background: #fff;
+  color: #493235;
+  font: 11px var(--sans);
+}
+.admin-orders-filter select:focus-visible {
+  outline: 3px solid #d9a7ad;
+  outline-offset: 2px;
+}
+@media (max-width: 760px) {
+  .admin-orders-heading { align-items: stretch; }
+  .admin-orders-heading-actions { align-items: stretch; flex-direction: column; }
+  .admin-orders-filter select { width: 100%; }
+  .admin-orders-heading-actions > span { align-self: flex-start; }
+}
