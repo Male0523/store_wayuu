@@ -852,3 +852,148 @@
   .admin-orders-filter select { width: 100%; }
   .admin-orders-heading-actions > span { align-self: flex-start; }
 }
+
+
+/* =========================================================
+   WAYUUWAA · Refinamiento visual de formularios y paneles
+   Solo presentación: contornos, radios, fondos y estados focus.
+   ========================================================= */
+.form-label :is(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="image"]),
+  select,
+  textarea
+),
+.admin-inline-field :is(input, select),
+.rbac-block-heading select,
+.rbac-user-role select,
+.rbac-permission select,
+.admin-orders-filter select,
+.filter-select select,
+.sort-select select {
+  border: 1px solid #d9c9c3;
+  border-radius: 7px;
+  background-color: #fffdfa;
+  transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease;
+}
+
+.form-label :is(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="image"]),
+  select,
+  textarea
+):focus,
+.admin-inline-field :is(input, select):focus,
+.rbac-block-heading select:focus,
+.rbac-user-role select:focus,
+.rbac-permission select:focus,
+.admin-orders-filter select:focus,
+.filter-select select:focus,
+.sort-select select:focus {
+  border-color: #a65e57;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(166, 94, 87, .14);
+}
+
+.form-label :is(input, textarea)::placeholder {
+  color: #a3948e;
+  opacity: 1;
+}
+
+.form-label input:disabled,
+.form-label select:disabled,
+.form-label textarea:disabled,
+.admin-inline-field input:disabled,
+.admin-inline-field select:disabled {
+  border-color: #e7ded9;
+  background-color: #f6f1ed;
+  color: #897d78;
+  cursor: not-allowed;
+}
+
+.form-label input[type="file"] {
+  min-height: 44px;
+  padding: 7px;
+  border-style: dashed;
+  background: #fffdfa;
+}
+
+.form-label input[type="file"]::file-selector-button {
+  margin-right: 10px;
+  padding: 7px 11px;
+  border: 1px solid #e3d2cc;
+  border-radius: 5px;
+  background: #f7eeeb;
+  color: #5c1d24;
+  font: 11px var(--sans);
+  cursor: pointer;
+}
+
+.form-label input[type="checkbox"],
+.form-label input[type="radio"],
+.admin-check input,
+.rbac-permission input,
+.rbac-action-option input,
+.rbac-nav-actions input,
+.rbac-role-picker input {
+  accent-color: #8a4149;
+}
+
+.header-search,
+.rbac-search {
+  border: 1px solid #dfd0ca;
+  border-radius: 7px;
+  background: #fffdfa;
+}
+
+.header-search { padding: 0 10px; }
+.rbac-search { padding: 0 12px; }
+
+.designer-controls fieldset {
+  padding: 14px;
+  border: 1px solid #eadfd8;
+  border-radius: 9px;
+  background: #fffdfa;
+}
+
+.profile-form {
+  padding: 20px;
+  border: 1px solid #eadfd8;
+  border-radius: 11px;
+  background: #fffdfa;
+}
+
+.admin-product-form,
+.craftswoman-product-form,
+.admin-category-form,
+.rbac-user-form {
+  padding: 18px;
+  border: 1px solid #eadfd8;
+  border-radius: 10px;
+  background: #fffdfa;
+}
+
+.rbac-block {
+  padding: 16px;
+  border: 1px solid #eadfd8;
+  border-radius: 10px;
+  background: #fffdfa;
+}
+
+.rbac-role-status,
+.rbac-resource-card,
+.rbac-nav-row,
+.rbac-search,
+.rbac-guide,
+.order-card {
+  border-radius: 8px;
+}
+
+.auth-dialog,
+.success-dialog,
+.product-dialog {
+  border: 1px solid #e7d8d0;
+  border-radius: 12px;
+}
+
+.cart-drawer {
+  border-left: 1px solid #e7d8d0;
+}
