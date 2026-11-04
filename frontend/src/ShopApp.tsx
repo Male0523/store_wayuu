@@ -184,9 +184,13 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
     let cancelled = false
     const loadDashboard = async () => {
       try {
+        const configuredNavigation = await api.roleNavigation()
+        if (cancelled) return
+        setRoleNavigation(configuredNavigation)
+        const routes = configuredNavigation.map((item) => item.route_name)
         const [data, ownProducts] = await Promise.all([
-          api.craftswomanDashboard(),
-          api.craftswomanProducts(),
+          routes.includes('craftswoman.dashboard') || routes.includes('craftswoman.orders') ? api.craftswomanDashboard() : Promise.resolve(null),
+          routes.some((route) => ['craftswoman.dashboard', 'craftswoman.products', 'craftswoman.inventory'].includes(route)) ? api.craftswomanProducts() : Promise.resolve([]),
         ])
         if (cancelled) return
         setDashboard(data)
@@ -199,7 +203,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
 
     void loadDashboard()
     return () => { cancelled = true }
-  }, [initialScreen, user])
+  }, [initialScreen, user?.id, user?.role])
 
   useEffect(() => {
     if (initialScreen !== 'admin' || !user || (user.role !== 'admin' && user.role !== 'superadmin')) return
@@ -556,7 +560,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
 
     {screen === 'orders' && user && <CustomerAccountView user={user} navigationItems={roleNavigation} orders={orders} designs={designs} profile={profileDraft} section={accountSection} busy={busy} onSection={setAccountSection} onProfileSubmit={saveProfile} onSignOut={signOut} onShop={() => setScreen('shop')} />}
 
-    {screen === 'craftswoman' && dashboard && <CraftswomanAccountView user={user} navigationItems={roleNavigation} dashboard={dashboard} products={craftswomanProducts} categories={categories} busy={busy} onCreateProduct={createCraftswomanProduct} onSignOut={signOut} onAcceptOrder={acceptOrder} onOrderStatus={updateOrder} onDesignStatus={updateDesignStatus} />}
+    {screen === 'craftswoman' && user?.role === 'craftswoman' && <CraftswomanAccountView user={user} navigationItems={roleNavigation} dashboard={dashboard} products={craftswomanProducts} categories={categories} busy={busy} onCreateProduct={createCraftswomanProduct} onSignOut={signOut} onAcceptOrder={acceptOrder} onOrderStatus={updateOrder} onDesignStatus={updateDesignStatus} />}
 
     {screen === 'admin' && user && (user.role === 'admin' || user.role === 'superadmin') && <AdminAccountView user={user} isSuperadmin={user.role === 'superadmin'} navigationItems={roleNavigation} orders={orders} products={adminProducts} categories={adminCategories} busy={busy} onSignOut={signOut} onSaveProduct={saveAdminProduct} onCreateProduct={createAdminProduct} onCreateCategory={createAdminCategory} onCategoryActive={updateAdminCategory} onOrderStatus={saveAdminOrderStatus} />}
 
