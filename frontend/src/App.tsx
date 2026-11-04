@@ -145,7 +145,6 @@ export default function App() {
 				<a className="unified-brand" href="/" onClick={(event) => navigate(event, '/')}>STORE WAYUU</a>
 				<nav aria-label="Navegación de la aplicación">
 					<a href="/" onClick={(event) => navigate(event, '/')}>Sitio público</a>
-					<a href="/tienda" onClick={(event) => navigate(event, '/tienda')}>Tienda conectada</a>
 					{roleRoutes.filter((route) => route.role === user?.role).map((route) => (
 						<a key={route.path} href={route.path} onClick={(event) => navigate(event, route.path)}>{route.label}</a>
 					))}
