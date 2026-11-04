@@ -201,6 +201,83 @@ class StoreAPITests(TestCase):
         self.assertEqual(self.product.stock, 2)
         self.assertEqual(self.client.get('/api/v1/cart/').json()['count'], 0)
 
+    def test_customer_can_update_and_remove_own_inactive_custom_design_cart_item(self):
+        design = CustomDesign.objects.create(
+            customer=self.customer,
+            pattern='rombos',
+            base_color='#112233',
+            accent_color_one='#445566',
+            accent_color_two='#778899',
+            size='M',
+            quantity=2,
+            estimated_price=Decimal('240000'),
+        )
+        custom_product = Product.objects.create(
+            sku='CUSTOM-CART-API-001',
+            name='Manta personalizada de prueba',
+            category=self.category,
+            custom_design=design,
+            price=Decimal('120000'),
+            stock=2,
+            active=False,
+            made_to_order=True,
+        )
+        CustomerCartItem.objects.create(customer=self.customer, product=custom_product, quantity=1)
+        self.client.force_login(self.user)
+
+        updated = self.client.patch(
+            f'/api/v1/cart/items/{custom_product.id}/',
+            {'quantity': 2},
+            content_type='application/json',
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(
+            CustomerCartItem.objects.get(customer=self.customer, product=custom_product).quantity,
+            2,
+        )
+
+        removed = self.client.delete(f'/api/v1/cart/items/{custom_product.id}/')
+        self.assertEqual(removed.status_code, 204)
+        self.assertFalse(CustomerCartItem.objects.filter(customer=self.customer, product=custom_product).exists())
+
+    def test_customer_cannot_update_another_customers_inactive_product(self):
+        other_user = User.objects.create_user(
+            username='otro-cliente-diseno',
+            email='otro-cliente-diseno@example.com',
+            password='ClaveSegura2026!',
+        )
+        other_customer = Customer.objects.create(
+            user=other_user,
+            name='Otro cliente',
+            email='otro-cliente-diseno@example.com',
+        )
+        design = CustomDesign.objects.create(
+            customer=other_customer,
+            pattern='rombos',
+            base_color='#112233',
+            accent_color_one='#445566',
+            accent_color_two='#778899',
+            size='M',
+            estimated_price=Decimal('120000'),
+        )
+        custom_product = Product.objects.create(
+            sku='CUSTOM-CART-API-002',
+            name='Diseño privado de otro cliente',
+            category=self.category,
+            custom_design=design,
+            price=Decimal('120000'),
+            stock=1,
+            active=False,
+            made_to_order=True,
+        )
+        self.client.force_login(self.user)
+        response = self.client.patch(
+            f'/api/v1/cart/items/{custom_product.id}/',
+            {'quantity': 1},
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 404)
+
     def test_customer_cart_persists_after_logout_and_new_login(self):
         self.client.force_login(self.user)
         added = self.client.post('/api/v1/cart/items/', {
