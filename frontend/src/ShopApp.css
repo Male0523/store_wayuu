@@ -792,3 +792,9 @@
 .artisan-initials { width: 46px; height: 46px; flex: 0 0 46px; display: grid; place-items: center; border-radius: 50%; background: var(--forest); color: #fffaf0; font-weight: 700; }
 .artisan-directory-card h3 { margin: 0 0 5px; color: var(--ink); font-weight: 700; }
 .artisan-directory-card p, .artisan-directory-card small { display: block; margin: 0; color: var(--muted); line-height: 1.6; }
+
+.order-filter-toolbar { display: grid; grid-template-columns: minmax(180px,2fr) repeat(2,minmax(150px,1fr)); gap: 12px; margin: 18px 0 22px; }
+.order-filter-toolbar label, .order-status-filter { display: grid; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.order-filter-toolbar input, .order-filter-toolbar select, .order-status-filter select { min-width: 0; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 3px; background: #fffdf8; color: var(--ink); }
+.order-status-filter { max-width: 260px; margin: 14px 0; }
+@media (max-width: 700px) { .order-filter-toolbar { grid-template-columns: 1fr; } }
