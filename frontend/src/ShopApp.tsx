@@ -903,7 +903,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   const [permissionSearch, setPermissionSearch] = useState('')
   const [createUserRole, setCreateUserRole] = useState<SessionUser['role']>('customer')
   const [newNavigationRoute, setNewNavigationRoute] = useState('customer.orders')
-  const [newNavigationRoles, setNewNavigationRoles] = useState<SessionUser['role'][]>(['customer'])
+  const [newNavigationRoles, setNewNavigationRoles] = useState<SessionUser['role'][]>([])
   const [newNavigationResource, setNewNavigationResource] = useState('')
   const [newNavigationAction, setNewNavigationAction] = useState('')
   const canViewCatalog = hasEffectivePermission(currentUser, 'permissions.view')
@@ -1070,7 +1070,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
       setNavigationItems((current) => [...current, created].sort((a, b) => a.order - b.order))
       form.reset()
       setNewNavigationRoute('customer.orders')
-      setNewNavigationRoles(['customer'])
+      setNewNavigationRoles([])
       setNewNavigationResource('')
       setNewNavigationAction('')
       setFeedback('Elemento de menú creado y guardado.')
@@ -1214,7 +1214,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
         {canAddNavigation && <form className="rbac-user-form rbac-navigation-form" onSubmit={createNavigationItem}>
           <div className="rbac-form-section-title"><span>1</span><div><strong>Identificación de la opción</strong><small>Los campos con * son obligatorios.</small></div></div>
           <label className="form-label">Nombre visible *<input name="label" required maxLength={80} placeholder="Ej. Mis pedidos" /><small>Es el texto que verá la persona en su menú.</small></label>
-          <label className="form-label">Pantalla permitida *<select name="route_name" required value={newNavigationRoute} onChange={(event) => { const next = event.target.value; setNewNavigationRoute(next); const option = navigationRouteOptions.find((item) => item.value === next); setNewNavigationRoles(option ? [...option.roles] as SessionUser['role'][] : []) }}>{navigationRouteOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><small>Selecciona la función que se abrirá. Las opciones disponibles ya están conectadas al sistema.</small></label>
+          <label className="form-label">Pantalla permitida *<select name="route_name" required value={newNavigationRoute} onChange={(event) => setNewNavigationRoute(event.target.value)}>{navigationRouteOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><small>Selecciona la función que se abrirá. Las opciones disponibles ya están conectadas al sistema.</small></label>
           <p className="rbac-warning">Esta pantalla exige estos permisos mínimos: <b>{(navigationMinimumPermissions[newNavigationRoute] ?? []).map(permissionHelpLabel).join(' + ') || 'sin permisos mínimos adicionales'}</b>. Si alguno no está activo para el rol seleccionado, el servidor ocultará esta opción aunque esté marcada como visible. Configúralos en la pestaña “Roles y permisos”.</p>
           <div className="rbac-form-section-title"><span>2</span><div><strong>Presentación y orden</strong><small>Estos datos organizan el menú; no habilitan permisos.</small></div></div>
           <label className="form-label">Sección (opcional)<input name="anchor" maxLength={80} placeholder="Ej. pedidos" /><small>Identificador auxiliar; puedes dejarlo vacío si no sabes qué colocar.</small></label>
@@ -1224,8 +1224,8 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
           <label className="form-label">Permiso requerido · recurso<select name="permission_resource" value={newNavigationResource} onChange={(event) => setNewNavigationResource(event.target.value)}><option value="">Sin requisito adicional</option>{Object.entries(rbacResourceLabels).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>
           <label className="form-label">Permiso requerido · acción<select name="permission_action" value={newNavigationAction} onChange={(event) => setNewNavigationAction(event.target.value)}><option value="">Sin acción</option>{Object.entries(rbacActionLabels).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>
           {Boolean(newNavigationResource) !== Boolean(newNavigationAction) && <p className="rbac-warning">Debes completar los dos campos o dejar ambos vacíos. Si guardas solo uno, la opción no se podrá crear.</p>}
-          <div className="rbac-form-section-title"><span>4</span><div><strong>¿Quién verá esta opción?</strong><small>Selecciona al menos un rol.</small></div></div>
-          <fieldset className="rbac-role-picker"><legend>Roles permitidos *</legend>{(['superadmin', 'admin', 'craftswoman', 'customer'] as const).filter((role) => navigationRouteOptions.find((option) => option.value === newNavigationRoute)?.roles.some((allowedRole) => allowedRole === role)).map((role) => <label key={role}><input type="checkbox" name="role_codes" value={role} checked={newNavigationRoles.includes(role)} onChange={(event) => setNewNavigationRoles((current) => event.target.checked ? [...current, role] : current.filter((item) => item !== role))} /> {rbacRoleLabels[role]}</label>)}</fieldset>
+          <div className="rbac-form-section-title"><span>4</span><div><strong>¿Quién verá esta opción?</strong><small>Activa uno o varios de los cuatro roles que podrán ver esta opción.</small></div></div>
+          <fieldset className="rbac-role-picker"><legend>Roles permitidos *</legend>{(['superadmin', 'admin', 'craftswoman', 'customer'] as const).map((role) => <label key={role}><input type="checkbox" name="role_codes" value={role} checked={newNavigationRoles.includes(role)} onChange={(event) => setNewNavigationRoles((current) => event.target.checked ? [...current, role] : current.filter((item) => item !== role))} /> {rbacRoleLabels[role]}</label>)}</fieldset>
           {!newNavigationRoles.length && <p className="rbac-warning">Selecciona al menos un rol para que esta opción pueda mostrarse.</p>}
           <button className="button button-dark" disabled={saving || !newNavigationRoles.length || (Boolean(newNavigationResource) !== Boolean(newNavigationAction))}>{saving ? 'Guardando…' : 'Añadir opción al menú'}</button>
         </form>}
