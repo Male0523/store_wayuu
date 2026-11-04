@@ -2218,6 +2218,7 @@ class StoreAPITests(TestCase):
         self.assertFalse(NavigationItem.objects.filter(pk=item_id).exists())
 
     def test_role_navigation_endpoint_filters_by_role_and_effective_permissions(self):
+        NavigationItem.objects.all().delete()
         craftswoman = self.create_role_user('role-menu-craftswoman', AccessRole.Code.CRAFTSWOMAN)
         role = AccessRole.objects.get(code=AccessRole.Code.CRAFTSWOMAN)
         RolePermission.objects.get_or_create(role=role, permission=permission_for('products', 'view'))
