@@ -129,7 +129,7 @@ export default function App() {
 
 	let page: ReactNode
 	switch (path.replace(/\/$/, '') || '/') {
-		case '/': page = <><DemoNotice /><PublicSite /></>; break
+		case '/': page = <ConnectedShop key="public" initialScreen="shop" />; break
 		case '/cliente': page = protectedPage('customer', <CustomerPanel />, true); break
 		case '/tienda': page = <ConnectedShop key="tienda" initialScreen="shop" />; break
 		case '/tejedora': page = protectedPage('craftswoman', <ConnectedShop key="tejedora" initialScreen="craftswoman" />, true); break
