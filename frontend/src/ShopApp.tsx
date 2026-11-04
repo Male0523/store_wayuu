@@ -849,7 +849,6 @@ const navigationRouteOptions = [
   { value: 'admin.products', label: 'Administrador · Productos', roles: ['admin', 'superadmin'] },
   { value: 'admin.orders', label: 'Administrador · Pedidos', roles: ['admin', 'superadmin'] },
   { value: 'admin.categories', label: 'Administrador · Categorías', roles: ['admin', 'superadmin'] },
-  { value: 'admin.access', label: 'Superadministrador · Roles y permisos', roles: ['superadmin'] },
 ] as const
 type RBACSection = 'roles' | 'users' | 'delegations' | 'audit' | 'navigation'
 
