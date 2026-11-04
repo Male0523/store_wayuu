@@ -209,6 +209,7 @@ class OrderSerializer(serializers.ModelSerializer):
     total = serializers.DecimalField(max_digits=14, decimal_places=0, read_only=True)
     status_label = serializers.CharField(source='get_status_display', read_only=True)
     craftswoman = CraftswomanSummarySerializer(read_only=True)
+    customer_id = serializers.IntegerField(read_only=True)
     customer_name = serializers.CharField(source='customer.name', read_only=True)
     customer_username = serializers.SerializerMethodField()
 
@@ -221,7 +222,7 @@ class OrderSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'status', 'status_label', 'payment_method', 'shipping_address',
             'notes', 'created_at', 'updated_at', 'items', 'total', 'craftswoman',
-            'customer_name', 'customer_username',
+            'customer_id', 'customer_name', 'customer_username',
         )
 
 
@@ -1548,6 +1549,11 @@ class AdminOrderListView(PaginatedAPIView):
             if not craftswoman_id.isdigit():
                 raise serializers.ValidationError({'craftswoman_id': 'Selecciona una tejedora válida.'})
             orders = orders.filter(craftswoman_id=int(craftswoman_id))
+        customer_id = request.query_params.get('customer_id', '').strip()
+        if customer_id:
+            if not customer_id.isdigit():
+                raise serializers.ValidationError({'customer_id': 'Selecciona un cliente válido.'})
+            orders = orders.filter(customer_id=int(customer_id))
         search = request.query_params.get('search', '').strip()
         if search:
             search_filter = (
