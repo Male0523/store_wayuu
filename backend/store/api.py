@@ -431,8 +431,6 @@ NAVIGATION_ROUTE_RULES = {
     'admin.products': {'roles': {AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN}, 'permissions': (('products', 'view'),)},
     'admin.orders': {'roles': {AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN}, 'permissions': (('orders', 'view'),)},
     'admin.categories': {'roles': {AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN}, 'permissions': (('categories', 'view'),)},
-    'admin.access': {'roles': {AccessRole.Code.SUPERADMIN}, 'permissions': (('roles', 'view'),)},
-    'superadmin.access': {'roles': {AccessRole.Code.SUPERADMIN}, 'permissions': (('roles', 'view'),)},
 }
 class NavigationItemWriteSerializer(serializers.Serializer):
     label = serializers.CharField(max_length=80)
