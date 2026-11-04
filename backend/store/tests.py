@@ -201,7 +201,7 @@ class StoreAPITests(TestCase):
         self.assertEqual(self.product.stock, 2)
         self.assertEqual(self.client.get('/api/v1/cart/').json()['count'], 0)
 
-    def test_customer_can_update_and_remove_own_inactive_custom_design_cart_item(self):
+    def test_customer_cannot_multiply_own_inactive_custom_design_cart_item_and_can_remove_it(self):
         design = CustomDesign.objects.create(
             customer=self.customer,
             pattern='rombos',
@@ -230,10 +230,11 @@ class StoreAPITests(TestCase):
             {'quantity': 2},
             content_type='application/json',
         )
-        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.status_code, 400)
+        self.assertIn('cantidad del diseño personalizado', updated.json()['detail'])
         self.assertEqual(
             CustomerCartItem.objects.get(customer=self.customer, product=custom_product).quantity,
-            2,
+            1,
         )
 
         removed = self.client.delete(f'/api/v1/cart/items/{custom_product.id}/')
