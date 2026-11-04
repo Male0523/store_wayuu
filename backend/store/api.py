@@ -441,6 +441,7 @@ NAVIGATION_ROUTE_RULES = {
     'admin.products': {'roles': {AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN}, 'permissions': (('products', 'view'),)},
     'admin.orders': {'roles': {AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN}, 'permissions': (('orders', 'view'),)},
     'admin.categories': {'roles': {AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN}, 'permissions': (('categories', 'view'),)},
+    'admin.access': {'roles': {AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN}, 'permissions': (('roles', 'view'), ('permissions', 'view'))},
 }
 class NavigationItemWriteSerializer(serializers.Serializer):
     label = serializers.CharField(max_length=80)
@@ -913,8 +914,12 @@ class RBACCatalogView(APIView):
 
 
 class SuperadminRolePermissionsView(APIView):
-    permission_classes = (SuperadminOnly,)
     rbac_resource = 'roles'
+
+    def get_permissions(self):
+        # El administrador delegado puede consultar la matriz; solo superadmin puede modificarla.
+        permission_class = AdminOrSuperadmin if self.request.method == 'GET' else SuperadminOnly
+        return [permission_class()]
 
     def get(self, request, role_code):
         role = get_object_or_404(AccessRole, code=role_code)
