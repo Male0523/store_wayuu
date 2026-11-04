@@ -12,6 +12,8 @@ import type {
   RBACAction,
   RBACDelegation,
   RBACPermission,
+  RBACNavigationItem,
+  RBACNavigationInput,
   RBACRolePermissions,
   RBACUserPermissions,
   SessionUser,
@@ -155,6 +157,14 @@ export const api = {
       method: 'PATCH', body: json({ role }),
     }),
   auditEvents: () => request<AuditEvent[]>('/admin/rbac/audit/'),
+  navigationItems: () => request<RBACNavigationItem[]>('/admin/rbac/navigation/'),
+  createNavigationItem: (values: RBACNavigationInput) =>
+    request<RBACNavigationItem>('/admin/rbac/navigation/', { method: 'POST', body: json(values) }),
+  updateNavigationItem: (id: number, values: Partial<RBACNavigationInput>) =>
+    request<RBACNavigationItem>(`/admin/rbac/navigation/${id}/`, { method: 'PATCH', body: json(values) }),
+  deleteNavigationItem: (id: number) =>
+    request<void>(`/admin/rbac/navigation/${id}/`, { method: 'DELETE' }),
+
   adminCategories: () => request<AdminCategory[]>('/admin/categories/'),
   createAdminCategory: (values: Pick<AdminCategory, 'name' | 'description' | 'active'>) =>
     request<AdminCategory>('/admin/categories/', { method: 'POST', body: json(values) }),
