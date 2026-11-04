@@ -744,3 +744,7 @@
 .rbac-nav-actions { display:flex; align-items:center; gap:12px; flex:0 0 auto; }
 .rbac-nav-actions input, .rbac-role-picker input { accent-color:var(--clay); }
 @media (max-width:650px) { .rbac-nav-row { align-items:flex-start; flex-direction:column; } .rbac-nav-actions { width:100%; justify-content:space-between; } }
+
+.rbac-role-heading-actions { display:flex; align-items:center; justify-content:flex-end; gap:10px; flex-wrap:wrap; }
+.rbac-role-heading-actions .button { white-space:nowrap; }
+@media (max-width:760px) { .rbac-role-heading-actions { width:100%; justify-content:stretch; } .rbac-role-heading-actions .button, .rbac-role-heading-actions select { flex:1 1 100%; } }
