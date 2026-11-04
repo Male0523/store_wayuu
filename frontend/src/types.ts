@@ -31,13 +31,16 @@ export interface Product {
   stock: number
   image_url: string
   made_to_order: boolean
+  is_custom_design?: boolean
   created_at: string
   updated_at: string
+  active?: boolean
 }
 
 export interface AdminProduct extends Omit<Product, 'category' | 'craftswoman'> {
   category: number
   craftswoman: number | null
+  craftswoman_name?: string | null
   active: boolean
 }
 
@@ -76,6 +79,7 @@ export interface CustomDesign {
   notes: string
   estimated_price: string
   status: string
+  status_label?: string
   created_at: string
   craftswoman_name?: string | null
 }
@@ -213,4 +217,28 @@ export interface AuditEvent {
   result: 'success' | 'denied'
   details: Record<string, unknown>
   created_at: string
+}
+export interface RBACNavigationItem {
+  id: number
+  label: string
+  route_name: string
+  anchor: string
+  description: string
+  role_codes: SessionUser['role'][]
+  permission_resource: string | null
+  permission_action: RBACAction | null
+  order: number
+  active: boolean
+}
+
+export interface RBACNavigationInput {
+  label: string
+  route_name: string
+  anchor?: string
+  description?: string
+  role_codes: SessionUser['role'][]
+  permission_resource?: string | null
+  permission_action?: RBACAction | null
+  order?: number
+  active?: boolean
 }

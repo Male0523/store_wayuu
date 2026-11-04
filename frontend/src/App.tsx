@@ -4,10 +4,7 @@ import type { SessionUser } from './types'
 
 const legacyViews = import.meta.glob<ComponentType>('../../*.tsx', { import: 'default' })
 const PublicSite = lazy(() => legacyViews['../../sitio_p_blico_tienda_artesanal_way_u.tsx']().then((module) => ({ default: module })))
-const CustomerPanel = lazy(() => legacyViews['../../tienda_way_u_rol_cliente.tsx']().then((module) => ({ default: module })))
-const CraftswomanPanel = lazy(() => legacyViews['../../wayuu_tejedora_panel.tsx']().then((module) => ({ default: module })))
-const AdministratorPanel = lazy(() => legacyViews['../../way_u_store_administrator_panel.tsx']().then((module) => ({ default: module })))
-const SuperadministratorPanel = lazy(() => legacyViews['../../panel_de_control_superadministrador_way_u.tsx']().then((module) => ({ default: module })))
+const CustomerPanel = lazy(() => import('./CustomerPanel'))
 const ConnectedShop = lazy(() => import('./ShopApp').then((module) => ({ default: module.ConnectedShop })))
 
 type Role = SessionUser['role']
@@ -71,17 +68,18 @@ function AccessGate({ user, onLogin }: {
 	)
 }
 
-function RolePage({ user, role, onLogin, children }: {
+function RolePage({ user, role, onLogin, children, connected = false }: {
 	user: SessionUser | null
 	role: Role
 	onLogin: (event: FormEvent<HTMLFormElement>) => Promise<void>
 	children: ReactNode
+	connected?: boolean
 }) {
 	if (user?.role !== role) return <AccessGate user={user} onLogin={onLogin} />
 	if (role === 'craftswoman' && user.profile?.active === false) {
 		return <section className="access-panel"><h1>Cuenta pendiente de activación</h1><p>La administración debe activar el perfil antes de habilitar el panel de tejedora.</p></section>
 	}
-	return <><DemoNotice />{children}</>
+	return connected ? <>{children}</> : <><DemoNotice />{children}</>
 }
 
 export default function App() {
@@ -107,8 +105,10 @@ export default function App() {
 	async function login(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault()
 		const values = new FormData(event.currentTarget)
-		await loginUser(String(values.get('username')), String(values.get('password')))
-		setPath('/')
+		const account = await loginUser(String(values.get('username')), String(values.get('password')))
+		const destination = roleRoutes.find((route) => route.role === account.role)?.path ?? '/tienda'
+		window.history.pushState(null, '', destination)
+		setPath(destination)
 	}
 
 	async function logout() {
@@ -123,19 +123,19 @@ export default function App() {
 		setPath('/')
 	}
 
-	function protectedPage(role: Role, page: ReactNode) {
+	function protectedPage(role: Role, page: ReactNode, connected = false) {
 		if (!sessionLoaded) return <div className="route-loading" role="status">Comprobando sesión…</div>
-		return <RolePage user={user} role={role} onLogin={login}>{page}</RolePage>
+		return <RolePage user={user} role={role} onLogin={login} connected={connected}>{page}</RolePage>
 	}
 
 	let page: ReactNode
 	switch (path.replace(/\/$/, '') || '/') {
 		case '/': page = <><DemoNotice /><PublicSite /></>; break
-		case '/cliente': page = protectedPage('customer', <CustomerPanel />); break
+		case '/cliente': page = protectedPage('customer', <CustomerPanel />, true); break
 		case '/tienda': page = <ConnectedShop key="tienda" initialScreen="shop" />; break
-		case '/tejedora': page = protectedPage('craftswoman', <CraftswomanPanel />); break
-		case '/admin': page = protectedPage('admin', <AdministratorPanel />); break
-		case '/superadmin': page = protectedPage('superadmin', <SuperadministratorPanel />); break
+		case '/tejedora': page = protectedPage('craftswoman', <ConnectedShop key="tejedora" initialScreen="craftswoman" />, true); break
+		case '/admin': page = protectedPage('admin', <ConnectedShop key="admin" initialScreen="admin" />, true); break
+		case '/superadmin': page = protectedPage('superadmin', <ConnectedShop key="superadmin" initialScreen="admin" />, true); break
 		default: page = <section className="access-panel"><h1>Página no encontrada</h1><a className="primary-link" href="/" onClick={(event) => navigate(event, '/')}>Volver al inicio</a></section>
 	}
 
@@ -145,7 +145,6 @@ export default function App() {
 				<a className="unified-brand" href="/" onClick={(event) => navigate(event, '/')}>STORE WAYUU</a>
 				<nav aria-label="Navegación de la aplicación">
 					<a href="/" onClick={(event) => navigate(event, '/')}>Sitio público</a>
-					<a href="/tienda" onClick={(event) => navigate(event, '/tienda')}>Tienda conectada</a>
 					{roleRoutes.filter((route) => route.role === user?.role).map((route) => (
 						<a key={route.path} href={route.path} onClick={(event) => navigate(event, route.path)}>{route.label}</a>
 					))}

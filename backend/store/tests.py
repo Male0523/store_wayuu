@@ -36,6 +36,7 @@ from .models import (
     CustomDesign,
     Category,
     Customer,
+    CustomerCartItem,
     NavigationItem,
     Order,
     OrderItem,
@@ -200,6 +201,146 @@ class StoreAPITests(TestCase):
         self.assertEqual(self.product.stock, 2)
         self.assertEqual(self.client.get('/api/v1/cart/').json()['count'], 0)
 
+    def test_customer_cannot_multiply_own_inactive_custom_design_cart_item_and_can_remove_it(self):
+        design = CustomDesign.objects.create(
+            customer=self.customer,
+            pattern='rombos',
+            base_color='#112233',
+            accent_color_one='#445566',
+            accent_color_two='#778899',
+            size='M',
+            quantity=2,
+            estimated_price=Decimal('240000'),
+        )
+        custom_product = Product.objects.create(
+            sku='CUSTOM-CART-API-001',
+            name='Manta personalizada de prueba',
+            category=self.category,
+            custom_design=design,
+            price=Decimal('120000'),
+            stock=2,
+            active=False,
+            made_to_order=True,
+        )
+        CustomerCartItem.objects.create(customer=self.customer, product=custom_product, quantity=1)
+        self.client.force_login(self.user)
+
+        updated = self.client.patch(
+            f'/api/v1/cart/items/{custom_product.id}/',
+            {'quantity': 2},
+            content_type='application/json',
+        )
+        self.assertEqual(updated.status_code, 400)
+        self.assertIn('cantidad del diseño personalizado', updated.json()['detail'])
+        self.assertEqual(
+            CustomerCartItem.objects.get(customer=self.customer, product=custom_product).quantity,
+            1,
+        )
+
+        removed = self.client.delete(f'/api/v1/cart/items/{custom_product.id}/')
+        self.assertEqual(removed.status_code, 204)
+        self.assertFalse(CustomerCartItem.objects.filter(customer=self.customer, product=custom_product).exists())
+
+    def test_custom_design_products_never_appear_in_public_catalog_or_other_customers_cart(self):
+        other_user = User.objects.create_user(
+            username='cliente-diseno-privado',
+            email='cliente-diseno-privado@example.com',
+            password='ClaveSegura2026!',
+        )
+        other_customer = Customer.objects.create(
+            user=other_user,
+            name='Cliente diseño privado',
+            email='cliente-diseno-privado@example.com',
+        )
+        design = CustomDesign.objects.create(
+            customer=other_customer,
+            pattern='rombos',
+            base_color='#112233',
+            accent_color_one='#445566',
+            accent_color_two='#778899',
+            size='M',
+            estimated_price=Decimal('120000'),
+        )
+        private_product = Product.objects.create(
+            sku='CUSTOM-PRIVATE-CATALOG-001',
+            name='Diseño que debe ser privado',
+            category=self.category,
+            custom_design=design,
+            price=Decimal('120000'),
+            stock=1,
+            active=True,
+            made_to_order=True,
+        )
+
+        self.assertNotIn(
+            private_product.id,
+            [item['id'] for item in self.client.get('/api/v1/products/').json()['results']],
+        )
+        self.assertEqual(self.client.get(f'/api/v1/products/{private_product.id}/').status_code, 404)
+
+        self.client.force_login(self.user)
+        add_attempt = self.client.post('/api/v1/cart/items/', {
+            'product_id': private_product.id,
+            'quantity': 1,
+        }, content_type='application/json')
+        self.assertEqual(add_attempt.status_code, 404)
+        self.assertEqual(self.client.get('/api/v1/cart/').json()['count'], 0)
+
+    def test_customer_cannot_update_another_customers_inactive_product(self):
+        other_user = User.objects.create_user(
+            username='otro-cliente-diseno',
+            email='otro-cliente-diseno@example.com',
+            password='ClaveSegura2026!',
+        )
+        other_customer = Customer.objects.create(
+            user=other_user,
+            name='Otro cliente',
+            email='otro-cliente-diseno@example.com',
+        )
+        design = CustomDesign.objects.create(
+            customer=other_customer,
+            pattern='rombos',
+            base_color='#112233',
+            accent_color_one='#445566',
+            accent_color_two='#778899',
+            size='M',
+            estimated_price=Decimal('120000'),
+        )
+        custom_product = Product.objects.create(
+            sku='CUSTOM-CART-API-002',
+            name='Diseño privado de otro cliente',
+            category=self.category,
+            custom_design=design,
+            price=Decimal('120000'),
+            stock=1,
+            active=False,
+            made_to_order=True,
+        )
+        self.client.force_login(self.user)
+        response = self.client.patch(
+            f'/api/v1/cart/items/{custom_product.id}/',
+            {'quantity': 1},
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_customer_cart_persists_after_logout_and_new_login(self):
+        self.client.force_login(self.user)
+        added = self.client.post('/api/v1/cart/items/', {
+            'product_id': self.product.id,
+            'quantity': 2,
+        }, content_type='application/json')
+        self.assertEqual(added.status_code, 201)
+        self.assertEqual(CustomerCartItem.objects.get(customer=self.customer, product=self.product).quantity, 2)
+
+        self.client.post('/api/v1/auth/logout/')
+        self.client.force_login(self.user)
+        restored = self.client.get('/api/v1/cart/')
+
+        self.assertEqual(restored.status_code, 200)
+        self.assertEqual(restored.json()['count'], 2)
+        self.assertEqual(restored.json()['items'][0]['product']['id'], self.product.id)
+
     def test_html_checkout_uses_authenticated_customer_profile(self):
         self.client.force_login(self.user)
 
@@ -359,6 +500,41 @@ class StoreAPITests(TestCase):
         self.assertEqual(designs.json()[0]['accent_color_two'], '#87978c')
         self.assertEqual(designs.json()[0]['status_label'], 'Pendiente')
 
+    def test_craftswoman_can_accept_order_without_design_change_permission(self):
+        craft_user = self.create_role_user(
+            'tejedora-order-without-design-change',
+            AccessRole.Code.CRAFTSWOMAN,
+        )
+        craftswoman = Craftswoman.objects.create(
+            user=craft_user,
+            name='Tejedora Pedido Normal',
+            active=True,
+        )
+        role = AccessRole.objects.get(code=AccessRole.Code.CRAFTSWOMAN)
+        orders_permission = permission_for('orders', 'change')
+        designs_permission = permission_for('designs', 'change')
+        RolePermission.objects.get_or_create(role=role, permission=orders_permission)
+        RolePermission.objects.filter(role=role, permission=designs_permission).delete()
+
+        order = Order.objects.create(
+            customer=self.customer,
+            shipping_address='Maicao, La Guajira',
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            quantity=1,
+            unit_price=self.product.price,
+        )
+        self.client.force_login(craft_user)
+
+        response = self.client.post(f'/api/v1/craftswoman/orders/{order.id}/accept/')
+
+        self.assertEqual(response.status_code, 200)
+        order.refresh_from_db()
+        self.assertEqual(order.craftswoman_id, craftswoman.id)
+        self.assertEqual(order.status, Order.Status.ACCEPTED)
+
     def test_craftswoman_can_accept_orders_and_update_design_status(self):
         craft_user = User.objects.create_user(
             username='tejedora-api',
@@ -398,6 +574,35 @@ class StoreAPITests(TestCase):
         self.assertEqual(updated_design.status_code, 200)
         self.assertEqual(updated_design.json()['status'], Order.Status.WEAVING)
 
+    def test_craftswoman_can_submit_own_product_for_admin_review(self):
+        craft_user = self.create_role_user('tejedora-products-api', AccessRole.Code.CRAFTSWOMAN)
+        craftswoman = Craftswoman.objects.create(user=craft_user, name='Tejedora Productos', active=True)
+        self.client.force_login(craft_user)
+
+        created = self.client.post('/api/v1/craftswoman/products/', {
+            'sku': 'CRAFT-OWN-001',
+            'name': 'Manta de mi taller',
+            'category': self.category.id,
+            'description': 'Tejido tradicional.',
+            'region': 'La Guajira',
+            'color': 'Borgoña y crema',
+            'size': 'M',
+            'production_time': '20 días',
+            'image_url': 'https://example.com/manta-wayuu.jpg',
+            'price': '280000',
+            'stock': 2,
+        }, content_type='application/json')
+
+        self.assertEqual(created.status_code, 201)
+        self.assertFalse(created.json()['active'])
+        product = Product.objects.get(sku='CRAFT-OWN-001')
+        self.assertEqual(product.craftswoman_id, craftswoman.id)
+        self.assertEqual(
+            self.client.get('/api/v1/craftswoman/products/').json()[0]['id'],
+            product.id,
+        )
+
+
     def test_admin_can_manage_products_and_order_status(self):
         admin = self.create_role_user('admin-api', AccessRole.Code.ADMIN)
         order = Order.objects.create(customer=self.customer, shipping_address='Maicao, La Guajira')
@@ -428,6 +633,47 @@ class StoreAPITests(TestCase):
         self.assertFalse(updated.json()['active'])
         self.assertEqual(order_status.status_code, 200)
         self.assertEqual(order_status.json()['status'], Order.Status.PREPARING)
+
+    def test_admin_can_review_and_publish_product_submitted_by_craftswoman(self):
+        craft_user = self.create_role_user('weaver-review-flow', AccessRole.Code.CRAFTSWOMAN)
+        craftswoman = Craftswoman.objects.create(
+            user=craft_user, name='Tejedora Flujo', active=True,
+        )
+        self.client.force_login(craft_user)
+        submitted = self.client.post('/api/v1/craftswoman/products/', {
+            'sku': 'FLOW-WAY-001',
+            'name': 'Manta de prueba de flujo',
+            'category': self.category.id,
+            'description': 'Manta tejida para comprobar la revisión administrativa.',
+            'region': 'La Guajira',
+            'color': 'Borgoña y crema',
+            'size': 'M',
+            'production_time': '15 días',
+            'image_url': 'https://example.com/flow-wayuu.jpg',
+            'price': '280000',
+            'stock': 1,
+        }, content_type='application/json')
+        self.assertEqual(submitted.status_code, 201)
+        self.assertFalse(submitted.json()['active'])
+
+        admin = self.create_role_user('admin-review-flow', AccessRole.Code.ADMIN)
+        self.client.force_login(admin)
+        review_list = self.client.get('/api/v1/admin/products/')
+        reviewed_product = next(
+            item for item in review_list.json() if item['sku'] == 'FLOW-WAY-001'
+        )
+        self.assertEqual(reviewed_product['craftswoman'], craftswoman.id)
+        self.assertEqual(reviewed_product['craftswoman_name'], 'Tejedora Flujo')
+        self.assertFalse(reviewed_product['active'])
+
+        approved = self.client.patch(
+            f"/api/v1/admin/products/{submitted.json()['id']}/",
+            {'active': True},
+            content_type='application/json',
+        )
+        self.assertEqual(approved.status_code, 200)
+        self.assertTrue(approved.json()['active'])
+        self.assertEqual(approved.json()['craftswoman'], craftswoman.id)
 
     def test_admin_product_routes_reject_customers(self):
         self.client.force_login(self.user)
@@ -1321,6 +1567,7 @@ class StoreAPITests(TestCase):
                 ('cart', 'view'), ('cart', 'add'), ('cart', 'change'), ('cart', 'delete'),
             },
             AccessRole.Code.CRAFTSWOMAN: {
+                ('products', 'view'), ('products', 'add'), ('products', 'change'),
                 ('orders', 'view'), ('orders', 'change'),
                 ('designs', 'view'), ('designs', 'change'),
             },
@@ -1804,7 +2051,8 @@ class StoreAPITests(TestCase):
 
         dashboard = self.client.get('/api/v1/craftswoman/dashboard/')
         html_dashboard = self.client.get('/panel-tejedora/')
-        self.assertEqual(dashboard.status_code, 403)
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertEqual(dashboard.json()['designs'], [])
         self.assertEqual(html_dashboard.status_code, 403)
 
         UserPermissionGrant.objects.filter(user=craft_user).delete()
@@ -1937,6 +2185,98 @@ class StoreAPITests(TestCase):
 
         self.assertFalse(inline.has_add_permission(request, order))
 
+
+    def test_superadmin_can_create_update_and_delete_navigation_items(self):
+        superadmin = self.create_role_user('rbac-navigation-superadmin', AccessRole.Code.SUPERADMIN)
+        self.client.force_login(superadmin)
+        create = self.client.post('/api/v1/admin/rbac/navigation/', {
+            'label': 'Mis pedidos',
+            'route_name': 'customer.orders',
+            'description': 'Consulta tus pedidos.',
+            'role_codes': ['customer'],
+            'permission_resource': 'orders',
+            'permission_action': 'view',
+            'order': 4,
+            'active': True,
+        }, content_type='application/json')
+        self.assertEqual(create.status_code, 201)
+        item_id = create.json()['id']
+        self.assertEqual(create.json()['role_codes'], ['customer'])
+        self.assertEqual(create.json()['permission_resource'], 'orders')
+
+        update = self.client.patch(
+            f'/api/v1/admin/rbac/navigation/{item_id}/',
+            {'label': 'Historial de pedidos', 'active': False},
+            content_type='application/json',
+        )
+        self.assertEqual(update.status_code, 200)
+        self.assertEqual(update.json()['label'], 'Historial de pedidos')
+        self.assertFalse(update.json()['active'])
+
+        delete = self.client.delete(f'/api/v1/admin/rbac/navigation/{item_id}/')
+        self.assertEqual(delete.status_code, 204)
+        self.assertFalse(NavigationItem.objects.filter(pk=item_id).exists())
+
+    def test_role_navigation_endpoint_filters_by_role_and_effective_permissions(self):
+        NavigationItem.objects.all().delete()
+        craftswoman = self.create_role_user('role-menu-craftswoman', AccessRole.Code.CRAFTSWOMAN)
+        role = AccessRole.objects.get(code=AccessRole.Code.CRAFTSWOMAN)
+        RolePermission.objects.get_or_create(role=role, permission=permission_for('products', 'view'))
+        visible_item = NavigationItem.objects.create(
+            label='Mis tejidos',
+            route_name='craftswoman.products',
+            active=True,
+        )
+        visible_item.roles.add(role)
+        inactive_item = NavigationItem.objects.create(
+            label='Panel oculto',
+            route_name='craftswoman.dashboard',
+            active=False,
+        )
+        inactive_item.roles.add(role)
+        wrong_role_item = NavigationItem.objects.create(
+            label='Pedidos de cliente',
+            route_name='customer.orders',
+            active=True,
+        )
+        wrong_role_item.roles.add(role)
+
+        self.client.force_login(craftswoman)
+        response = self.client.get('/api/v1/navigation/menu/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item['route_name'] for item in response.json()], ['craftswoman.products'])
+
+        UserPermissionGrant.objects.create(
+            user=craftswoman,
+            permission=permission_for('products', 'view'),
+            effect=UserPermissionGrant.Effect.DENY,
+        )
+        denied = self.client.get('/api/v1/navigation/menu/')
+        self.assertEqual(denied.status_code, 200)
+        self.assertEqual(denied.json(), [])
+
+    def test_navigation_route_allowlist_rejects_arbitrary_routes_and_wrong_roles(self):
+        superadmin = self.create_role_user('role-menu-superadmin', AccessRole.Code.SUPERADMIN)
+        self.client.force_login(superadmin)
+        invalid_route = self.client.post('/api/v1/admin/rbac/navigation/', {
+            'label': 'Ruta libre',
+            'route_name': '/admin/secreto',
+            'role_codes': ['admin'],
+        }, content_type='application/json')
+        self.assertEqual(invalid_route.status_code, 400)
+
+        invalid_role = self.client.post('/api/v1/admin/rbac/navigation/', {
+            'label': 'Pantalla de cliente',
+            'route_name': 'customer.orders',
+            'role_codes': ['admin'],
+        }, content_type='application/json')
+        self.assertEqual(invalid_role.status_code, 400)
+
+    def test_non_superadmin_cannot_manage_navigation(self):
+        admin_user = self.create_role_user('rbac-navigation-admin', AccessRole.Code.ADMIN)
+        self.client.force_login(admin_user)
+        response = self.client.get('/api/v1/admin/rbac/navigation/')
+        self.assertEqual(response.status_code, 403)
 
 class RBACProtectionTransactionTests(TransactionTestCase):
     def create_superadmin(self, username):

@@ -24,8 +24,10 @@ from .models import (
     Craftswoman,
     CustomDesign,
     Customer,
+    CustomerCartItem,
     Order,
     OrderItem,
+    NavigationItem,
     PermissionDelegation,
     Product,
     RolePermission,
@@ -76,26 +78,37 @@ class CraftswomanSummarySerializer(serializers.ModelSerializer):
 class ProductSerializer(serializers.ModelSerializer):
     category = CategorySerializer(read_only=True)
     craftswoman = CraftswomanSummarySerializer(read_only=True)
+    is_custom_design = serializers.SerializerMethodField()
+
+    @staticmethod
+    def get_is_custom_design(product):
+        return bool(product.custom_design_id)
 
     class Meta:
         model = Product
         fields = (
             'id', 'sku', 'name', 'category', 'craftswoman', 'description', 'region',
             'color', 'size', 'production_time', 'price', 'stock', 'image_url',
-            'made_to_order', 'created_at', 'updated_at',
+            'made_to_order', 'active', 'is_custom_design', 'created_at', 'updated_at',
         )
 
 
 class AdminProductSerializer(serializers.ModelSerializer):
     category = serializers.PrimaryKeyRelatedField(queryset=Category.objects.all())
+    craftswoman_name = serializers.CharField(source='craftswoman.name', read_only=True, allow_null=True, default=None)
     craftswoman = serializers.PrimaryKeyRelatedField(
         queryset=Craftswoman.objects.all(), required=False, allow_null=True,
     )
 
+    def validate_active(self, value):
+        if value and self.instance and self.instance.custom_design_id:
+            raise serializers.ValidationError('Los diseños personalizados son privados y no se pueden publicar en el catálogo.')
+        return value
+
     class Meta:
         model = Product
         fields = (
-            'id', 'sku', 'name', 'category', 'craftswoman', 'description', 'region',
+            'id', 'sku', 'name', 'category', 'craftswoman', 'craftswoman_name', 'description', 'region',
             'color', 'size', 'production_time', 'price', 'stock', 'image_url',
             'made_to_order', 'active', 'created_at', 'updated_at',
         )
@@ -299,6 +312,23 @@ class ProfileSerializer(serializers.ModelSerializer):
         read_only_fields = ('email',)
 
 
+class CraftswomanProductWriteSerializer(serializers.ModelSerializer):
+    category = serializers.PrimaryKeyRelatedField(queryset=Category.objects.filter(active=True))
+    description = serializers.CharField(required=True, allow_blank=False, min_length=10, max_length=2000)
+    region = serializers.CharField(required=True, allow_blank=False, max_length=100)
+    color = serializers.CharField(required=True, allow_blank=False, max_length=150)
+    size = serializers.CharField(required=True, allow_blank=False, max_length=30)
+    production_time = serializers.CharField(required=True, allow_blank=False, max_length=100)
+    image_url = serializers.URLField(required=True, allow_blank=False)
+
+    class Meta:
+        model = Product
+        fields = (
+            'sku', 'name', 'category', 'description', 'region', 'color', 'size',
+            'production_time', 'price', 'stock', 'image_url', 'made_to_order',
+        )
+
+
 class CartItemInputSerializer(serializers.Serializer):
     product_id = serializers.IntegerField(min_value=1)
     quantity = serializers.IntegerField(min_value=1, max_value=100)
@@ -396,6 +426,59 @@ class SuperadminUserWriteSerializer(serializers.Serializer):
                 validate_password(password, user=instance)
             except DjangoValidationError as error:
                 raise serializers.ValidationError({'password': list(error.messages)}) from error
+        return attrs
+
+
+NAVIGATION_ROUTE_RULES = {
+    'customer.orders': {'roles': {AccessRole.Code.CUSTOMER}, 'permissions': (('orders', 'view'),)},
+    'customer.designs': {'roles': {AccessRole.Code.CUSTOMER}, 'permissions': (('designs', 'view'),)},
+    'customer.profile': {'roles': {AccessRole.Code.CUSTOMER}, 'permissions': (('customers', 'view'),)},
+    'craftswoman.dashboard': {'roles': {AccessRole.Code.CRAFTSWOMAN}, 'permissions': (('products', 'view'), ('orders', 'view'))},
+    'craftswoman.products': {'roles': {AccessRole.Code.CRAFTSWOMAN}, 'permissions': (('products', 'view'),)},
+    'craftswoman.inventory': {'roles': {AccessRole.Code.CRAFTSWOMAN}, 'permissions': (('products', 'view'),)},
+    'craftswoman.orders': {'roles': {AccessRole.Code.CRAFTSWOMAN}, 'permissions': (('orders', 'view'),)},
+    'admin.dashboard': {'roles': {AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN}, 'permissions': (('products', 'view'), ('orders', 'view'))},
+    'admin.products': {'roles': {AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN}, 'permissions': (('products', 'view'),)},
+    'admin.orders': {'roles': {AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN}, 'permissions': (('orders', 'view'),)},
+    'admin.categories': {'roles': {AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN}, 'permissions': (('categories', 'view'),)},
+}
+class NavigationItemWriteSerializer(serializers.Serializer):
+    label = serializers.CharField(max_length=80)
+    route_name = serializers.ChoiceField(choices=tuple((key, key) for key in NAVIGATION_ROUTE_RULES))
+    anchor = serializers.CharField(max_length=80, required=False, allow_blank=True)
+    description = serializers.CharField(max_length=220, required=False, allow_blank=True)
+    role_codes = serializers.ListField(
+        child=serializers.ChoiceField(choices=AccessRole.Code.choices),
+        allow_empty=False,
+    )
+    permission_resource = serializers.ChoiceField(
+        choices=tuple((key, key) for key in PERMISSION_RESOURCES),
+        required=False,
+        allow_null=True,
+    )
+    permission_action = serializers.ChoiceField(
+        choices=tuple((action, action) for action in PERMISSION_ACTIONS),
+        required=False,
+        allow_null=True,
+    )
+    order = serializers.IntegerField(min_value=0, max_value=32767, required=False, default=10)
+    active = serializers.BooleanField(required=False, default=True)
+
+    def validate(self, attrs):
+        resource = attrs.get('permission_resource')
+        action = attrs.get('permission_action')
+        if bool(resource) != bool(action):
+            raise serializers.ValidationError('Selecciona tanto el recurso como la acción requerida, o deja ambos vacíos.')
+        if resource and permission_for(resource, action) is None:
+            raise serializers.ValidationError('El permiso seleccionado no existe.')
+        if 'role_codes' in attrs and len(attrs['role_codes']) != len(set(attrs['role_codes'])):
+            raise serializers.ValidationError({'role_codes': 'No repitas roles.'})
+        route_name = attrs.get('route_name')
+        role_codes = attrs.get('role_codes')
+        if route_name and role_codes is not None:
+            invalid_roles = set(role_codes) - NAVIGATION_ROUTE_RULES[route_name]['roles']
+            if invalid_roles:
+                raise serializers.ValidationError({'role_codes': 'La pantalla seleccionada no está disponible para uno o más roles elegidos.'})
         return attrs
 
 
@@ -516,24 +599,49 @@ def _customer_for(user):
     return customer
 
 
-def _cart_for(request):
-    cart = request.session.get('cart')
-    if not isinstance(cart, dict):
-        cart = {}
-        request.session['cart'] = cart
-    return cart
+def _sync_legacy_session_cart(request, customer):
+    """Migra una sola vez los carritos de sesión existentes al almacenamiento por cuenta."""
+    legacy_cart = request.session.get('cart')
+    if isinstance(legacy_cart, dict):
+        for product_id, raw_quantity in legacy_cart.items():
+            if not str(product_id).isdigit():
+                continue
+            try:
+                quantity = max(0, int(raw_quantity))
+            except (TypeError, ValueError):
+                continue
+            if not quantity:
+                continue
+            product = Product.objects.filter(id=int(product_id), active=True).first()
+            if not product or product.stock < 1:
+                continue
+            item, created = CustomerCartItem.objects.get_or_create(
+                customer=customer,
+                product=product,
+                defaults={'quantity': min(quantity, product.stock)},
+            )
+            if not created:
+                item.quantity = min(item.quantity + quantity, product.stock)
+                item.save(update_fields=('quantity', 'updated_at'))
+        request.session.pop('cart', None)
+        request.session.modified = True
 
 
 def _cart_items(request, customer):
-    cart = _cart_for(request)
-    product_ids = [int(key) for key in cart if str(key).isdigit()]
-    products = Product.objects.filter(id__in=product_ids).select_related('category', 'craftswoman', 'custom_design', 'custom_design__customer')
+    _sync_legacy_session_cart(request, customer)
+    cart_rows = CustomerCartItem.objects.filter(customer=customer).select_related(
+        'product__category', 'product__craftswoman', 'product__custom_design',
+        'product__custom_design__customer',
+    )
     items = []
     total = Decimal('0')
-    for product in products:
-        if not product.active and (not product.custom_design_id or product.custom_design.customer_id != customer.id):
+    for row in cart_rows:
+        product = row.product
+        if product.custom_design_id and product.custom_design.customer_id != customer.id:
             continue
-        quantity = min(max(int(cart.get(str(product.id), 0)), 0), product.stock)
+        if not product.active and not product.custom_design_id:
+            continue
+        quantity = min(row.quantity, product.stock)
         if not quantity:
             continue
         subtotal = product.price * quantity
@@ -599,7 +707,7 @@ class ProductListView(PaginatedAPIView):
     permission_classes = (AllowAny,)
 
     def get(self, request):
-        products = Product.objects.filter(active=True).select_related('category', 'craftswoman')
+        products = Product.objects.filter(active=True, custom_design__isnull=True).select_related('category', 'craftswoman')
         search = request.query_params.get('search', '').strip()
         if search:
             products = products.filter(
@@ -634,7 +742,7 @@ class ProductDetailView(APIView):
 
     def get(self, request, product_id):
         product = get_object_or_404(
-            Product.objects.select_related('category', 'craftswoman'), id=product_id, active=True,
+            Product.objects.select_related('category', 'craftswoman'), id=product_id, active=True, custom_design__isnull=True,
         )
         return Response(ProductSerializer(product).data)
 
@@ -1012,6 +1120,112 @@ class SuperadminAuditView(APIView):
         } for event in events])
 
 
+class SuperadminNavigationView(APIView):
+    permission_classes = (SuperadminOnly,)
+    rbac_resource = 'navigation'
+
+    def get(self, request):
+        items = NavigationItem.objects.prefetch_related('roles').select_related('permission__content_type').order_by('order', 'label')
+        return Response([self.serialize_item(item) for item in items])
+
+    @staticmethod
+    def serialize_item(item):
+        key = permission_key(item.permission) if item.permission_id else None
+        return {
+            'id': item.id,
+            'label': item.label,
+            'route_name': item.route_name,
+            'anchor': item.anchor,
+            'description': item.description,
+            'role_codes': list(item.roles.values_list('code', flat=True)),
+            'permission_resource': key[0] if key else None,
+            'permission_action': key[1] if key else None,
+            'order': item.order,
+            'active': item.active,
+        }
+
+    def post(self, request):
+        serializer = NavigationItemWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        role_codes = values.pop('role_codes')
+        resource = values.pop('permission_resource', None)
+        action = values.pop('permission_action', None)
+        item = NavigationItem.objects.create(
+            **values,
+            permission=permission_for(resource, action) if resource else None,
+        )
+        item.roles.set(AccessRole.objects.filter(code__in=role_codes))
+        record_audit(request.user, 'create_navigation_item', 'navigation', instance=item)
+        return Response(self.serialize_item(item), status=status.HTTP_201_CREATED)
+
+
+class SuperadminNavigationDetailView(APIView):
+    permission_classes = (SuperadminOnly,)
+    rbac_resource = 'navigation'
+
+    def patch(self, request, item_id):
+        item = get_object_or_404(NavigationItem, pk=item_id)
+        serializer = NavigationItemWriteSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        role_codes = values.pop('role_codes', None)
+        next_route = values.get('route_name', item.route_name)
+        next_roles = set(role_codes) if role_codes is not None else set(item.roles.values_list('code', flat=True))
+        route_rule = NAVIGATION_ROUTE_RULES.get(next_route)
+        if route_rule is None:
+            raise serializers.ValidationError({'route_name': 'Esta opción usa una ruta antigua no permitida. Elimínala y créala de nuevo con una pantalla disponible.'})
+        allowed_roles = route_rule['roles']
+        if next_roles - allowed_roles:
+            raise serializers.ValidationError({'role_codes': 'La pantalla seleccionada no está disponible para uno o más roles elegidos.'})
+        resource = values.pop('permission_resource', serializers.empty)
+        action = values.pop('permission_action', serializers.empty)
+        if resource is not serializers.empty or action is not serializers.empty:
+            current_resource, current_action = permission_key(item.permission) if item.permission_id else (None, None)
+            next_resource = current_resource if resource is serializers.empty else resource
+            next_action = current_action if action is serializers.empty else action
+            if bool(next_resource) != bool(next_action):
+                raise serializers.ValidationError('Selecciona tanto el recurso como la acción requerida, o deja ambos vacíos.')
+            item.permission = permission_for(next_resource, next_action) if next_resource else None
+        for field, value in values.items():
+            setattr(item, field, value)
+        item.save()
+        if role_codes is not None:
+            item.roles.set(AccessRole.objects.filter(code__in=role_codes))
+        record_audit(request.user, 'update_navigation_item', 'navigation', instance=item)
+        return Response(SuperadminNavigationView.serialize_item(item))
+
+    def delete(self, request, item_id):
+        item = get_object_or_404(NavigationItem, pk=item_id)
+        record_audit(request.user, 'delete_navigation_item', 'navigation', instance=item)
+        item.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class RoleNavigationMenuView(APIView):
+    """Devuelve solo opciones permitidas para el rol y los permisos efectivos actuales."""
+    permission_classes = (IsAuthenticated, HasAssignedRole)
+
+    def get(self, request):
+        role = role_for_user(request.user)
+        if role is None:
+            return Response([])
+        visible = []
+        items = NavigationItem.objects.filter(active=True, roles=role).select_related('permission__content_type').order_by('order', 'label')
+        for item in items:
+            rule = NAVIGATION_ROUTE_RULES.get(item.route_name)
+            if not rule or role.code not in rule['roles']:
+                continue
+            if not all(has_rbac_permission(request.user, resource, action) for resource, action in rule['permissions']):
+                continue
+            if item.permission_id:
+                key = permission_key(item.permission)
+                if not key or not has_rbac_permission(request.user, *key):
+                    continue
+            visible.append(SuperadminNavigationView.serialize_item(item))
+        return Response(visible)
+
+
 class AdminCategoryListView(APIView):
     permission_classes = (AdminOrSuperadmin,)
     rbac_resource = 'categories'
@@ -1180,18 +1394,27 @@ class CartItemListView(APIView):
     rbac_resource = 'cart'
 
     def post(self, request):
-        _customer_for(request.user)
+        customer = _customer_for(request.user)
         serializer = CartItemInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        product = get_object_or_404(Product, id=serializer.validated_data['product_id'], active=True)
+        product = get_object_or_404(
+            Product.objects.filter(active=True, custom_design__isnull=True),
+            id=serializer.validated_data['product_id'],
+        )
         quantity = serializer.validated_data['quantity']
-        cart = _cart_for(request)
-        key = str(product.id)
-        new_quantity = int(cart.get(key, 0)) + quantity
-        if product.stock < new_quantity:
-            return Response({'detail': 'No hay suficientes unidades disponibles.'}, status=status.HTTP_400_BAD_REQUEST)
-        cart[key] = new_quantity
-        request.session.modified = True
+        _sync_legacy_session_cart(request, customer)
+        with transaction.atomic():
+            row, created = CustomerCartItem.objects.select_for_update().get_or_create(
+                customer=customer, product=product, defaults={'quantity': quantity},
+            )
+            new_quantity = row.quantity if created else row.quantity + quantity
+            if product.stock < new_quantity:
+                if created:
+                    row.delete()
+                return Response({'detail': 'No hay suficientes unidades disponibles.'}, status=status.HTTP_400_BAD_REQUEST)
+            if not created:
+                row.quantity = new_quantity
+                row.save(update_fields=('quantity', 'updated_at'))
         return Response({'detail': 'Producto agregado.', 'product_id': product.id, 'quantity': new_quantity}, status=status.HTTP_201_CREATED)
 
 
@@ -1200,26 +1423,33 @@ class CartItemDetailView(APIView):
     rbac_resource = 'cart'
 
     def patch(self, request, product_id):
-        _customer_for(request.user)
-        cart = _cart_for(request)
-        key = str(product_id)
-        if key not in cart:
-            return Response({'detail': 'El producto no está en el carrito.'}, status=status.HTTP_404_NOT_FOUND)
+        customer = _customer_for(request.user)
         serializer = CartQuantitySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        product = get_object_or_404(Product, id=product_id, active=True)
+        product = get_object_or_404(
+            Product.objects.filter(
+                models.Q(active=True, custom_design__isnull=True) | models.Q(custom_design__customer=customer),
+            ).distinct(),
+            id=product_id,
+        )
         quantity = serializer.validated_data['quantity']
+        if product.custom_design_id and quantity != 1:
+            return Response(
+                {'detail': 'La cantidad del diseño personalizado ya está incluida en su precio. Puedes retirar el diseño del carrito, pero no multiplicarlo.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        _sync_legacy_session_cart(request, customer)
         if quantity > product.stock:
             return Response({'detail': 'No hay suficientes unidades disponibles.'}, status=status.HTTP_400_BAD_REQUEST)
-        cart[key] = quantity
-        request.session.modified = True
+        updated = CustomerCartItem.objects.filter(customer=customer, product=product).update(quantity=quantity)
+        if not updated:
+            return Response({'detail': 'El producto no está en el carrito.'}, status=status.HTTP_404_NOT_FOUND)
         return Response({'detail': 'Carrito actualizado.', 'product_id': product.id, 'quantity': quantity})
 
     def delete(self, request, product_id):
-        _customer_for(request.user)
-        cart = _cart_for(request)
-        cart.pop(str(product_id), None)
-        request.session.modified = True
+        customer = _customer_for(request.user)
+        _sync_legacy_session_cart(request, customer)
+        CustomerCartItem.objects.filter(customer=customer, product_id=product_id).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -1268,7 +1498,8 @@ class CheckoutView(APIView):
                 details={'item_count': len(items)},
                 instance=order,
             )
-        request.session['cart'] = {}
+        CustomerCartItem.objects.filter(customer=customer).delete()
+        request.session.pop('cart', None)
         request.session.modified = True
         order = Order.objects.prefetch_related('items__product').select_related('craftswoman').get(id=order.id)
         return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
@@ -1350,13 +1581,63 @@ class CustomDesignListView(APIView):
                 affected_user=request.user,
                 instance=design,
             )
-        cart = _cart_for(request)
-        cart[str(product.id)] = 1
-        request.session.modified = True
+        CustomerCartItem.objects.update_or_create(
+            customer=customer,
+            product=product,
+            defaults={'quantity': 1},
+        )
         return Response(
             {**CustomDesignSerializer(design).data, 'product_id': product.id},
             status=status.HTTP_201_CREATED,
         )
+
+
+class CraftswomanProductsView(APIView):
+    permission_classes = (CraftswomanOnly,)
+    rbac_resource = 'products'
+
+    def get(self, request):
+        craftswoman = get_object_or_404(Craftswoman, user=request.user)
+        products = Product.objects.filter(craftswoman=craftswoman).select_related('category', 'craftswoman')
+        return Response(ProductSerializer(products, many=True).data)
+
+    def post(self, request):
+        if not has_rbac_permission(request.user, 'products', 'add'):
+            raise PermissionDenied('No tienes permiso para registrar productos.')
+        craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
+        serializer = CraftswomanProductWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        product = serializer.save(craftswoman=craftswoman, active=False)
+        record_audit(
+            request.user,
+            'craftswoman_submit_product',
+            'products',
+            details={'product_name': product.name, 'publication_status': 'pending'},
+            instance=product,
+        )
+        return Response(ProductSerializer(product).data, status=status.HTTP_201_CREATED)
+
+
+class CraftswomanProductDetailView(APIView):
+    permission_classes = (CraftswomanOnly,)
+    rbac_resource = 'products'
+
+    def patch(self, request, product_id):
+        if not has_rbac_permission(request.user, 'products', 'change'):
+            raise PermissionDenied('No tienes permiso para corregir tus productos.')
+        craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
+        product = get_object_or_404(Product, id=product_id, craftswoman=craftswoman)
+        serializer = CraftswomanProductWriteSerializer(product, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        product = serializer.save(active=False)
+        record_audit(
+            request.user,
+            'craftswoman_resubmit_product',
+            'products',
+            details={'product_name': product.name, 'publication_status': 'pending_review'},
+            instance=product,
+        )
+        return Response(ProductSerializer(product).data)
 
 
 class CraftswomanDashboardView(APIView):
@@ -1364,14 +1645,12 @@ class CraftswomanDashboardView(APIView):
     rbac_resource = 'orders'
 
     def get(self, request):
-        if not has_rbac_permission(request.user, 'designs', 'view'):
-            raise PermissionDenied('No tienes permiso para consultar los diseños de tu taller.')
         craftswoman = get_object_or_404(Craftswoman, user=request.user)
         available = Order.objects.filter(
             craftswoman__isnull=True, status=Order.Status.PENDING,
         ).select_related('craftswoman').prefetch_related('items__product') if craftswoman.active else Order.objects.none()
         assigned = craftswoman.orders.select_related('craftswoman').prefetch_related('items__product')
-        designs = craftswoman.custom_designs.select_related('customer')
+        designs = craftswoman.custom_designs.select_related('customer') if has_rbac_permission(request.user, 'designs', 'view') else CustomDesign.objects.none()
         return Response({
             'active': craftswoman.active,
             'available_orders': OrderSerializer(available, many=True).data,
@@ -1386,8 +1665,8 @@ class AcceptOrderView(APIView):
     rbac_actions = {'POST': 'change'}
 
     def post(self, request, order_id):
-        if not has_rbac_permission(request.user, 'designs', 'change'):
-            raise PermissionDenied('No tienes permiso para actualizar los diseños asociados al pedido.')
+        if not has_rbac_permission(request.user, 'orders', 'change'):
+            raise PermissionDenied('No tienes permiso para aceptar pedidos.')
         craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
         with transaction.atomic():
             order = get_object_or_404(
@@ -1396,6 +1675,18 @@ class AcceptOrderView(APIView):
                 craftswoman__isnull=True,
                 status=Order.Status.PENDING,
             )
+
+            # Los pedidos con diseños personalizados requieren permiso para modificarlos.
+            has_custom_design = order.items.filter(
+                product__custom_design__isnull=False,
+            ).exists()
+            if has_custom_design and not has_rbac_permission(
+                request.user, 'designs', 'change',
+            ):
+                raise PermissionDenied(
+                    'No tienes permiso para aceptar pedidos con diseños personalizados.'
+                )
+
             order.craftswoman = craftswoman
             order.status = Order.Status.ACCEPTED
             order.save(update_fields=('craftswoman', 'status', 'updated_at'))

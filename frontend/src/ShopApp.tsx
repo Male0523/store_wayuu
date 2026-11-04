@@ -1,12 +1,13 @@
 import { useCallback, useDeferredValue, useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import {
-  ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, Check, ChevronDown,
+  ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, Check, ChevronDown, Eye,
   Camera, CircleUserRound, Heart, LoaderCircle, LockKeyhole, Minus,
   Plus, Search, ShoppingBag, SlidersHorizontal, Trash2, X,
+  LayoutDashboard, Boxes, Layers, LogOut, Sparkles, ShoppingCart,
 } from 'lucide-react'
 import { api, ApiError } from './lib/api'
 import { useUserSession } from './context/user-context'
-import type { AdminCategory, AdminProduct, AuditEvent, Cart, Category, CustomDesign, CraftswomanDashboard, Order, Product, RBACDelegation, RBACPermission, RBACRolePermissions, RBACUserPermissions, SessionUser, SuperadminUser, SuperadminUserInput, UserProfile } from './types'
+import type { AdminCategory, AdminProduct, AuditEvent, Cart, Category, CustomDesign, CraftswomanDashboard, Order, Product, RBACNavigationItem, RBACPermission, RBACRolePermissions, RBACUserPermissions, SessionUser, SuperadminUser, SuperadminUserInput, UserProfile } from './types'
 import './ShopApp.css'
 
 type Screen = 'shop' | 'orders' | 'craftswoman' | 'design' | 'admin'
@@ -84,6 +85,8 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
   const [profileDraft, setProfileDraft] = useState<UserProfile | null>(null)
   const [accountSection, setAccountSection] = useState<AccountSection>('orders')
   const [dashboard, setDashboard] = useState<CraftswomanDashboard | null>(null)
+  const [craftswomanProducts, setCraftswomanProducts] = useState<Product[]>([])
+  const [roleNavigation, setRoleNavigation] = useState<RBACNavigationItem[]>([])
   const [loading, setLoading] = useState(true)
   const [catalogError, setCatalogError] = useState('')
   const [notice, setNotice] = useState('')
@@ -112,11 +115,18 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
   const [designNotes, setDesignNotes] = useState('')
   const featuredProduct = products.find((product) => product.image_url) ?? products[0]
   const customPrice = ({ S: 100000, M: 120000, L: 145000, XL: 175000 }[designSize] ?? 120000) * designQuantity
-  const canRequestDesign = !user || hasEffectivePermission(user, 'designs.add')
+  const canRequestDesign = !user || (hasEffectivePermission(user, 'designs.add') && hasEffectivePermission(user, 'cart.add'))
 
   useEffect(() => {
     setProfileDraft(null)
   }, [user?.id, user?.email, user?.username, user?.role])
+
+  useEffect(() => {
+    let active = true
+    if (!user) { setRoleNavigation([]); return }
+    api.roleNavigation().then((items) => { if (active) setRoleNavigation(items) }).catch(() => { if (active) setRoleNavigation([]) })
+    return () => { active = false }
+  }, [user?.id, user?.role, user?.permissions?.join('|')])
 
   const loadAdminData = useCallback(async () => {
     if (!user || (user.role !== 'admin' && user.role !== 'superadmin')) return
@@ -159,14 +169,47 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
     if (user?.role !== 'customer') {
       return () => { active = false }
     }
-    api.profile().then((profile) => {
-      if (!active) return
-      setCheckoutAddress(profile.address ?? '')
-      setCheckoutCity(profile.city ?? '')
-    }).catch(() => undefined)
-    api.cart().then((nextCart) => { if (active) setCart(nextCart) }).catch(() => { if (active) setCart(null) })
+    if (hasEffectivePermission(user, 'customers.view')) {
+      api.profile().then((profile) => {
+        if (!active) return
+        setCheckoutAddress(profile.address ?? '')
+        setCheckoutCity(profile.city ?? '')
+      }).catch(() => undefined)
+    }
+    if (hasEffectivePermission(user, 'cart.view')) {
+      api.cart().then((nextCart) => { if (active) setCart(nextCart) }).catch(() => { if (active) setCart(null) })
+    } else {
+      setCart(null)
+    }
     return () => { active = false }
   }, [user])
+
+  useEffect(() => {
+    if (initialScreen !== 'craftswoman' || user?.role !== 'craftswoman') return
+
+    let cancelled = false
+    const loadDashboard = async () => {
+      try {
+        const configuredNavigation = await api.roleNavigation()
+        if (cancelled) return
+        setRoleNavigation(configuredNavigation)
+        const routes = configuredNavigation.map((item) => item.route_name)
+        const [data, ownProducts] = await Promise.all([
+          routes.includes('craftswoman.dashboard') || routes.includes('craftswoman.orders') ? api.craftswomanDashboard() : Promise.resolve(null),
+          routes.some((route) => ['craftswoman.dashboard', 'craftswoman.products', 'craftswoman.inventory'].includes(route)) ? api.craftswomanProducts() : Promise.resolve([]),
+        ])
+        if (cancelled) return
+        setDashboard(data)
+        setCraftswomanProducts(ownProducts)
+        setScreen('craftswoman')
+      } catch (error) {
+        if (!cancelled) setNotice(errorMessage(error))
+      }
+    }
+
+    void loadDashboard()
+    return () => { cancelled = true }
+  }, [initialScreen, user?.id, user?.role])
 
   useEffect(() => {
     if (initialScreen !== 'admin' || !user || (user.role !== 'admin' && user.role !== 'superadmin')) return
@@ -326,22 +369,33 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
     setProfileDraft(null)
     setBusy(true)
     try {
+      const configuredNavigation = await api.roleNavigation()
+      setRoleNavigation(configuredNavigation)
       if (user.role === 'admin' || user.role === 'superadmin') {
         await loadAdminData()
         setScreen('admin')
       } else if (user.role === 'craftswoman') {
-        setDashboard(await api.craftswomanDashboard())
+        const visibleRoutes = configuredNavigation.map((item) => item.route_name)
+        const [craftswomanDashboard, ownProducts] = await Promise.all([
+          visibleRoutes.includes('craftswoman.dashboard') || visibleRoutes.includes('craftswoman.orders') ? api.craftswomanDashboard() : Promise.resolve(null),
+          visibleRoutes.some((route) => ['craftswoman.dashboard', 'craftswoman.products', 'craftswoman.inventory'].includes(route)) ? api.craftswomanProducts() : Promise.resolve([]),
+        ])
+        setDashboard(craftswomanDashboard)
+        setCraftswomanProducts(ownProducts)
         setScreen('craftswoman')
       } else {
-        const [orderPage, customerDesigns, customerProfile] = await Promise.all([
-          api.orders(),
-          api.designs(),
-          api.profile(),
+        const visibleRoutes = configuredNavigation.map((item) => item.route_name)
+        const requests = await Promise.all([
+          visibleRoutes.includes('customer.orders') ? api.orders() : Promise.resolve({ results: [] as Order[] }),
+          visibleRoutes.includes('customer.designs') ? api.designs() : Promise.resolve([] as CustomDesign[]),
+          visibleRoutes.includes('customer.profile') ? api.profile() : Promise.resolve(null),
         ])
+        const [orderPage, customerDesigns, customerProfile] = requests
         setOrders(orderPage.results)
         setDesigns(customerDesigns)
         setProfileDraft(customerProfile)
-        setAccountSection('orders')
+        const firstSection = configuredNavigation.find((item) => item.route_name.startsWith('customer.'))?.route_name.split('.')[1] as AccountSection | undefined
+        setAccountSection(firstSection ?? 'orders')
         setScreen('orders')
       }
     } catch (error) { setNotice(errorMessage(error)) } finally { setBusy(false) }
@@ -384,6 +438,23 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
       setScreen('shop')
       setNotice('Diseño creado y agregado al carrito.')
     } catch (error) { setNotice(errorMessage(error)) } finally { setBusy(false) }
+  }
+
+  async function createCraftswomanProduct(values: {
+    sku: string; name: string; category: number; description?: string; region?: string;
+    color?: string; size?: string; production_time?: string; price: string | number;
+    stock: number; image_url?: string; made_to_order?: boolean;
+  }) {
+    setBusy(true)
+    try {
+      const created = await api.createCraftswomanProduct(values)
+      setCraftswomanProducts((current) => [created, ...current])
+      setNotice('Producto enviado a revisión. El administrador debe aprobar su publicación.')
+    } catch (error) {
+      setNotice(errorMessage(error))
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function acceptOrder(orderId: number) {
@@ -473,11 +544,11 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
   }
 
   return <div className="app-shell">
-    <header className="site-header">
+    {screen !== 'craftswoman' && screen !== 'admin' && <header className="site-header">
       <button className="wordmark" onClick={() => setScreen('shop')} aria-label="Ir al inicio"><span className="wordmark-symbol" aria-hidden="true"><span /><span /><span /></span><span>wayuuwaa<small>TEJIDO CON ORIGEN</small></span></button>
       <nav className="main-nav" aria-label="Navegación principal"><button className={screen === 'shop' ? 'active' : ''} onClick={() => setScreen('shop')}>Colección</button>{canRequestDesign && <button className={screen === 'design' ? 'active' : ''} onClick={() => setScreen('design')}>Diseña tu manta</button>}<button className="nav-story" onClick={() => document.getElementById('origen')?.scrollIntoView({ behavior: 'smooth' })}>Nuestro origen</button></nav>
       <div className="header-actions"><label className="header-search" aria-label="Buscar en la colección"><Search size={17} /><input value={query} onChange={(event) => { setQuery(event.target.value); setScreen('shop') }} placeholder="Buscar" /></label><button className="icon-action account-action" onClick={openAccount} title={user ? `Cuenta de ${resolveUserDisplayName(user, profileDraft)}` : 'Iniciar sesión'} aria-label={user ? 'Abrir mi cuenta' : 'Iniciar sesión'}><CircleUserRound size={20} strokeWidth={1.6} /></button><button className="icon-action bag-action" onClick={openCart} title="Abrir carrito" aria-label="Abrir carrito"><ShoppingBag size={20} strokeWidth={1.6} /><span className="bag-count">{cart?.count ?? 0}</span></button></div>
-    </header>
+    </header>}
 
     {screen === 'shop' && <>
       <main>
@@ -493,13 +564,13 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
 
     {screen === 'design' && <main className="inner-page design-page"><button className="back-link" onClick={() => setScreen('shop')}><ArrowLeft size={15} /> Volver a la colección</button><div className="inner-page-heading"><p className="eyebrow"><span className="eyebrow-line" /> HECHA A TU MANERA</p><h1>Imagina tu <em>manta.</em></h1><p>Elige una combinación de color, un patrón y una talla. La tejedora recibirá tus indicaciones junto con el pedido.</p></div><form className="designer-layout" onSubmit={createDesign}><div className="designer-preview"><div className={`weave-preview pattern-${designPattern}`} style={{ '--base': designColors[0], '--accent-one': designColors[1], '--accent-two': designColors[2] } as CSSProperties}><span /><span /><span /><span /></div><div className="preview-caption"><span>VISTA DE COLOR</span><span>{designPattern.toUpperCase()} · TALLA {designSize}</span></div></div><div className="designer-controls"><fieldset><legend>01 / Elige un patrón</legend><div className="pattern-options">{[['rombos', 'Rombos'], ['olas', 'Olas'], ['estrellas', 'Estrellas'], ['caminos', 'Caminos']].map(([value, label]) => <button type="button" key={value} className={designPattern === value ? 'pattern-choice active' : 'pattern-choice'} onClick={() => setDesignPattern(value)}><span className={`pattern-swatch pattern-${value}`} /><span>{label}</span>{designPattern === value && <Check size={14} />}</button>)}</div></fieldset><fieldset><legend>02 / Combina tus colores</legend><div className="color-pickers">{designColors.map((color, index) => <label key={index}><input type="color" value={color} onChange={(event) => setDesignColors((current) => current.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} /><span>{['Base', 'Acento 1', 'Acento 2'][index]}</span></label>)}</div></fieldset><fieldset><legend>03 / Escoge la talla</legend><div className="size-options">{['S', 'M', 'L', 'XL'].map((size) => <button type="button" key={size} className={designSize === size ? 'size-option selected' : 'size-option'} onClick={() => setDesignSize(size)}>{size}</button>)}</div></fieldset><label className="form-label">Cantidad<div className="stepper"><button type="button" onClick={() => setDesignQuantity((value) => Math.max(1, value - 1))} aria-label="Disminuir cantidad"><Minus size={14} /></button><span>{designQuantity}</span><button type="button" onClick={() => setDesignQuantity((value) => Math.min(20, value + 1))} aria-label="Aumentar cantidad"><Plus size={14} /></button></div></label><label className="form-label">Indicaciones para la tejedora<textarea value={designNotes} onChange={(event) => setDesignNotes(event.target.value)} placeholder="Cuéntanos qué te gustaría tener en cuenta…" rows={3} /></label><div className="design-total"><span>Precio estimado</span><strong>{money(customPrice)}</strong><small>El precio final se confirma con la tejedora.</small></div><button className="button button-dark full-button" disabled={busy}>{busy ? <LoaderCircle className="spin" size={16} /> : <ShoppingBag size={16} />} Agregar diseño al carrito</button></div></form></main>}
 
-    {screen === 'orders' && user && <CustomerAccountView user={user} orders={orders} designs={designs} profile={profileDraft} section={accountSection} busy={busy} onSection={setAccountSection} onProfileSubmit={saveProfile} onSignOut={signOut} onShop={() => setScreen('shop')} />}
+    {screen === 'orders' && user && <CustomerAccountView user={user} navigationItems={roleNavigation} orders={orders} designs={designs} profile={profileDraft} section={accountSection} busy={busy} onSection={setAccountSection} onProfileSubmit={saveProfile} onSignOut={signOut} onShop={() => setScreen('shop')} />}
 
-    {screen === 'craftswoman' && dashboard && <CraftswomanAccountView user={user} dashboard={dashboard} onSignOut={signOut} onAcceptOrder={acceptOrder} onOrderStatus={updateOrder} onDesignStatus={updateDesignStatus} />}
+    {screen === 'craftswoman' && user?.role === 'craftswoman' && <CraftswomanAccountView user={user} navigationItems={roleNavigation} dashboard={dashboard} products={craftswomanProducts} categories={categories} busy={busy} onCreateProduct={createCraftswomanProduct} onSignOut={signOut} onAcceptOrder={acceptOrder} onOrderStatus={updateOrder} onDesignStatus={updateDesignStatus} />}
 
-    {screen === 'admin' && user && (user.role === 'admin' || user.role === 'superadmin') && <AdminAccountView user={user} isSuperadmin={user.role === 'superadmin'} orders={orders} products={adminProducts} categories={adminCategories} busy={busy} onSignOut={signOut} onSaveProduct={saveAdminProduct} onCreateProduct={createAdminProduct} onCreateCategory={createAdminCategory} onCategoryActive={updateAdminCategory} onOrderStatus={saveAdminOrderStatus} />}
+    {screen === 'admin' && user && (user.role === 'admin' || user.role === 'superadmin') && <AdminAccountView user={user} isSuperadmin={user.role === 'superadmin'} navigationItems={roleNavigation} orders={orders} products={adminProducts} categories={adminCategories} busy={busy} onSignOut={signOut} onSaveProduct={saveAdminProduct} onCreateProduct={createAdminProduct} onCreateCategory={createAdminCategory} onCategoryActive={updateAdminCategory} onOrderStatus={saveAdminOrderStatus} />}
 
-    {screen !== 'shop' && <Footer onInstagram={() => setNotice('Pronto encontrarás nuestras novedades en Instagram.')} />}
+    {screen !== 'shop' && screen !== 'admin' && <Footer onInstagram={() => setNotice('Pronto encontrarás nuestras novedades en Instagram.')} />}
     {selectedProduct && <ProductDialog product={selectedProduct} busy={busy} onClose={() => setSelectedProduct(null)} onAdd={() => addToCart(selectedProduct.id)} />}
     {cartOpen && <CartDrawer cart={cart} checkoutOpen={checkoutOpen} busy={busy} address={checkoutAddress} city={checkoutCity} paymentMethod={paymentMethod} notes={checkoutNotes} onClose={() => { setCartOpen(false); setCheckoutOpen(false) }} onCheckout={() => setCheckoutOpen(true)} onBack={() => setCheckoutOpen(false)} onQuantity={changeQuantity} onAddress={setCheckoutAddress} onCity={setCheckoutCity} onPayment={setPaymentMethod} onNotes={setCheckoutNotes} onSubmit={submitCheckout} />}
     {authOpen && <AuthDialog mode={authMode} busy={busy} onMode={setAuthMode} onClose={() => { setAuthOpen(false); setPendingProduct(null) }} onSubmit={submitAuth} />}
@@ -524,7 +595,7 @@ function CartDrawer({ cart, checkoutOpen, busy, address, city, paymentMethod, no
   onAddress: (value: string) => void; onCity: (value: string) => void; onPayment: (value: string) => void
   onNotes: (value: string) => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void
 }) {
-  return <div className="drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><aside className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="cart-title"><div className="drawer-header"><div><p className="eyebrow">WAYUUWAA · TU ELECCIÓN</p><h2 id="cart-title">{checkoutOpen ? 'Datos de entrega' : 'Tu carrito'} <span>({cart?.count ?? 0})</span></h2></div><button className="close-button" onClick={onClose} aria-label="Cerrar carrito"><X size={19} /></button></div>{checkoutOpen ? <form className="checkout-form" onSubmit={onSubmit}><button type="button" className="back-link" onClick={onBack}><ArrowLeft size={15} /> Volver al carrito</button><p className="checkout-help">Cuéntanos dónde quieres recibir tu pieza. El pago se coordina contigo.</p><label className="form-label">Dirección de entrega<input required value={address} onChange={(event) => onAddress(event.target.value)} autoComplete="street-address" placeholder="Calle, número, barrio" /></label><label className="form-label">Ciudad<input required value={city} onChange={(event) => onCity(event.target.value)} autoComplete="address-level2" placeholder="Ciudad" /></label><label className="form-label">Forma de pago<select value={paymentMethod} onChange={(event) => onPayment(event.target.value)}><option value="contact">Acordar con la tejedora</option><option value="nequi">Nequi</option><option value="daviplata">Daviplata</option><option value="bancolombia">Bancolombia</option><option value="whatsapp">WhatsApp</option></select></label><label className="form-label">Nota para el pedido<textarea value={notes} onChange={(event) => onNotes(event.target.value)} rows={3} placeholder="Indicaciones de entrega (opcional)" /></label><div className="checkout-total"><span>Total</span><strong>{money(cart?.total ?? 0)}</strong></div><button className="button button-dark full-button" disabled={busy || !cart?.count}>{busy ? <LoaderCircle className="spin" size={16} /> : <LockKeyhole size={16} />} Confirmar pedido</button></form> : <><div className="cart-content">{cart?.items.length ? cart.items.map((item) => <div className="cart-line" key={item.product.id}><ProductPhoto src={item.product.image_url} alt={item.product.name} className="cart-product-photo" /><div className="cart-line-copy"><p className="product-origin">PIEZA WAYUU</p><h3>{item.product.name}</h3><strong>{money(item.product.price)}</strong><div className="cart-stepper"><button onClick={() => onQuantity(item.product.id, item.quantity - 1)} aria-label="Disminuir cantidad"><Minus size={13} /></button><span>{item.quantity}</span><button onClick={() => onQuantity(item.product.id, item.quantity + 1)} aria-label="Aumentar cantidad"><Plus size={13} /></button></div></div><button className="remove-item" onClick={() => onQuantity(item.product.id, 0)} title="Eliminar del carrito" aria-label={`Quitar ${item.product.name}`}><Trash2 size={15} /></button></div>) : <div className="empty-cart"><ShoppingBag size={29} strokeWidth={1.4} /><h3>Tu carrito está esperando.</h3><p>Cuando encuentres tu pieza, estará aquí.</p><button className="text-button" onClick={onClose}>Seguir explorando <ArrowRight size={15} /></button></div>}</div>{cart?.items.length ? <div className="drawer-footer"><div className="subtotal-row"><span>Subtotal</span><strong>{money(cart.total)}</strong></div><p className="drawer-shipping">El costo de envío se confirma al coordinar la entrega.</p><button className="button button-dark full-button" onClick={onCheckout}>Continuar al pedido <ArrowRight size={16} /></button><div className="secure-note"><LockKeyhole size={13} /> Compra acompañada por la tejedora</div></div> : <div className="drawer-footer drawer-footer-empty"><button className="button button-outline full-button" onClick={onClose}>Seguir explorando <ArrowRight size={15} /></button></div>}</>}</aside></div>
+  return <div className="drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><aside className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="cart-title"><div className="drawer-header"><div><p className="eyebrow">WAYUUWAA · TU ELECCIÓN</p><h2 id="cart-title">{checkoutOpen ? 'Datos de entrega' : 'Tu carrito'} <span>({cart?.count ?? 0})</span></h2></div><button className="close-button" onClick={onClose} aria-label="Cerrar carrito"><X size={19} /></button></div>{checkoutOpen ? <form className="checkout-form" onSubmit={onSubmit}><button type="button" className="back-link" onClick={onBack}><ArrowLeft size={15} /> Volver al carrito</button><p className="checkout-help">Cuéntanos dónde quieres recibir tu pieza. El pago se coordina contigo.</p><label className="form-label">Dirección de entrega<input required value={address} onChange={(event) => onAddress(event.target.value)} autoComplete="street-address" placeholder="Calle, número, barrio" /></label><label className="form-label">Ciudad<input required value={city} onChange={(event) => onCity(event.target.value)} autoComplete="address-level2" placeholder="Ciudad" /></label><label className="form-label">Forma de pago<select value={paymentMethod} onChange={(event) => onPayment(event.target.value)}><option value="contact">Acordar con la tejedora</option><option value="nequi">Nequi</option><option value="daviplata">Daviplata</option><option value="bancolombia">Bancolombia</option><option value="whatsapp">WhatsApp</option></select></label><label className="form-label">Nota para el pedido<textarea value={notes} onChange={(event) => onNotes(event.target.value)} rows={3} placeholder="Indicaciones de entrega (opcional)" /></label><div className="checkout-total"><span>Total</span><strong>{money(cart?.total ?? 0)}</strong></div><button className="button button-dark full-button" disabled={busy || !cart?.count}>{busy ? <LoaderCircle className="spin" size={16} /> : <LockKeyhole size={16} />} Confirmar pedido</button></form> : <><div className="cart-content">{cart?.items.length ? cart.items.map((item) => <div className="cart-line" key={item.product.id}><ProductPhoto src={item.product.image_url} alt={item.product.name} className="cart-product-photo" /><div className="cart-line-copy"><p className="product-origin">PIEZA WAYUU</p><h3>{item.product.name}</h3><strong>{money(item.product.price)}</strong>{item.product.is_custom_design ? <p className="checkout-help">Cantidad incluida en el diseño personalizado</p> : <div className="cart-stepper"><button onClick={() => onQuantity(item.product.id, item.quantity - 1)} aria-label="Disminuir cantidad"><Minus size={13} /></button><span>{item.quantity}</span><button onClick={() => onQuantity(item.product.id, item.quantity + 1)} aria-label="Aumentar cantidad"><Plus size={13} /></button></div>}</div><button className="remove-item" onClick={() => onQuantity(item.product.id, 0)} title="Eliminar del carrito" aria-label={`Quitar ${item.product.name}`}><Trash2 size={15} /></button></div>) : <div className="empty-cart"><ShoppingBag size={29} strokeWidth={1.4} /><h3>Tu carrito está esperando.</h3><p>Cuando encuentres tu pieza, estará aquí.</p><button className="text-button" onClick={onClose}>Seguir explorando <ArrowRight size={15} /></button></div>}</div>{cart?.items.length ? <div className="drawer-footer"><div className="subtotal-row"><span>Subtotal</span><strong>{money(cart.total)}</strong></div><p className="drawer-shipping">El costo de envío se confirma al coordinar la entrega.</p><button className="button button-dark full-button" onClick={onCheckout}>Continuar al pedido <ArrowRight size={16} /></button><div className="secure-note"><LockKeyhole size={13} /> Compra acompañada por la tejedora</div></div> : <div className="drawer-footer drawer-footer-empty"><button className="button button-outline full-button" onClick={onClose}>Seguir explorando <ArrowRight size={15} /></button></div>}</>}</aside></div>
 }
 
 function AuthDialog({ mode, busy, onMode, onClose, onSubmit }: { mode: AuthMode; busy: boolean; onMode: (mode: AuthMode) => void; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
@@ -532,8 +603,9 @@ function AuthDialog({ mode, busy, onMode, onClose, onSubmit }: { mode: AuthMode;
   return <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-title"><button className="close-button" onClick={onClose} aria-label="Cerrar"><X size={19} /></button><div className="auth-mark"><span className="wordmark-symbol"><span /><span /><span /></span></div><p className="eyebrow">WAYUUWAA · MI CUENTA</p><h2 id="auth-title">{mode === 'login' ? 'Qué bueno verte.' : mode === 'craftswoman' ? 'Tejamos juntas.' : 'Comienza por aquí.'}</h2><p className="auth-intro">{mode === 'craftswoman' ? 'Envía tu solicitud para vincular tu taller a la tienda.' : 'Inicia sesión para guardar tus piezas y seguir tus pedidos.'}</p><div className="auth-tabs"><button className={mode === 'login' ? 'active' : ''} onClick={() => onMode('login')}>Iniciar sesión</button><button className={mode === 'register' ? 'active' : ''} onClick={() => onMode('register')}>Crear cuenta</button></div><form className="auth-form" onSubmit={onSubmit}>{registering && <label className="form-label">Nombre completo<input name="name" required autoComplete="name" placeholder="Tu nombre" /></label>}<label className="form-label">Usuario<input name="username" required autoComplete="username" placeholder="Tu usuario" /></label>{registering && <label className="form-label">Correo electrónico<input name="email" type="email" required autoComplete="email" placeholder="tu@correo.com" /></label>}<label className="form-label">Contraseña<input name="password" type="password" required minLength={8} autoComplete={registering ? 'new-password' : 'current-password'} placeholder="Mínimo 8 caracteres" /></label>{registering && <label className="form-label">Teléfono <span className="optional">OPCIONAL</span><input name="phone" autoComplete="tel" placeholder="300 000 0000" /></label>}{mode === 'craftswoman' && <><label className="form-label">Comunidad<input name="community" placeholder="Tu comunidad" /></label><label className="form-label">Región<input name="region" placeholder="La Guajira" /></label></>}<button className="button button-dark full-button" disabled={busy}>{busy ? <LoaderCircle className="spin" size={16} /> : registering ? <ArrowRight size={16} /> : <LockKeyhole size={16} />}{mode === 'login' ? 'Entrar a mi cuenta' : mode === 'craftswoman' ? 'Enviar solicitud' : 'Crear cuenta'}</button></form>{mode !== 'craftswoman' && <button className="craftswoman-link" onClick={() => onMode('craftswoman')}>¿Eres tejedora? Solicita acceso <ArrowUpRight size={14} /></button>}</section></div>
 }
 
-function CustomerAccountView({ user, orders, designs, profile, section, busy, onSection, onProfileSubmit, onSignOut, onShop }: {
+function CustomerAccountView({ user, navigationItems, orders, designs, profile, section, busy, onSection, onProfileSubmit, onSignOut, onShop }: {
   user: SessionUser
+  navigationItems: RBACNavigationItem[]
   orders: Order[]
   designs: CustomDesign[]
   profile: UserProfile | null
@@ -545,36 +617,123 @@ function CustomerAccountView({ user, orders, designs, profile, section, busy, on
   onShop: () => void
 }) {
   const accountName = resolveUserDisplayName(user, profile)
+  const canChangeProfile = hasEffectivePermission(user, 'customers.change')
   return <main className="inner-page account-page">
     <div className="account-heading"><div><p className="eyebrow"><span className="eyebrow-line" /> MI CUENTA</p><h1>Hola, <em>{accountName}.</em></h1><p>Pedidos, diseños y datos de entrega en un mismo lugar.</p></div><button className="text-button" onClick={onSignOut}>Cerrar sesión <ArrowUpRight size={15} /></button></div>
-    <div className="account-tabs"><div className="account-tab-buttons"><button className={section === 'orders' ? 'active' : ''} onClick={() => onSection('orders')}>Mis pedidos <span>{orders.length}</span></button><button className={section === 'designs' ? 'active' : ''} onClick={() => onSection('designs')}>Mis diseños <span>{designs.length}</span></button><button className={section === 'profile' ? 'active' : ''} onClick={() => onSection('profile')}>Mis datos</button></div><span>{user.email}</span></div>
-    {section === 'orders' && (orders.length ? <div className="orders-list">{orders.map((order) => <OrderCard key={order.id} order={order} />)}</div> : <div className="empty-account"><ShoppingBag size={30} strokeWidth={1.4} /><h2>Aún no tienes pedidos.</h2><p>Cuando encuentres la pieza indicada, la guardaremos aquí.</p><button className="button button-dark" onClick={onShop}>Explorar la colección <ArrowRight size={15} /></button></div>)}
-    {section === 'designs' && (designs.length ? <div className="design-list">{designs.map((design) => <DesignSummary key={design.id} design={design} />)}</div> : <div className="empty-account"><Heart size={29} strokeWidth={1.4} /><h2>Aún no has creado diseños.</h2><p>Combina patrón y colores para imaginar una manta propia.</p><button className="button button-dark" onClick={onShop}>Diseñar una manta <ArrowRight size={15} /></button></div>)}
-    {section === 'profile' && <form className="profile-form" onSubmit={onProfileSubmit}><div className="profile-form-heading"><div><p className="eyebrow">DATOS DE ENTREGA</p><h2>Tu información</h2></div><p>La usaremos para preparar tus pedidos.</p></div><label className="form-label">Nombre completo<input name="name" required maxLength={150} defaultValue={resolveUserDisplayName(user, profile)} autoComplete="name" /></label><label className="form-label">Correo electrónico<input value={user.email} readOnly /></label><label className="form-label">Teléfono<input name="phone" maxLength={30} defaultValue={profile?.phone ?? ''} autoComplete="tel" /></label><div className="profile-address-row"><label className="form-label">Dirección<input name="address" defaultValue={profile?.address ?? ''} autoComplete="street-address" /></label><label className="form-label">Ciudad<input name="city" maxLength={100} defaultValue={profile?.city ?? ''} autoComplete="address-level2" /></label></div><button className="button button-dark" disabled={busy}>{busy ? <LoaderCircle className="spin" size={16} /> : <Check size={15} />} Guardar datos</button></form>}
+    <div className="account-tabs"><div className="account-tab-buttons">{navigationItems.filter((item) => item.route_name.startsWith('customer.')).map((item) => { const target = item.route_name.split('.')[1] as AccountSection; return <button key={item.id} className={section === target ? 'active' : ''} onClick={() => onSection(target)}>{item.label}{target === 'orders' && <span>{orders.length}</span>}{target === 'designs' && <span>{designs.length}</span>}</button> })}</div><span>{user.email}</span></div>
+    {section === 'orders' && navigationItems.some((item) => item.route_name === 'customer.orders') && (orders.length ? <div className="orders-list">{orders.map((order) => <OrderCard key={order.id} order={order} />)}</div> : <div className="empty-account"><ShoppingBag size={30} strokeWidth={1.4} /><h2>Aún no tienes pedidos.</h2><p>Cuando encuentres la pieza indicada, la guardaremos aquí.</p><button className="button button-dark" onClick={onShop}>Explorar la colección <ArrowRight size={15} /></button></div>)}
+    {section === 'designs' && navigationItems.some((item) => item.route_name === 'customer.designs') && (designs.length ? <div className="design-list">{designs.map((design) => <DesignSummary key={design.id} design={design} />)}</div> : <div className="empty-account"><Heart size={29} strokeWidth={1.4} /><h2>Aún no has creado diseños.</h2><p>Combina patrón y colores para imaginar una manta propia.</p><button className="button button-dark" onClick={onShop}>Diseñar una manta <ArrowRight size={15} /></button></div>)}
+    {navigationItems.filter((item) => item.route_name.startsWith('customer.')).length === 0 && <div className="empty-account"><LockKeyhole size={28} /><h2>No tienes secciones habilitadas</h2><p>El superadministrador debe asignarte las opciones y permisos correspondientes.</p></div>}
+    {section === 'profile' && navigationItems.some((item) => item.route_name === 'customer.profile') && <form className="profile-form" onSubmit={onProfileSubmit}><div className="profile-form-heading"><div><p className="eyebrow">DATOS DE ENTREGA</p><h2>Tu información</h2></div><p>La usaremos para preparar tus pedidos.</p></div><label className="form-label">Nombre completo<input name="name" required maxLength={150} defaultValue={resolveUserDisplayName(user, profile)} autoComplete="name" disabled={!canChangeProfile} /></label><label className="form-label">Correo electrónico<input value={user.email} readOnly /></label><label className="form-label">Teléfono<input name="phone" maxLength={30} defaultValue={profile?.phone ?? ''} autoComplete="tel" disabled={!canChangeProfile} /></label><div className="profile-address-row"><label className="form-label">Dirección<input name="address" defaultValue={profile?.address ?? ''} autoComplete="street-address" disabled={!canChangeProfile} /></label><label className="form-label">Ciudad<input name="city" maxLength={100} defaultValue={profile?.city ?? ''} autoComplete="address-level2" disabled={!canChangeProfile} /></label></div>{canChangeProfile && <button className="button button-dark" disabled={busy}>{busy ? <LoaderCircle className="spin" size={16} /> : <Check size={15} />} Guardar datos</button>}</form>}
   </main>
 }
 
-function CraftswomanAccountView({ user, dashboard, onSignOut, onAcceptOrder, onOrderStatus, onDesignStatus }: {
+function CraftswomanAccountView({ user, navigationItems, dashboard, products, categories, busy, onCreateProduct, onSignOut, onAcceptOrder, onOrderStatus, onDesignStatus }: {
   user: SessionUser | null
-  dashboard: CraftswomanDashboard
+  navigationItems: RBACNavigationItem[]
+  dashboard: CraftswomanDashboard | null
+  products: Product[]
+  categories: Category[]
+  busy: boolean
+  onCreateProduct: (values: {
+    sku: string; name: string; category: number; description?: string; region?: string;
+    color?: string; size?: string; production_time?: string; price: string | number;
+    stock: number; image_url?: string; made_to_order?: boolean;
+  }) => void
   onSignOut: () => void
-  onAcceptOrder: (orderId: number) => void
+  onAcceptOrder: (orderId: number) => Promise<void>
   onOrderStatus: (orderId: number, status: string) => void
   onDesignStatus: (designId: number, status: string) => void
 }) {
+  const [activeSection, setActiveSection] = useState<'dashboard' | 'products' | 'inventory' | 'orders'>('dashboard')
+  const [showProductForm, setShowProductForm] = useState(false)
+  const [acceptingOrderId, setAcceptingOrderId] = useState<number | null>(null)
   const canChangeOrders = Boolean(user && hasEffectivePermission(user, 'orders.change'))
+  const canAddProducts = Boolean(user && hasEffectivePermission(user, 'products.add'))
   const canChangeDesigns = Boolean(user && hasEffectivePermission(user, 'designs.change'))
   const accountName = resolveUserDisplayName(user)
-  return <main className="inner-page account-page"><div className="account-heading"><div><p className="eyebrow"><span className="eyebrow-line" /> ESPACIO DE TEJEDORA</p><h1>Buen día, <em>{accountName}.</em></h1><p>{dashboard.active ? 'Pedidos y diseños que acompañan el trabajo de tu taller.' : 'Tu cuenta está pendiente de activación por administración.'}</p></div><button className="text-button" onClick={onSignOut}>Cerrar sesión <ArrowUpRight size={15} /></button></div>
-    {!dashboard.active ? <div className="empty-account"><LockKeyhole size={30} /><h2>Cuenta pendiente de activación</h2><p>La administración debe activar tu perfil antes de asignarte pedidos.</p></div> : <>
-      <div className="artisan-columns"><section><div className="list-heading"><h2>Pedidos por aceptar</h2><span>{dashboard.available_orders.length}</span></div>{dashboard.available_orders.length ? dashboard.available_orders.map((order) => <div className="artisan-order" key={order.id}><OrderCard order={order} />{canChangeOrders && canChangeDesigns && <button className="button button-dark" onClick={() => onAcceptOrder(order.id)}>Aceptar pedido <ArrowRight size={15} /></button>}</div>) : <p className="muted-copy">No hay pedidos disponibles en este momento.</p>}</section><section><div className="list-heading"><h2>Pedidos de mi taller</h2><span>{dashboard.orders.length}</span></div>{dashboard.orders.length ? dashboard.orders.map((order) => <div className="artisan-order" key={order.id}><OrderCard order={order} />{canChangeOrders && canChangeDesigns && order.status === 'accepted' && <button className="button button-outline" onClick={() => onOrderStatus(order.id, 'weaving')}>Iniciar tejido <ArrowRight size={15} /></button>}{canChangeOrders && canChangeDesigns && order.status === 'weaving' && <button className="button button-outline" onClick={() => onOrderStatus(order.id, 'completed')}>Marcar como terminado <Check size={15} /></button>}</div>) : <p className="muted-copy">Tus pedidos aceptados aparecerán aquí.</p>}</section></div>
-      <section className="artisan-designs"><div className="list-heading"><div><p className="eyebrow">DISEÑOS PERSONALIZADOS</p><h2>Diseños de mi taller</h2></div><span>{dashboard.designs.length}</span></div>{dashboard.designs.length ? <div className="design-list">{dashboard.designs.map((design) => <article className="artisan-design" key={design.id}><DesignSummary design={design} /><div className="design-actions">{canChangeDesigns && design.status === 'accepted' && <button className="button button-outline" onClick={() => onDesignStatus(design.id, 'weaving')}>Iniciar tejido <ArrowRight size={15} /></button>}{canChangeDesigns && design.status === 'weaving' && <button className="button button-outline" onClick={() => onDesignStatus(design.id, 'completed')}>Marcar terminado <Check size={15} /></button>}</div></article>)}</div> : <p className="muted-copy">Los diseños que te asignen aparecerán aquí.</p>}</section>
-    </>}
-  </main>
+  const published = products.filter((product) => product.active).length
+  const pending = products.length - published
+  const stock = products.reduce((total, product) => total + product.stock, 0)
+  const initials = accountName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()
+  const navItems = navigationItems.filter((item) => item.route_name.startsWith('craftswoman.')).map((item) => {
+    const id = item.route_name.split('.')[1] as 'dashboard' | 'products' | 'inventory' | 'orders'
+    const icon = id === 'dashboard' ? <LayoutDashboard size={17} /> : id === 'products' ? <ShoppingBag size={17} /> : id === 'inventory' ? <Boxes size={17} /> : <ShoppingCart size={17} />
+    return { id, label: item.label, icon }
+  })
+  const canOpenSection = (section: string) => navItems.some((item) => item.id === section)
+  useEffect(() => {
+    if (!canOpenSection(activeSection) && navItems[0]) setActiveSection(navItems[0].id)
+  }, [navigationItems, activeSection])
+  async function handleAcceptOrder(orderId: number) {
+    if (acceptingOrderId !== null) return
+    setAcceptingOrderId(orderId)
+    try {
+      await onAcceptOrder(orderId)
+    } finally {
+      setAcceptingOrderId(null)
+    }
+  }
+  function submitProduct(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const values = Object.fromEntries(new FormData(event.currentTarget).entries()) as Record<string, string>
+    onCreateProduct({
+      sku: values.sku.trim(), name: values.name.trim(), category: Number(values.category),
+      price: values.price, stock: Number(values.stock), size: values.size || 'M',
+      region: values.region.trim(), color: values.color.trim(),
+      production_time: values.production_time.trim(), description: values.description.trim(),
+      image_url: values.image_url.trim(), made_to_order: values.made_to_order === 'on',
+    })
+    event.currentTarget.reset()
+    setShowProductForm(false)
+  }
+  return <div className="craftswoman-workspace">
+    <aside className="craftswoman-sidebar">
+      <div className="craftswoman-brand"><span className="craftswoman-brand-mark"><Layers size={22} /></span><span><strong>Wayúu</strong><small>PORTAL DE TEJEDORA</small></span></div>
+      <nav className="craftswoman-nav" aria-label="Menú de tejedora">
+        <p>MENÚ PRINCIPAL</p>
+        {navItems.map((item) => <button key={item.id} className={activeSection === item.id ? 'active' : ''} onClick={() => setActiveSection(item.id)}>{item.icon}<span>{item.label}</span></button>)}
+      </nav>
+      <div className="craftswoman-sidebar-profile"><span className="craftswoman-avatar">{initials || 'TW'}</span><div><strong>{accountName}</strong><small>Tejedora Wayúu</small></div><button onClick={onSignOut} aria-label="Cerrar sesión" title="Cerrar sesión"><LogOut size={16} /></button></div>
+      <div className="craftswoman-sidebar-foot">SÜCHIKI KANAAS · LEGADO CULTURAL</div>
+    </aside>
+    <section className="craftswoman-main">
+      <header className="craftswoman-topbar"><div><span>ROL: TEJEDORA</span><b>/</b><strong>{navItems.find((item) => item.id === activeSection)?.label}</strong></div><div className="craftswoman-top-user"><span className="craftswoman-avatar">{initials || 'TW'}</span><span><strong>{accountName}</strong><small>Espacio de trabajo</small></span></div></header>
+      <main className="craftswoman-content">
+        {navItems.length === 0 ? <div className="craftswoman-empty"><LockKeyhole size={30} /><h2>No tienes secciones habilitadas</h2><p>El superadministrador debe asignarte las opciones y permisos correspondientes.</p></div> : user?.profile?.active === false || (!dashboard?.active && (canOpenSection('dashboard') || canOpenSection('orders'))) ? <div className="craftswoman-empty"><LockKeyhole size={30} /><h2>Cuenta pendiente de activación</h2><p>La administración debe activar tu perfil antes de asignarte pedidos.</p></div> : <>
+          {canOpenSection('dashboard') && activeSection === 'dashboard' && <div className="craftswoman-dashboard">
+            <section className="craftswoman-welcome"><div><span><Sparkles size={14} /> SÜCHIKI KANAAS · LEGADO CULTURAL</span><h1>Jamaya, {accountName}!</h1><p>Tu trabajo conserva historias. Aquí puedes organizar tus tejidos, revisar tus pedidos y compartir nuevas piezas con la tienda.</p></div><div className="craftswoman-welcome-actions">{canOpenSection('products') && canAddProducts && <button onClick={() => { setActiveSection('products'); setShowProductForm(true) }}><Plus size={16} /> Registrar nuevo tejido</button>}{canOpenSection('orders') && <button className="secondary" onClick={() => setActiveSection('orders')}><ShoppingCart size={16} /> Ver mis pedidos</button>}</div></section>
+            <section className="craftswoman-stats">
+              <article><span>Total de tejidos</span><strong>{products.length}</strong><small>Registrados por ti</small></article>
+              <article><span>Publicados</span><strong>{published}</strong><small>Visibles en la tienda</small></article>
+              <article><span>En revisión</span><strong>{pending}</strong><small>Esperando aprobación</small></article>
+              <article><span>En inventario</span><strong>{stock} <small>unid.</small></strong><small>Piezas registradas</small></article>
+              <article><span>Pedidos asignados</span><strong>{(dashboard?.orders ?? []).length}</strong><small>De tu taller</small></article>
+            </section>
+            <div className="craftswoman-columns">
+              <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>ACTIVIDAD</small><h2>Pedidos por aceptar</h2></div><span>{(dashboard?.available_orders ?? []).length}</span></div>{(dashboard?.available_orders ?? []).length ? (dashboard?.available_orders ?? []).slice(0,3).map((order) => <div className="artisan-order" key={order.id}><OrderCard order={order} />{canChangeOrders && <button className="button button-dark" disabled={acceptingOrderId !== null} onClick={() => void handleAcceptOrder(order.id)}>{acceptingOrderId === order.id ? <><LoaderCircle className="spin" size={15} /> Aceptando pedido…</> : <>Aceptar pedido <ArrowRight size={15} /></>}</button>}</div>) : <p className="muted-copy">No hay pedidos disponibles en este momento.</p>}</section>
+              <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>TU TALLER</small><h2>Mis productos recientes</h2></div>{canOpenSection('products') && <button onClick={() => setActiveSection('products')}>Ver todos <ArrowRight size={14} /></button>}</div>{products.slice(0,4).map((product) => <div className="craftswoman-product-mini" key={product.id}><span><strong>{product.name}</strong><small>{product.category.name} · Stock {product.stock}</small></span><em className={product.active ? 'published' : ''}>{product.active ? 'Publicado' : 'En revisión'}</em></div>)}{!products.length && <p className="muted-copy">Registra tu primera pieza para comenzar.</p>}</section>
+            </div>
+          </div>}
+        {canOpenSection('products') && activeSection === 'products' && <section className="craftswoman-panel craftswoman-products-section"><div className="craftswoman-panel-heading"><div><small>CATÁLOGO DE TU TALLER</small><h1>Mis tejidos y productos</h1><p>Registra tus piezas. Antes de aparecer en la tienda, cada producto debe ser aprobado por administración.</p></div>{canAddProducts && <button className="craftswoman-primary-action" onClick={() => setShowProductForm((value) => !value)}><Plus size={16} /> {showProductForm ? 'Cerrar formulario' : 'Registrar tejido'}</button>}</div>
+            {showProductForm && canAddProducts && <form className="craftswoman-product-form" onSubmit={submitProduct}>
+              <label className="form-label">Referencia<input name="sku" required maxLength={50} placeholder="Ej. WAY-TEJ-001" /></label><label className="form-label">Nombre de la pieza<input name="name" required maxLength={180} /></label><label className="form-label">Categoría<select name="category" required defaultValue=""><option value="" disabled>Selecciona una categoría</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label><label className="form-label">Precio sugerido (COP)<input name="price" type="number" min="0" step="1" required /></label><label className="form-label">Stock inicial<input name="stock" type="number" min="0" step="1" defaultValue="1" required /></label><label className="form-label">Talla *<input name="size" maxLength={30} defaultValue="M" required /></label><label className="form-label">Región de elaboración *<input name="region" maxLength={100} placeholder="La Guajira" required /></label><label className="form-label">Colores principales *<input name="color" maxLength={150} placeholder="Ej. vino tinto, beige y negro" required /></label><label className="form-label">Tiempo de elaboración *<input name="production_time" maxLength={100} placeholder="Ej. 10 a 15 días" required /></label><label className="form-label">Imagen del tejido (URL) *<input name="image_url" type="url" placeholder="https://..." required /></label><label className="form-label craftswoman-description-field">Descripción del tejido *<textarea name="description" rows={2} minLength={10} maxLength={2000} placeholder="Describe el diseño, la técnica y los detalles de la pieza..." required /></label><label className="admin-check"><input name="made_to_order" type="checkbox" /> Elaborar por pedido</label><button className="button button-dark craftswoman-submit-review" disabled={busy || !categories.length}>{busy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} Enviar a revisión</button>
+            </form>}
+            <div className="craftswoman-product-list">{products.map((product) => <article key={product.id}><div><strong>{product.name}</strong><small>{product.sku} · {product.category.name} · Talla {product.size}</small></div><span>{money(product.price)}</span><span>Stock {product.stock}</span><em className={product.active ? 'published' : ''}>{product.active ? 'Publicado' : 'Pendiente de revisión'}</em></article>)}{!products.length && <p className="muted-copy">Todavía no has registrado productos en tu taller.</p>}</div>
+          </section>}
+          {canOpenSection('inventory') && activeSection === 'inventory' && <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>CONTROL DE EXISTENCIAS</small><h1>Mi inventario</h1><p>Consulta las piezas y las unidades registradas en tu taller.</p></div><span className="craftswoman-total-stock">{stock} unidades</span></div><div className="craftswoman-product-list">{products.map((product) => <article key={product.id}><div><strong>{product.name}</strong><small>{product.sku} · {product.category.name}</small></div><span>{money(product.price)}</span><span>Disponibles: {product.stock}</span><em className={product.stock > 0 ? 'published' : ''}>{product.stock > 0 ? 'Con existencias' : 'Agotado'}</em></article>)}{!products.length && <p className="muted-copy">Tu inventario aparecerá aquí cuando registres productos.</p>}</div></section>}
+          {canOpenSection('orders') && activeSection === 'orders' && <div className="craftswoman-orders"><section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>OPORTUNIDADES DE TRABAJO</small><h1>Pedidos por aceptar</h1></div><span>{(dashboard?.available_orders ?? []).length}</span></div>{(dashboard?.available_orders ?? []).length ? (dashboard?.available_orders ?? []).map((order) => <div className="artisan-order" key={order.id}><OrderCard order={order} />{canChangeOrders && <button className="button button-dark" disabled={acceptingOrderId !== null} onClick={() => void handleAcceptOrder(order.id)}>{acceptingOrderId === order.id ? <><LoaderCircle className="spin" size={15} /> Aceptando pedido…</> : <>Aceptar pedido <ArrowRight size={15} /></>}</button>}</div>) : <p className="muted-copy">No hay pedidos disponibles.</p>}</section>
+            <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>PRODUCCIÓN</small><h1>Pedidos de mi taller</h1></div><span>{(dashboard?.orders ?? []).length}</span></div>{(dashboard?.orders ?? []).length ? (dashboard?.orders ?? []).map((order) => <div className="artisan-order" key={order.id}><OrderCard order={order} />{canChangeOrders && canChangeDesigns && order.status === 'accepted' && <button className="button button-outline" onClick={() => onOrderStatus(order.id, 'weaving')}>Iniciar tejido <ArrowRight size={15} /></button>}{canChangeOrders && canChangeDesigns && order.status === 'weaving' && <button className="button button-outline" onClick={() => onOrderStatus(order.id, 'completed')}>Marcar como terminado <Check size={15} /></button>}</div>) : <p className="muted-copy">Tus pedidos aceptados aparecerán aquí.</p>}</section></div>}
+          {activeSection !== 'orders' && activeSection !== 'dashboard' && (dashboard?.designs.length ?? 0) > 0 && <section className="craftswoman-panel craftswoman-designs"><div className="craftswoman-panel-heading"><div><small>DISEÑOS PERSONALIZADOS</small><h2>Diseños de mi taller</h2></div><span>{dashboard?.designs.length ?? 0}</span></div><div className="design-list">{(dashboard?.designs ?? []).map((design) => <article className="artisan-design" key={design.id}><DesignSummary design={design} /><div className="design-actions">{canChangeDesigns && design.status === 'accepted' && <button className="button button-outline" onClick={() => onDesignStatus(design.id, 'weaving')}>Iniciar tejido <ArrowRight size={15} /></button>}{canChangeDesigns && design.status === 'weaving' && <button className="button button-outline" onClick={() => onDesignStatus(design.id, 'completed')}>Marcar terminado <Check size={15} /></button>}</div></article>)}</div></section>}
+        </>}
+      </main>
+    </section>
+  </div>
 }
 
-function AdminAccountView({ user, isSuperadmin, orders, products, categories, busy, onSignOut, onSaveProduct, onCreateProduct, onCreateCategory, onCategoryActive, onOrderStatus }: {
+function AdminAccountView({ user, isSuperadmin, navigationItems, orders, products, categories, busy, onSignOut, onSaveProduct, onCreateProduct, onCreateCategory, onCategoryActive, onOrderStatus }: {
   user: SessionUser
+  navigationItems: RBACNavigationItem[]
   isSuperadmin: boolean
   orders: Order[]
   products: AdminProduct[]
@@ -587,16 +746,42 @@ function AdminAccountView({ user, isSuperadmin, orders, products, categories, bu
   onCategoryActive: (categoryId: number, active: boolean) => void
   onOrderStatus: (orderId: number, status: string) => void
 }) {
+  const [activeSection, setActiveSection] = useState<'dashboard' | 'products' | 'orders' | 'categories' | 'access'>('dashboard')
   const [showCreateForm, setShowCreateForm] = useState(false)
+  const [selectedCraftswomanId, setSelectedCraftswomanId] = useState('all')
   function submitNewCategory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const values = Object.fromEntries(new FormData(event.currentTarget).entries()) as Record<string, string>
     onCreateCategory({ name: values.name.trim(), description: values.description.trim(), active: true })
     event.currentTarget.reset()
   }
+  function submitNewProduct(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const values = Object.fromEntries(new FormData(event.currentTarget).entries()) as Record<string, string>
+    onCreateProduct({
+      sku: values.sku.trim(), name: values.name.trim(), category: Number(values.category),
+      price: values.price, stock: Number(values.stock), size: values.size || 'M',
+      region: values.region.trim(), image_url: values.image_url.trim(),
+      active: values.active === 'on', made_to_order: values.made_to_order === 'on',
+    })
+    event.currentTarget.reset()
+    setShowCreateForm(false)
+  }
+  const pendingProducts = products.filter((product) => !product.active)
+  const publishedProducts = products.filter((product) => product.active)
   const pendingOrders = orders.filter((order) => order.status === 'pending').length
   const activeOrders = orders.filter((order) => ['accepted', 'weaving', 'preparing', 'shipped'].includes(order.status)).length
-  const revenue = orders.filter((order) => order.status !== 'cancelled').reduce((total, order) => total + Number(order.total), 0)
+  const craftswomanOptions = orders.reduce<{ id: number; name: string }[]>((list, order) => {
+    if (order.craftswoman && !list.some((item) => item.id === order.craftswoman?.id)) {
+      list.push({ id: order.craftswoman.id, name: order.craftswoman.name })
+    }
+    return list
+  }, [])
+  const filteredOrders = orders.filter((order) => {
+    if (selectedCraftswomanId === 'all') return true
+    if (selectedCraftswomanId === 'unassigned') return !order.craftswoman
+    return String(order.craftswoman?.id ?? '') === selectedCraftswomanId
+  })
   const canViewOrders = hasEffectivePermission(user, 'orders.view')
   const canChangeOrders = hasEffectivePermission(user, 'orders.change')
   const canViewProducts = hasEffectivePermission(user, 'products.view')
@@ -605,42 +790,106 @@ function AdminAccountView({ user, isSuperadmin, orders, products, categories, bu
   const canViewCategories = hasEffectivePermission(user, 'categories.view')
   const canAddCategories = hasEffectivePermission(user, 'categories.add')
   const canChangeCategories = hasEffectivePermission(user, 'categories.change')
-  function submitNewProduct(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const values = Object.fromEntries(new FormData(event.currentTarget).entries()) as Record<string, string>
-    onCreateProduct({
-      sku: values.sku.trim(),
-      name: values.name.trim(),
-      category: Number(values.category),
-      price: values.price,
-      stock: Number(values.stock),
-      size: values.size,
-      region: values.region.trim(),
-      image_url: values.image_url.trim(),
-      active: values.active === 'on',
-      made_to_order: values.made_to_order === 'on',
-    })
-    event.currentTarget.reset()
-    setShowCreateForm(false)
-  }
   const accountName = resolveUserDisplayName(user)
-  return <main className="inner-page account-page"><div className="account-heading"><div><p className="eyebrow"><span className="eyebrow-line" /> ADMINISTRACIÓN</p><h1>Hola, <em>{accountName}.</em></h1><p>Resumen de la operación de Wayuuwaa.</p></div><button className="text-button" onClick={onSignOut}>Cerrar sesión <ArrowUpRight size={15} /></button></div>
-    {canViewOrders && <div className="admin-stats"><article><span>Pedidos</span><strong>{orders.length}</strong></article><article><span>Por aceptar</span><strong>{pendingOrders}</strong></article><article><span>En proceso</span><strong>{activeOrders}</strong></article><article><span>Valor de pedidos</span><strong>{money(revenue)}</strong></article></div>}
-    {isSuperadmin && <SuperadminRBACPanel currentUser={user} />}
-    <div className="admin-tools"><div><p className="eyebrow">GESTIÓN DE TIENDA</p><h2>Productos, inventario y estados</h2><p>El administrador de Django conserva los permisos y formularios de gestión.</p></div><a className="button button-dark" href={api.adminUrl} target="_blank" rel="noreferrer">Abrir administración <ArrowUpRight size={15} /></a></div>
-    {(canViewCategories || canAddCategories) && <section className="admin-inventory admin-categories"><div className="admin-orders-heading"><div><h2>Categorías</h2>{canViewCategories && <span>{categories.length} en total</span>}</div></div>{canAddCategories && <form className="admin-category-form" onSubmit={submitNewCategory}><label className="form-label">Nombre de categoría<input name="name" required maxLength={100} placeholder="Ej. Tejidos especiales" /></label><label className="form-label">Descripción<input name="description" maxLength={500} placeholder="Descripción breve" /></label><button className="button button-outline" disabled={busy}>{busy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} Crear categoría</button></form>}{canViewCategories && <div className="admin-category-list">{categories.map((category) => <div className="admin-category-row" key={category.id}><div><strong>{category.name}</strong><small>{category.description || 'Sin descripción'}</small></div><span className={category.active ? 'category-state active' : 'category-state'}>{category.active ? 'Activa' : 'Inactiva'}</span>{canChangeCategories && <button className="text-button" disabled={busy} onClick={() => onCategoryActive(category.id, !category.active)}>{category.active ? 'Desactivar' : 'Activar'}</button>}</div>)}</div>}</section>}
-    {(canViewProducts || canAddProducts) && <section className="admin-inventory"><div className="admin-orders-heading"><h2>Inventario</h2>{canAddProducts && <button className="button button-outline" onClick={() => setShowCreateForm((value) => !value)}>{showCreateForm ? 'Cancelar' : 'Agregar producto'} <Plus size={15} /></button>}</div>
-      {showCreateForm && <form className="admin-product-form" onSubmit={submitNewProduct}><label className="form-label">Referencia<input name="sku" required maxLength={50} /></label><label className="form-label">Nombre<input name="name" required maxLength={180} /></label><label className="form-label">Categoría<select name="category" required defaultValue=""><option value="" disabled>Selecciona una categoría</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label><label className="form-label">Precio COP<input name="price" type="number" min="0" step="1" required /></label><label className="form-label">Stock inicial<input name="stock" type="number" min="0" step="1" defaultValue="0" required /></label><label className="form-label">Talla<input name="size" maxLength={30} defaultValue="M" /></label><label className="form-label">Región<input name="region" maxLength={100} /></label><label className="form-label">URL o imagen<input name="image_url" placeholder="https://…" /></label><label className="admin-check"><input name="active" type="checkbox" /> Publicar en la tienda</label><label className="admin-check"><input name="made_to_order" type="checkbox" /> Hecho por pedido</label><button className="button button-dark" disabled={busy || !categories.length}>{busy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} Crear producto</button></form>}
-      {canViewProducts && <div className="admin-product-list">{products.map((product) => <AdminProductRow key={product.id} product={product} busy={busy} canChange={canChangeProducts} onSave={onSaveProduct} />)}</div>}
-    </section>}
-    {canViewOrders && <><div className="admin-orders-heading"><h2>Pedidos recientes</h2><span>{orders.length} en total</span></div>{orders.length ? <div className="orders-list">{orders.slice(0, 8).map((order) => <AdminOrderRow key={order.id} order={order} busy={busy} canChange={canChangeOrders} onStatus={onOrderStatus} />)}</div> : <div className="empty-account"><ShoppingBag size={28} /><h2>Aún no hay pedidos.</h2><p>Los pedidos creados desde la tienda aparecerán aquí.</p></div>}</>}
-  </main>
+  const navItems = [
+    ...navigationItems.filter((item) => item.route_name.startsWith('admin.') && item.route_name !== 'admin.access').map((item) => {
+      const id = item.route_name.split('.')[1] as 'dashboard' | 'products' | 'orders' | 'categories'
+      const icon = id === 'dashboard' ? <LayoutDashboard size={17} /> : id === 'products' ? <ShoppingBag size={17} /> : id === 'orders' ? <ShoppingCart size={17} /> : <Boxes size={17} />
+      return { id, label: item.label, icon }
+    }),
+    ...(isSuperadmin ? [{ id: 'access' as const, label: 'Roles y permisos', icon: <LockKeyhole size={17} /> }] : []),
+  ]
+  const canOpenSection = (section: string) => navItems.some((item) => item.id === section)
+  useEffect(() => {
+    if (!canOpenSection(activeSection) && navItems[0]) setActiveSection(navItems[0].id)
+  }, [navigationItems, activeSection])
+  return <div className="craftswoman-workspace admin-workspace">
+    <aside className="craftswoman-sidebar">
+      <div className="craftswoman-brand"><span className="craftswoman-brand-mark"><Layers size={22} /></span><span><strong>Wayúu</strong><small>{isSuperadmin ? 'CONTROL GENERAL DEL SISTEMA' : 'ADMINISTRACIÓN DE TIENDA'}</small></span></div>
+      <nav className="craftswoman-nav" aria-label="Menú de administración">
+        <p>MENÚ PRINCIPAL</p>
+        {navItems.map((item) => <button key={item.id} className={activeSection === item.id ? 'active' : ''} onClick={() => setActiveSection(item.id)}>{item.icon}<span>{item.label}</span></button>)}
+      </nav>
+      <div className="craftswoman-sidebar-profile"><span className="craftswoman-avatar">{accountName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'AD'}</span><div><strong>{accountName}</strong><small>{isSuperadmin ? 'Superadministrador' : 'Administrador de tienda'}</small></div><button onClick={onSignOut} aria-label="Cerrar sesión" title="Cerrar sesión"><LogOut size={16} /></button></div>
+      <div className="craftswoman-sidebar-foot">SÜCHIKI KANAAS · LEGADO CULTURAL</div>
+    </aside>
+    <section className="craftswoman-main">
+      <header className="craftswoman-topbar"><div><span>ROL: {isSuperadmin ? 'SUPERADMINISTRADOR' : 'ADMINISTRADOR'}</span><b>/</b><strong>{navItems.find((item) => item.id === activeSection)?.label}</strong></div><div className="craftswoman-top-user"><span className="craftswoman-avatar">{accountName.slice(0, 1).toUpperCase()}</span><span><strong>{accountName}</strong><small>Gestión comercial</small></span></div></header>
+      <main className="craftswoman-content admin-content">
+        {!isSuperadmin && navItems.length === 0 && <div className="craftswoman-empty"><LockKeyhole size={30} /><h2>No tienes secciones habilitadas</h2><p>El superadministrador debe asignarte las opciones y permisos correspondientes.</p></div>}
+        {canOpenSection('dashboard') && activeSection === 'dashboard' && <div className="craftswoman-dashboard">
+          <section className="craftswoman-welcome"><div><span><Sparkles size={14} /> SÜCHIKI KANAAS · GESTIÓN DE LA TIENDA</span><h1>Jamaya, {accountName}!</h1><p>Desde aquí puedes acompañar el trabajo de las tejedoras, revisar nuevas piezas y mantener organizada la tienda.</p></div><div className="craftswoman-welcome-actions">{canOpenSection('products') && <button onClick={() => setActiveSection('products')}><Eye size={16} /> Revisar tejidos</button>}{canOpenSection('orders') && <button className="secondary" onClick={() => setActiveSection('orders')}><ShoppingCart size={16} /> Ver pedidos</button>}</div></section>
+          <section className="craftswoman-stats admin-stats">
+            <article><span>Productos registrados</span><strong>{products.length}</strong><small>En el catálogo de tienda</small></article>
+            <article><span>Por revisar</span><strong>{pendingProducts.length}</strong><small>Esperando aprobación</small></article>
+            <article><span>Publicados</span><strong>{publishedProducts.length}</strong><small>Visibles para clientes</small></article>
+            <article><span>Pedidos pendientes</span><strong>{pendingOrders}</strong><small>Requieren seguimiento</small></article>
+            <article><span>Pedidos activos</span><strong>{activeOrders}</strong><small>En preparación o envío</small></article>
+          </section>
+          <div className="craftswoman-columns">
+            <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>REVISIÓN DE CATÁLOGO</small><h2>Tejidos por aprobar</h2></div><span>{pendingProducts.length}</span></div>{pendingProducts.slice(0,4).map((product) => <div className="admin-review-mini" key={product.id}><div><strong>{product.name}</strong><small>{product.sku} · Taller #{product.craftswoman ?? 'sin asignar'}</small></div><button disabled={busy || !canChangeProducts} onClick={() => onSaveProduct(product.id, { active: true })}>Aprobar</button></div>)}{!pendingProducts.length && <p className="muted-copy">No hay tejidos pendientes de revisión.</p>}{canOpenSection('products') && <button className="admin-text-link" onClick={() => setActiveSection('products')}>Ir a productos <ArrowRight size={14} /></button>}</section>
+            <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>OPERACIÓN</small><h2>Pedidos recientes</h2></div><span>{orders.length}</span></div>{orders.slice(0,3).map((order) => <div className="admin-review-mini" key={order.id}><div><strong>Pedido #{order.id}</strong><small>{dateLabel(order.created_at)} · {money(order.total)}</small></div><em>{statusLabel(order.status)}</em></div>)}{!orders.length && <p className="muted-copy">Los pedidos aparecerán aquí cuando los clientes compren.</p>}{canOpenSection('orders') && <button className="admin-text-link" onClick={() => setActiveSection('orders')}>Consultar pedidos <ArrowRight size={14} /></button>}</section>
+          </div>
+          
+        </div>}
+        {canOpenSection('products') && activeSection === 'products' && <section className="craftswoman-panel craftswoman-products-section">
+          <div className="craftswoman-panel-heading"><div><small>CATÁLOGO Y CONTROL DE PUBLICACIÓN</small><h1>Productos y tejidos</h1><p>Los tejidos enviados por las artesanas llegan aquí como pendientes. Aprueba su publicación cuando la información esté completa.</p></div>{canAddProducts && <button className="craftswoman-primary-action" onClick={() => setShowCreateForm((visible) => !visible)}><Plus size={16} /> {showCreateForm ? 'Cerrar formulario' : 'Agregar producto'}</button>}</div>
+          {showCreateForm && <form className="craftswoman-product-form" onSubmit={submitNewProduct}><label className="form-label">Referencia *<input name="sku" required maxLength={50} /></label><label className="form-label">Nombre de la pieza *<input name="name" required maxLength={180} /></label><label className="form-label">Categoría *<select name="category" required defaultValue=""><option value="" disabled>Selecciona una categoría</option>{categories.filter((category) => category.active).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label><label className="form-label">Precio COP *<input name="price" type="number" min="0" step="1" required /></label><label className="form-label">Stock inicial *<input name="stock" type="number" min="0" step="1" defaultValue="0" required /></label><label className="form-label">Talla<input name="size" maxLength={30} defaultValue="M" /></label><label className="form-label">Región<input name="region" maxLength={100} /></label><label className="form-label">Imagen (URL)<input name="image_url" type="url" placeholder="https://…" /></label><label className="admin-check"><input name="active" type="checkbox" /> Publicar directamente</label><label className="admin-check"><input name="made_to_order" type="checkbox" /> Elaborar por pedido</label><button className="button button-dark craftswoman-submit-review" disabled={busy || !categories.some((category) => category.active)}>{busy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} Guardar producto</button></form>}
+          {canViewProducts && <><div className="admin-section-subheading"><h2>Pendientes de aprobación</h2><span>{pendingProducts.length}</span></div>{pendingProducts.length ? <div className="admin-review-list">{pendingProducts.map((product) => <article className="admin-review-card" key={product.id}><div className="admin-review-card-main">{product.image_url ? <img src={product.image_url} alt={product.name} /> : <span className="admin-review-placeholder"><ShoppingBag size={22} /></span>}<div><strong>{product.name}</strong><small>{product.sku} · {categories.find((category) => category.id === product.category)?.name ?? 'Categoría'}</small><small>Taller vinculado: {product.craftswoman_name || (product.craftswoman ? `Taller #${product.craftswoman}` : 'No asignado')} · Stock: {product.stock}</small><p>{product.description || 'Sin descripción registrada.'}</p></div></div><div className="admin-review-actions"><span className="admin-review-pending">Pendiente de revisión</span>{canChangeProducts && <button className="craftswoman-submit-review" disabled={busy} onClick={() => onSaveProduct(product.id, { active: true })}><Check size={15} /> Aprobar y publicar</button>}</div></article>)}</div> : <p className="muted-copy">No hay tejidos pendientes. Cuando una tejedora envíe una pieza, aparecerá en esta sección.</p>}</>}
+          {canViewProducts && <><div className="admin-section-subheading"><h2>Productos publicados y catálogo</h2><span>{publishedProducts.length}</span></div><div className="admin-product-list">{publishedProducts.map((product) => <AdminProductRow key={product.id} product={product} busy={busy} canChange={canChangeProducts} onSave={onSaveProduct} />)}</div></>}
+        </section>}
+        {canOpenSection('orders') && activeSection === 'orders' && <section className="craftswoman-panel"><div className="craftswoman-panel-heading admin-orders-heading"><div><small>SEGUIMIENTO COMERCIAL</small><h1>Pedidos de clientes</h1><p>Consulta las compras registradas, identifica la tejedora asignada y actualiza su estado.</p></div><div className="admin-orders-heading-actions"><label className="admin-orders-filter">Filtrar por tejedora<select aria-label="Filtrar pedidos por tejedora" value={selectedCraftswomanId} onChange={(event) => setSelectedCraftswomanId(event.target.value)}><option value="all">Todas las tejedoras</option><option value="unassigned">Sin tejedora asignada</option>{craftswomanOptions.map((craftswoman) => <option key={craftswoman.id} value={String(craftswoman.id)}>{craftswoman.name}</option>)}</select></label><span>{filteredOrders.length} de {orders.length} pedidos</span></div></div>{canViewOrders ? orders.length ? filteredOrders.length ? <div className="orders-list">{filteredOrders.map((order) => <AdminOrderRow key={order.id} order={order} busy={busy} canChange={canChangeOrders} onStatus={onOrderStatus} />)}</div> : <p className="muted-copy">No hay pedidos para la tejedora seleccionada.</p> : <p className="muted-copy">Todavía no hay pedidos registrados.</p> : <p className="muted-copy">Tu rol no tiene permiso para consultar pedidos.</p>}</section>}
+        {canOpenSection('categories') && activeSection === 'categories' && <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>ORGANIZACIÓN DEL CATÁLOGO</small><h1>Categorías</h1><p>Mantén las categorías disponibles para ordenar las piezas de la tienda.</p></div></div>{canAddCategories && <form className="admin-category-form" onSubmit={submitNewCategory}><label className="form-label">Nombre de categoría *<input name="name" required maxLength={100} placeholder="Ej. Mantas Wayúu" /></label><label className="form-label">Descripción<input name="description" maxLength={500} placeholder="Descripción breve" /></label><button className="button button-dark" disabled={busy}>{busy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} Crear categoría</button></form>}{canViewCategories && <div className="admin-category-list">{categories.map((category) => <div className="admin-category-row" key={category.id}><div><strong>{category.name}</strong><small>{category.description || 'Sin descripción'}</small></div><span className={category.active ? 'category-state active' : 'category-state'}>{category.active ? 'Activa' : 'Inactiva'}</span>{canChangeCategories && <button className="text-button" disabled={busy} onClick={() => onCategoryActive(category.id, !category.active)}>{category.active ? 'Desactivar' : 'Activar'}</button>}</div>)}</div>}</section>}
+        {canOpenSection('access') && activeSection === 'access' && isSuperadmin && <SuperadminRBACPanel currentUser={user} />}
+      </main>
+    </section>
+  </div>
 }
+
+const rbacRoleLabels: Record<SessionUser['role'], string> = {
+  superadmin: 'Superadministrador', admin: 'Administrador de tienda',
+  craftswoman: 'Tejedora', customer: 'Cliente',
+}
+const rbacActionLabels: Record<RBACPermission['action'], string> = {
+  view: 'Consultar', add: 'Crear', change: 'Editar', delete: 'Eliminar',
+}
+const rbacResourceLabels: Record<string, string> = {
+  cart: 'Carrito de compras', products: 'Productos', categories: 'Categorías',
+  orders: 'Pedidos', designs: 'Diseños de mantas', craftswomen: 'Tejedoras',
+  customers: 'Clientes', users: 'Cuentas de usuario', roles: 'Roles',
+  role_assignments: 'Asignación de roles', permissions: 'Permisos',
+  delegations: 'Delegaciones', navigation: 'Menú y navegación', audit: 'Registro de actividad',
+}
+const navigationRouteOptions = [
+  { value: 'customer.orders', label: 'Cliente · Mis pedidos', roles: ['customer'] },
+  { value: 'customer.designs', label: 'Cliente · Mis diseños', roles: ['customer'] },
+  { value: 'customer.profile', label: 'Cliente · Mis datos', roles: ['customer'] },
+  { value: 'craftswoman.dashboard', label: 'Tejedora · Panel principal', roles: ['craftswoman'] },
+  { value: 'craftswoman.products', label: 'Tejedora · Mis tejidos', roles: ['craftswoman'] },
+  { value: 'craftswoman.inventory', label: 'Tejedora · Mi inventario', roles: ['craftswoman'] },
+  { value: 'craftswoman.orders', label: 'Tejedora · Mis pedidos', roles: ['craftswoman'] },
+  { value: 'admin.dashboard', label: 'Administrador · Panel principal', roles: ['admin', 'superadmin'] },
+  { value: 'admin.products', label: 'Administrador · Productos', roles: ['admin', 'superadmin'] },
+  { value: 'admin.orders', label: 'Administrador · Pedidos', roles: ['admin', 'superadmin'] },
+  { value: 'admin.categories', label: 'Administrador · Categorías', roles: ['admin', 'superadmin'] },
+] as const
+const navigationMinimumPermissions: Record<string, string[]> = {
+  'customer.orders': ['orders.view'], 'customer.designs': ['designs.view'], 'customer.profile': ['customers.view'],
+  'craftswoman.dashboard': ['products.view', 'orders.view'], 'craftswoman.products': ['products.view'],
+  'craftswoman.inventory': ['products.view'], 'craftswoman.orders': ['orders.view'],
+  'admin.dashboard': ['products.view', 'orders.view'], 'admin.products': ['products.view'],
+  'admin.orders': ['orders.view'], 'admin.categories': ['categories.view'],
+}
+const permissionHelpLabel = (key: string) => {
+  const [resource, action] = key.split('.')
+  return `${rbacResourceLabels[resource] ?? resource} · ${rbacActionLabels[action as RBACPermission['action']] ?? action}`
+}
+type RBACSection = 'roles' | 'users' | 'audit' | 'navigation'
 
 function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   const [catalog, setCatalog] = useState<RBACPermission[]>([])
   const [users, setUsers] = useState<SuperadminUser[]>([])
-  const [delegations, setDelegations] = useState<RBACDelegation[]>([])
+  const [navigationItems, setNavigationItems] = useState<RBACNavigationItem[]>([])
   const [audit, setAudit] = useState<AuditEvent[]>([])
   const [selectedRole, setSelectedRole] = useState<SessionUser['role']>('admin')
   const [rolePermissions, setRolePermissions] = useState<RBACRolePermissions | null>(null)
@@ -650,7 +899,13 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   const [feedback, setFeedback] = useState('')
   const [saving, setSaving] = useState(false)
   const [showCreateUser, setShowCreateUser] = useState(false)
+  const [activeSection, setActiveSection] = useState<RBACSection>('roles')
+  const [permissionSearch, setPermissionSearch] = useState('')
   const [createUserRole, setCreateUserRole] = useState<SessionUser['role']>('customer')
+  const [newNavigationRoute, setNewNavigationRoute] = useState('customer.orders')
+  const [newNavigationRoles, setNewNavigationRoles] = useState<SessionUser['role'][]>(['customer'])
+  const [newNavigationResource, setNewNavigationResource] = useState('')
+  const [newNavigationAction, setNewNavigationAction] = useState('')
   const canViewCatalog = hasEffectivePermission(currentUser, 'permissions.view')
   const canChangePermissions = hasEffectivePermission(currentUser, 'permissions.change')
   const canViewUsers = hasEffectivePermission(currentUser, 'users.view')
@@ -659,26 +914,40 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   const canAssignRoles = hasEffectivePermission(currentUser, 'role_assignments.change')
   const canViewRoles = hasEffectivePermission(currentUser, 'roles.view')
   const canChangeRoles = hasEffectivePermission(currentUser, 'roles.change')
-  const canViewDelegations = hasEffectivePermission(currentUser, 'delegations.view')
-  const canAddDelegations = hasEffectivePermission(currentUser, 'delegations.add')
   const canViewAudit = hasEffectivePermission(currentUser, 'audit.view')
+  const canViewNavigation = hasEffectivePermission(currentUser, 'navigation.view')
+  const canAddNavigation = hasEffectivePermission(currentUser, 'navigation.add')
+  const canChangeNavigation = hasEffectivePermission(currentUser, 'navigation.change')
+  const canDeleteNavigation = hasEffectivePermission(currentUser, 'navigation.delete')
   const selectedUser = users.find((candidate) => String(candidate.id) === selectedUserId)
+  const visibleRolePermissions = (rolePermissions?.permissions ?? []).filter((permission) => {
+    const search = permissionSearch.trim().toLocaleLowerCase('es')
+    return !search || (rbacResourceLabels[permission.resource] ?? permission.resource).toLocaleLowerCase('es').includes(search) || rbacActionLabels[permission.action].toLocaleLowerCase('es').includes(search) || permission.name.toLocaleLowerCase('es').includes(search)
+  })
+  const permissionGroups = visibleRolePermissions.reduce<Record<string, RBACPermission[]>>((groups, permission) => {
+    if (!groups[permission.resource]) groups[permission.resource] = []
+    groups[permission.resource].push(permission)
+    return groups
+  }, {})
 
   useEffect(() => {
     Promise.all([
       canViewCatalog ? api.rbacCatalog() : Promise.resolve({ permissions: [] }),
       canViewUsers ? api.superadminUsers(new URLSearchParams({ page_size: '100' })) : Promise.resolve([]),
-      canViewDelegations ? api.permissionDelegations() : Promise.resolve([]),
       canViewAudit ? api.auditEvents() : Promise.resolve([]),
-    ]).then(([catalogResponse, userRows, delegationRows, auditRows]) => {
+    ]).then(([catalogResponse, userRows, auditRows]) => {
       setCatalog(catalogResponse.permissions)
       setUsers(userRows)
-      setDelegations(delegationRows)
       setAudit(auditRows)
       const firstManageable = userRows.find((candidate) => candidate.role !== 'superadmin')
       setSelectedUserId(String(firstManageable?.id ?? userRows[0]?.id ?? ''))
     }).catch((loadError: unknown) => setError(errorMessage(loadError)))
-  }, [currentUser.id, canViewCatalog, canViewUsers, canViewDelegations, canViewAudit])
+  }, [currentUser.id, canViewCatalog, canViewUsers, canViewAudit])
+
+  useEffect(() => {
+    if (!canViewNavigation) return
+    api.navigationItems().then(setNavigationItems).catch((loadError: unknown) => setError(errorMessage(loadError)))
+  }, [canViewNavigation])
 
   useEffect(() => {
     if (!canViewRoles) return
@@ -774,6 +1043,73 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
     } catch (saveError) { setError(errorMessage(saveError)) } finally { setSaving(false) }
   }
 
+  async function createNavigationItem(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!canAddNavigation) return
+    const form = event.currentTarget
+    const values = new FormData(form)
+    const roleCodes = values.getAll('role_codes').map(String) as SessionUser['role'][]
+    const permissionResource = String(values.get('permission_resource') ?? '')
+    const permissionAction = String(values.get('permission_action') ?? '')
+    if (!roleCodes.length) { setError('Selecciona al menos un rol para mostrar esta opción.'); return }
+    if (Boolean(permissionResource) !== Boolean(permissionAction)) { setError('El permiso adicional está incompleto: selecciona recurso y acción, o deja ambos sin requisito adicional.'); return }
+    setSaving(true)
+    setError('')
+    try {
+      const created = await api.createNavigationItem({
+        label: String(values.get('label') ?? '').trim(),
+        route_name: String(values.get('route_name') ?? '').trim(),
+        description: String(values.get('description') ?? '').trim(),
+        anchor: String(values.get('anchor') ?? '').trim(),
+        role_codes: roleCodes,
+        permission_resource: permissionResource || null,
+        permission_action: permissionAction as RBACPermission['action'] || null,
+        order: Number(values.get('order') ?? 10),
+        active: true,
+      })
+      setNavigationItems((current) => [...current, created].sort((a, b) => a.order - b.order))
+      form.reset()
+      setNewNavigationRoute('customer.orders')
+      setNewNavigationRoles(['customer'])
+      setNewNavigationResource('')
+      setNewNavigationAction('')
+      setFeedback('Elemento de menú creado y guardado.')
+    } catch (saveError) { setError(errorMessage(saveError)) } finally { setSaving(false) }
+  }
+
+  async function toggleNavigationItem(item: RBACNavigationItem, active: boolean) {
+    if (!canChangeNavigation) {
+      setError('Tu cuenta no tiene permiso para modificar la visibilidad del menú.')
+      return
+    }
+    setSaving(true)
+    setError('')
+    setFeedback('')
+    try {
+      const updated = await api.updateNavigationItem(item.id, { active })
+      setNavigationItems((current) => current.map((entry) => entry.id === item.id ? updated : entry).sort((a, b) => a.order - b.order || a.label.localeCompare(b.label)))
+      setFeedback(active ? `“${item.label}” volvió a estar visible.` : `“${item.label}” quedó oculta para los roles asignados.`)
+    } catch (saveError) {
+      setError(errorMessage(saveError))
+      try {
+        setNavigationItems((await api.navigationItems()).sort((a, b) => a.order - b.order || a.label.localeCompare(b.label)))
+      } catch {
+        setError(`${errorMessage(saveError)} No pudimos volver a consultar el estado guardado.`)
+      }
+    } finally { setSaving(false) }
+  }
+
+  async function removeNavigationItem(item: RBACNavigationItem) {
+    if (!canDeleteNavigation || !window.confirm(`¿Eliminar la opción "${item.label}" del menú?`)) return
+    setSaving(true)
+    setError('')
+    try {
+      await api.deleteNavigationItem(item.id)
+      setNavigationItems((current) => current.filter((entry) => entry.id !== item.id))
+      setFeedback('Opción de menú eliminada.')
+    } catch (saveError) { setError(errorMessage(saveError)) } finally { setSaving(false) }
+  }
+
   async function changeRolePermission(permission: RBACPermission, allowed: boolean) {
     if (!rolePermissions || !canChangeRoles) return
     setSaving(true)
@@ -813,30 +1149,23 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
     } catch (saveError) { setError(errorMessage(saveError)) } finally { setSaving(false) }
   }
 
-  async function changeDelegation(permission: RBACPermission, allowed: boolean) {
-    if (!selectedUser || !canAddDelegations) return
-    setSaving(true)
-    setError('')
-    try {
-      await api.setPermissionDelegation({
-        admin_user_id: selectedUser.id,
-        resource: permission.resource,
-        action: permission.action,
-        allowed,
-      })
-      if (canViewDelegations) setDelegations(await api.permissionDelegations())
-      if (String(selectedUser.id) === selectedUserId && canViewUsers && canViewCatalog) {
-        setUserPermissions(await api.userPermissions(selectedUser.id))
-      }
-      if (canViewAudit) setAudit(await api.auditEvents())
-    } catch (saveError) { setError(errorMessage(saveError)) } finally { setSaving(false) }
-  }
-
   return <section className="rbac-panel" aria-labelledby="rbac-heading">
-    <div className="admin-orders-heading"><div><p className="eyebrow">CONTROL DE ACCESO</p><h2 id="rbac-heading">Roles y permisos</h2></div><span>{catalog.length} permisos catalogados</span></div>
+    <div className="rbac-hero"><div><p className="eyebrow">SEGURIDAD DE LA TIENDA</p><h2 id="rbac-heading">Roles y permisos</h2><p>Administra qué puede consultar y modificar cada tipo de cuenta.</p></div><div className="rbac-total"><strong>{catalog.length}</strong><span>permisos disponibles</span></div></div>
+    <nav className="rbac-tabs" aria-label="Secciones de administración de acceso">
+      {([['roles', 'Permisos por rol'], ['users', 'Cuentas'], ['navigation', 'Menú dinámico'], ['audit', 'Auditoría']] as [RBACSection, string][]).map(([section, label]) => <button type="button" key={section} className={activeSection === section ? 'active' : ''} onClick={() => setActiveSection(section)}>{label}</button>)}
+    </nav>
+    {(canViewRoles || canViewNavigation) && <section className="rbac-relationship-guide" aria-label="Cómo se relacionan los permisos y el menú">
+      {canViewRoles && <article className="rbac-relationship-card">
+        <span className="rbac-guide-number">01</span><div><span className="rbac-guide-kicker">SEGURIDAD · QUÉ PUEDE HACER</span><h3>Permisos por rol</h3><p>Autoriza acciones reales dentro del sistema: consultar, crear, editar o eliminar. Django comprueba estos permisos cuando se intenta realizar una operación.</p><small>Ejemplo: permitir que una tejedora consulte y actualice sus pedidos.</small><button type="button" onClick={() => setActiveSection('roles')}>Configurar permisos <ArrowRight size={14} /></button></div>
+      </article>}
+      {canViewNavigation && <article className="rbac-relationship-card">
+        <span className="rbac-guide-number">02</span><div><span className="rbac-guide-kicker">NAVEGACIÓN · QUÉ PUEDE VER</span><h3>Menú dinámico</h3><p>Decide qué enlaces aparecen en el panel, a qué pantalla existente llevan y para cuáles roles están visibles. No concede permisos de seguridad.</p><small>Ejemplo: mostrar la opción «Pedidos» en el menú de Tejedora.</small><button type="button" onClick={() => setActiveSection('navigation')}>Configurar menú <ArrowRight size={14} /></button></div>
+      </article>}
+      <p className="rbac-relationship-flow"><strong>Orden recomendado:</strong> primero habilita las acciones en «Permisos por rol»; después activa la pantalla y asígnala al mismo rol en «Menú dinámico». Si la pantalla exige permisos mínimos, también deben estar habilitados.</p>
+    </section>}
     {error && <p className="rbac-error" role="alert">{error}</p>}
     {feedback && <p className="rbac-feedback" role="status">{feedback}</p>}
-    {canAddUsers && canAssignRoles && <section className="rbac-block rbac-user-create">
+    {activeSection === "users" && canAddUsers && canAssignRoles && <section className="rbac-block rbac-user-create">
       <div className="rbac-block-heading"><h3>Crear cuenta</h3><button className="button button-outline" type="button" onClick={() => setShowCreateUser((visible) => !visible)}>{showCreateUser ? 'Cerrar' : 'Nueva cuenta'}</button></div>
       {showCreateUser && <form className="rbac-user-form" onSubmit={createManagedUser}>
         <label className="form-label">Usuario<input name="username" required maxLength={150} /></label>
@@ -853,11 +1182,14 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
       </form>}
     </section>}
     <div className="rbac-layout">
-      {canViewRoles && <section className="rbac-block"><div className="rbac-block-heading"><h3>Permisos por rol</h3><select aria-label="Rol a configurar" value={selectedRole} onChange={(event) => setSelectedRole(event.target.value as SessionUser['role'])}>{(['superadmin', 'admin', 'customer', 'craftswoman'] as const).map((role) => <option key={role} value={role}>{role}</option>)}</select></div>
-        {rolePermissions && <label className="admin-check rbac-active"><input type="checkbox" checked={rolePermissions.active} disabled={saving || !canChangeRoles} onChange={(event) => void changeRoleActive(event.target.checked)} /> Rol activo</label>}
-        <div className="rbac-permission-list">{rolePermissions?.permissions.map((permission) => <label className="rbac-permission" key={`${permission.resource}.${permission.action}`}><input type="checkbox" checked={Boolean(permission.allowed)} disabled={saving || !canChangeRoles || !rolePermissions.active || selectedRole === 'superadmin'} onChange={(event) => void changeRolePermission(permission, event.target.checked)} /><span><strong>{permission.resource}</strong><small>{permission.action} · {permission.name}</small></span></label>)}</div>
+      {activeSection === 'roles' && canViewRoles && <section className="rbac-block rbac-main-block"><div className="rbac-block-heading"><div><h3>Configurar permisos por rol</h3><p>Selecciona un rol y activa únicamente las acciones que necesita.</p></div><div className="rbac-role-heading-actions">{canAddNavigation && <button type="button" className="button button-outline" onClick={() => setActiveSection('navigation')}><Plus size={15} /> Añadir al menú</button>}<select aria-label="Rol a configurar" value={selectedRole} onChange={(event) => { setSelectedRole(event.target.value as SessionUser['role']); setPermissionSearch('') }}>{(['superadmin', 'admin', 'craftswoman', 'customer'] as const).map((role) => <option key={role} value={role}>{rbacRoleLabels[role]}</option>)}</select></div></div>
+        {rolePermissions && <div className="rbac-role-status"><label className="admin-check rbac-active"><input type="checkbox" checked={rolePermissions.active} disabled={saving || !canChangeRoles || selectedRole === 'superadmin'} onChange={(event) => void changeRoleActive(event.target.checked)} /> Rol activo</label><span>{rolePermissions.active ? 'Este rol puede acceder al sistema.' : 'Este rol está desactivado y no puede acceder al sistema.'}</span></div>}
+        {selectedRole === 'superadmin' && <p className="rbac-info">El superadministrador conserva acceso global. Esta matriz es solo informativa y no se puede modificar.</p>}
+        <label className="rbac-search"><Search size={16} /><input value={permissionSearch} onChange={(event) => setPermissionSearch(event.target.value)} placeholder="Buscar recurso o acción..." /></label>
+        <div className="rbac-groups">{Object.entries(permissionGroups).map(([resource, permissions]) => <section className="rbac-resource-card" key={resource}><div className="rbac-resource-heading"><strong>{rbacResourceLabels[resource] ?? resource}</strong><span>{permissions.filter((permission) => permission.allowed).length} de {permissions.length} acciones activas</span></div><div className="rbac-actions-grid">{permissions.map((permission) => <label className="rbac-action-option" key={permission.resource + '.' + permission.action}><input type="checkbox" checked={Boolean(permission.allowed)} disabled={saving || !canChangeRoles || !rolePermissions?.active || selectedRole === 'superadmin'} onChange={(event) => void changeRolePermission(permission, event.target.checked)} /><span>{rbacActionLabels[permission.action]}</span></label>)}</div></section>)}</div>
+        {Object.keys(permissionGroups).length === 0 && <p className="muted-copy">No hay permisos que coincidan con la búsqueda.</p>}
       </section>}
-      {canViewUsers && canViewCatalog && <section className="rbac-block"><div className="rbac-block-heading"><h3>Cuenta y permisos individuales</h3><select aria-label="Usuario a gestionar" value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)}><option value="">Selecciona una cuenta</option>{users.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.username} · {candidate.role}</option>)}</select></div>
+      {activeSection === "users" && canViewUsers && canViewCatalog && <section className="rbac-block"><div className="rbac-block-heading"><div><h3>Cuenta y permisos individuales</h3><p>Administra los datos y excepciones de una cuenta específica.</p></div><select aria-label="Usuario a gestionar" value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)}><option value="">Selecciona una cuenta</option>{users.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.username} · {candidate.role}</option>)}</select></div>
         {selectedUser && <form className="rbac-user-form" key={`${selectedUser.id}-${selectedUser.username}-${selectedUser.email}-${selectedUser.role}`} onSubmit={updateManagedUser}>
           <label className="form-label">Usuario<input name="username" required maxLength={150} defaultValue={selectedUser.username} disabled={!canChangeUsers} /></label>
           <label className="form-label">Correo<input name="email" type="email" required maxLength={254} defaultValue={selectedUser.email} disabled={!canChangeUsers} /></label>
@@ -870,15 +1202,37 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
           {selectedUser.role === 'craftswoman' && <><label className="form-label">Teléfono<input name="phone" maxLength={30} defaultValue={selectedUser.profile?.phone ?? ''} disabled={!canChangeUsers} /></label><label className="form-label">Comunidad<input name="community" maxLength={150} defaultValue={selectedUser.profile?.community ?? ''} disabled={!canChangeUsers} /></label><label className="form-label">Región<input name="region" maxLength={100} defaultValue={selectedUser.profile?.region ?? ''} disabled={!canChangeUsers} /></label><label className="admin-check"><input name="craftswoman_active" type="checkbox" defaultChecked={selectedUser.profile?.active ?? false} disabled={!canChangeUsers} /> Perfil artesana activo</label></>}
           {canChangeUsers && <button className="button button-outline" disabled={saving}>{saving ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />} Guardar cuenta</button>}
         </form>}
-        <div className="rbac-permission-list">{userPermissions?.permissions.map((permission) => <label className="rbac-permission" key={`${permission.resource}.${permission.action}`}><span><strong>{permission.resource}</strong><small>{permission.action} · {permission.name}</small></span><select aria-label={`${permission.resource} ${permission.action} para ${userPermissions.username}`} value={permission.effect ?? ''} disabled={saving || !canChangePermissions} onChange={(event) => void changeUserPermission(permission, event.target.value ? event.target.value as 'allow' | 'deny' : null)}><option value="">Heredado</option><option value="allow">Permitir</option><option value="deny">Denegar</option></select></label>)}</div>
+        <div className="rbac-permission-list">{userPermissions?.permissions.map((permission) => <label className="rbac-permission" key={`${permission.resource}.${permission.action}`}><span><strong>{rbacResourceLabels[permission.resource] ?? permission.resource}</strong><small>{rbacActionLabels[permission.action]} · {permission.name}</small></span><select aria-label={`${permission.resource} ${permission.action} para ${userPermissions.username}`} value={permission.effect ?? ''} disabled={saving || !canChangePermissions} onChange={(event) => void changeUserPermission(permission, event.target.value ? event.target.value as 'allow' | 'deny' : null)}><option value="">Heredado</option><option value="allow">Permitir</option><option value="deny">Denegar</option></select></label>)}</div>
       </section>}
-      {canViewDelegations && <section className="rbac-block"><div className="rbac-block-heading"><h3>Delegaciones para admin</h3><span>{selectedUser?.role === 'admin' ? selectedUser.username : 'Selecciona un admin'}</span></div>
-        {selectedUser?.role === 'admin' ? <div className="rbac-permission-list">{catalog.map((permission) => {
-          const delegated = delegations.some((item) => item.admin_user_id === selectedUser.id && item.resource === permission.resource && item.action === permission.action)
-          return <label className="rbac-permission" key={`${permission.resource}.${permission.action}`}><input type="checkbox" checked={delegated} disabled={saving || !canAddDelegations} onChange={(event) => void changeDelegation(permission, event.target.checked)} /><span><strong>{permission.resource}</strong><small>{permission.action} · {permission.name}</small></span></label>
-        })}</div> : <p className="muted-copy">Las delegaciones solo se pueden asignar a cuentas con rol admin.</p>}
+      {activeSection === 'navigation' && canViewNavigation && <section className="rbac-block">
+        <div className="rbac-block-heading"><div><h3>Menú y vistas por rol</h3><p>Configura qué pantallas aparecen en cada cuenta. Esta sección no crea pantallas nuevas: habilita accesos a funciones que ya existen.</p></div><span>{navigationItems.length} opciones</span></div>
+        <div className="rbac-guide">
+          <strong>Antes de configurar, ten en cuenta</strong>
+          <ol><li><b>Pantalla permitida:</b> determina qué función real abrirá la opción. No la cambies por ensayo y error.</li><li><b>Roles:</b> elige quién verá el acceso. La persona también necesita los permisos funcionales de esa pantalla.</li><li><b>Permiso adicional:</b> es un filtro extra; recurso y acción deben elegirse juntos. Si no conoces cuál necesitas, deja ambos sin requisito adicional.</li><li><b>Visible:</b> al desactivarlo, la opción deja de aparecer para todos los roles asignados, aunque sus permisos sigan activos.</li></ol>
+          <p><b>Importante:</b> ocultar una opción no concede ni revoca permisos de seguridad. El sistema valida los permisos en el servidor. Los accesos del cliente a pedidos, diseños y perfil se administran aquí; catálogo, favoritos y carrito son secciones fijas de la tienda.</p>
+        </div>
+        {canAddNavigation && <form className="rbac-user-form rbac-navigation-form" onSubmit={createNavigationItem}>
+          <div className="rbac-form-section-title"><span>1</span><div><strong>Identificación de la opción</strong><small>Los campos con * son obligatorios.</small></div></div>
+          <label className="form-label">Nombre visible *<input name="label" required maxLength={80} placeholder="Ej. Mis pedidos" /><small>Es el texto que verá la persona en su menú.</small></label>
+          <label className="form-label">Pantalla permitida *<select name="route_name" required value={newNavigationRoute} onChange={(event) => { const next = event.target.value; setNewNavigationRoute(next); const option = navigationRouteOptions.find((item) => item.value === next); setNewNavigationRoles(option ? [...option.roles] as SessionUser['role'][] : []) }}>{navigationRouteOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><small>Selecciona la función que se abrirá. Las opciones disponibles ya están conectadas al sistema.</small></label>
+          <p className="rbac-warning">Esta pantalla exige estos permisos mínimos: <b>{(navigationMinimumPermissions[newNavigationRoute] ?? []).map(permissionHelpLabel).join(' + ') || 'sin permisos mínimos adicionales'}</b>. Si alguno no está activo para el rol seleccionado, el servidor ocultará esta opción aunque esté marcada como visible. Configúralos en la pestaña “Roles y permisos”.</p>
+          <div className="rbac-form-section-title"><span>2</span><div><strong>Presentación y orden</strong><small>Estos datos organizan el menú; no habilitan permisos.</small></div></div>
+          <label className="form-label">Sección (opcional)<input name="anchor" maxLength={80} placeholder="Ej. pedidos" /><small>Identificador auxiliar; puedes dejarlo vacío si no sabes qué colocar.</small></label>
+          <label className="form-label">Descripción (opcional)<input name="description" maxLength={220} placeholder="Ej. Consulta el avance de tus compras" /><small>Texto informativo para identificar la finalidad de la opción.</small></label>
+          <label className="form-label">Orden de aparición<input name="order" type="number" min="0" max="32767" defaultValue="10" /><small>Define la posición de esta opción dentro del menú de cada rol: 10 aparece antes que 20 y 30. Usa saltos de 10 para poder insertar nuevas opciones después. Si dos opciones tienen el mismo número, se ordenan alfabéticamente. No concede ni quita permisos.</small></label>
+          <div className="rbac-form-section-title"><span>3</span><div><strong>Filtro adicional de permisos</strong><small>Opcional: úsalo solo si necesitas restringir más esta opción.</small></div></div>
+          <label className="form-label">Permiso requerido · recurso<select name="permission_resource" value={newNavigationResource} onChange={(event) => setNewNavigationResource(event.target.value)}><option value="">Sin requisito adicional</option>{Object.entries(rbacResourceLabels).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>
+          <label className="form-label">Permiso requerido · acción<select name="permission_action" value={newNavigationAction} onChange={(event) => setNewNavigationAction(event.target.value)}><option value="">Sin acción</option>{Object.entries(rbacActionLabels).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>
+          {Boolean(newNavigationResource) !== Boolean(newNavigationAction) && <p className="rbac-warning">Debes completar los dos campos o dejar ambos vacíos. Si guardas solo uno, la opción no se podrá crear.</p>}
+          <div className="rbac-form-section-title"><span>4</span><div><strong>¿Quién verá esta opción?</strong><small>Selecciona al menos un rol.</small></div></div>
+          <fieldset className="rbac-role-picker"><legend>Roles permitidos *</legend>{(['superadmin', 'admin', 'craftswoman', 'customer'] as const).filter((role) => navigationRouteOptions.find((option) => option.value === newNavigationRoute)?.roles.some((allowedRole) => allowedRole === role)).map((role) => <label key={role}><input type="checkbox" name="role_codes" value={role} checked={newNavigationRoles.includes(role)} onChange={(event) => setNewNavigationRoles((current) => event.target.checked ? [...current, role] : current.filter((item) => item !== role))} /> {rbacRoleLabels[role]}</label>)}</fieldset>
+          {!newNavigationRoles.length && <p className="rbac-warning">Selecciona al menos un rol para que esta opción pueda mostrarse.</p>}
+          <button className="button button-dark" disabled={saving || !newNavigationRoles.length || (Boolean(newNavigationResource) !== Boolean(newNavigationAction))}>{saving ? 'Guardando…' : 'Añadir opción al menú'}</button>
+        </form>}
+        <div className="rbac-nav-list">{[...navigationItems].sort((a, b) => a.order - b.order || a.label.localeCompare(b.label)).map((item) => <article className="rbac-nav-row" key={item.id}><div><strong>{item.label}</strong><small>{item.route_name} · Posición {item.order}</small><small>{item.order <= 10 ? 'Aparece al inicio del menú' : item.order <= 20 ? 'Aparece después de las opciones con posición 10' : 'Aparece después de las opciones con posiciones menores'}</small><small>Visible para: {item.role_codes.map((role) => rbacRoleLabels[role]).join(', ')}</small><small>{item.permission_resource ? 'Filtro adicional: ' + (rbacResourceLabels[item.permission_resource] ?? item.permission_resource) + ' · ' + rbacActionLabels[item.permission_action ?? 'view'] : 'Sin permiso adicional configurado'}</small></div><div className="rbac-nav-actions"><label><input type="checkbox" checked={item.active} disabled={saving || !canChangeNavigation} onChange={(event) => void toggleNavigationItem(item, event.target.checked)} /> Visible</label>{canDeleteNavigation && <button type="button" className="button button-outline" disabled={saving} onClick={() => void removeNavigationItem(item)}>Eliminar</button>}</div></article>)}</div>
+        {navigationItems.length === 0 && <p className="muted-copy">Todavía no hay opciones de menú configuradas.</p>}
       </section>}
-      {canViewAudit && <section className="rbac-block"><div className="rbac-block-heading"><h3>Actividad sensible</h3><span>{audit.length} eventos recientes</span></div>
+      {activeSection === "audit" && canViewAudit && <section className="rbac-block"><div className="rbac-block-heading"><h3>Actividad sensible</h3><span>{audit.length} eventos recientes</span></div>
         <div className="rbac-audit-list">{audit.slice(0, 12).map((event) => <article className="rbac-audit-row" key={event.id}><time>{new Date(event.created_at).toLocaleString('es-CO')}</time><strong>{event.action}</strong><span>{event.actor ?? 'Sistema'} · {event.affected_user ?? event.resource}</span><small>{event.result === 'denied' ? 'Denegado' : 'Correcto'}</small></article>)}</div>
       </section>}
     </div>
@@ -901,7 +1255,7 @@ function DesignSummary({ design }: { design: CustomDesign }) {
 }
 
 function OrderCard({ order }: { order: Order }) {
-  return <article className="order-card"><div className="order-topline"><div><p className="product-origin">PEDIDO #{String(order.id).padStart(4, '0')}</p><h3>{dateLabel(order.created_at)}</h3></div><span className={`status-pill status-${order.status}`}>{order.status_label}</span></div><div className="order-products">{order.items.map((item) => <div className="order-product" key={item.id}><ProductPhoto src={item.product.image_url} alt={item.product.name} className="order-product-photo" /><span>{item.product.name}<small>Cantidad: {item.quantity}</small></span><strong>{money(item.subtotal)}</strong></div>)}</div><div className="order-total"><span>{order.craftswoman ? `Tejido por ${order.craftswoman.name}` : order.payment_method === 'contact' ? 'Pago por coordinar' : `Pago: ${order.payment_method}`}</span><strong>Total {money(order.total)}</strong></div></article>
+  return <article className="order-card"><div className="order-topline"><div><p className="product-origin">PEDIDO #{String(order.id).padStart(4, '0')}</p><h3>{dateLabel(order.created_at)}</h3></div><span className={`status-pill status-${order.status}`}>{order.status_label}</span></div><div className="order-products">{order.items.map((item) => <div className="order-product" key={item.id}><ProductPhoto src={item.product.image_url} alt={item.product.name} className="order-product-photo" /><span>{item.product.name}<small>Cantidad: {item.quantity}</small></span><strong>{money(item.subtotal)}</strong></div>)}</div><div className="order-total"><span>{order.craftswoman ? `Tejedora asignada: ${order.craftswoman.name}` : 'Tejedora pendiente de asignación'} · {order.payment_method === 'contact' ? 'Pago por coordinar' : `Pago: ${order.payment_method}`}</span><strong>Total {money(order.total)}</strong></div></article>
 }
 
 function OrderSuccess({ order, onClose, onOrders }: { order: Order; onClose: () => void; onOrders: () => void }) {

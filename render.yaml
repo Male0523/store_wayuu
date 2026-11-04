@@ -1,11 +1,14 @@
 services:
+  # API Django: conserva la lógica existente y usa PostgreSQL administrado.
   - type: web
     name: wayuuwaa-backend
-    env: python
+    runtime: python
     plan: free
     region: oregon
     buildCommand: "cd backend && pip install -r requirements.txt && python manage.py collectstatic --noinput"
-    startCommand: "cd backend && gunicorn config.wsgi --bind 0.0.0.0:$PORT"
+    # En el plan gratuito no hay preDeployCommand. migrate es idempotente y
+    # se ejecuta antes de iniciar Gunicorn para preparar la base recién creada.
+    startCommand: "cd backend && python manage.py migrate --noinput && gunicorn config.wsgi --bind 0.0.0.0:$PORT"
     envVars:
       - key: DJANGO_SECRET_KEY
         generateValue: true
@@ -16,16 +19,27 @@ services:
       - key: ALLOWED_HOSTS
         value: "wayuuwaa-backend.onrender.com"
       - key: CORS_ALLOWED_ORIGINS
-        value: "https://wayuuwaa.vercel.app"
+        value: "https://wayuuwaa-frontend.onrender.com"
       - key: CSRF_TRUSTED_ORIGINS
-        value: "https://wayuuwaa.vercel.app"
+        value: "https://wayuuwaa-frontend.onrender.com"
       - key: DATABASE_URL
         fromDatabase:
           name: wayuuwaa-db
           property: connectionString
+
+  # Frontend React + Vite publicado como sitio estático gratuito.
+  - type: web
+    name: wayuuwaa-frontend
+    runtime: static
+    buildCommand: "cd frontend && npm ci && npm run build"
+    staticPublishPath: frontend/dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: "https://wayuuwaa-backend.onrender.com/api/v1"
 
 databases:
   - name: wayuuwaa-db
     databaseName: wayuuwaa
     user: wayuuwaa
     plan: free
+    region: oregon

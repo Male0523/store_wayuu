@@ -317,6 +317,26 @@ class Customer(models.Model):
         return self.name
 
 
+class CustomerCartItem(models.Model):
+    """Producto guardado en el carrito persistente de una cuenta de cliente."""
+
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='cart_items')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='customer_cart_items')
+    quantity = models.PositiveIntegerField('cantidad', validators=[MinValueValidator(1)])
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'producto del carrito'
+        verbose_name_plural = 'productos de los carritos'
+        ordering = ('updated_at',)
+        constraints = [
+            models.UniqueConstraint(fields=('customer', 'product'), name='unique_customer_cart_product'),
+        ]
+
+    def __str__(self):
+        return f'{self.customer} · {self.product} × {self.quantity}'
+
+
 class Order(models.Model):
     class Status(models.TextChoices):
         PENDING = 'pending', 'Pendiente'

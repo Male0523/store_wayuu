@@ -12,6 +12,8 @@ import type {
   RBACAction,
   RBACDelegation,
   RBACPermission,
+  RBACNavigationItem,
+  RBACNavigationInput,
   RBACRolePermissions,
   RBACUserPermissions,
   SessionUser,
@@ -105,10 +107,18 @@ export const api = {
     request<void>(`/cart/items/${productId}/`, { method: 'DELETE' }),
   checkout: (values: { address: string; city: string; payment_method: string; notes: string }) =>
     request<Order>('/checkout/', { method: 'POST', body: json(values) }),
-  orders: () => request<Page<Order>>('/orders/'),
+  orders: () => request<Page<Order>>('/orders/?page_size=100'),
   designs: () => request<CustomDesign[]>('/designs/'),
   createDesign: (values: Record<string, string | number>) =>
     request('/designs/', { method: 'POST', body: json(values) }),
+  craftswomanProducts: () => request<Product[]>('/craftswoman/products/'),
+  createCraftswomanProduct: (values: {
+    sku: string; name: string; category: number; description?: string; region?: string;
+    color?: string; size?: string; production_time?: string; price: string | number;
+    stock: number; image_url?: string; made_to_order?: boolean;
+  }) => request<Product>('/craftswoman/products/', { method: 'POST', body: json(values) }),
+  updateCraftswomanProduct: (id: number, values: Record<string, string | number | boolean>) =>
+    request<Product>(`/craftswoman/products/${id}/`, { method: 'PATCH', body: json(values) }),
   craftswomanDashboard: () => request<CraftswomanDashboard>('/craftswoman/dashboard/'),
   acceptOrder: (id: number) => request<Order>(`/craftswoman/orders/${id}/accept/`, { method: 'POST' }),
   updateOrderStatus: (id: number, value: string) =>
@@ -147,6 +157,15 @@ export const api = {
       method: 'PATCH', body: json({ role }),
     }),
   auditEvents: () => request<AuditEvent[]>('/admin/rbac/audit/'),
+  roleNavigation: () => request<RBACNavigationItem[]>('/navigation/menu/'),
+  navigationItems: () => request<RBACNavigationItem[]>('/admin/rbac/navigation/'),
+  createNavigationItem: (values: RBACNavigationInput) =>
+    request<RBACNavigationItem>('/admin/rbac/navigation/', { method: 'POST', body: json(values) }),
+  updateNavigationItem: (id: number, values: Partial<RBACNavigationInput>) =>
+    request<RBACNavigationItem>(`/admin/rbac/navigation/${id}/`, { method: 'PATCH', body: json(values) }),
+  deleteNavigationItem: (id: number) =>
+    request<void>(`/admin/rbac/navigation/${id}/`, { method: 'DELETE' }),
+
   adminCategories: () => request<AdminCategory[]>('/admin/categories/'),
   createAdminCategory: (values: Pick<AdminCategory, 'name' | 'description' | 'active'>) =>
     request<AdminCategory>('/admin/categories/', { method: 'POST', body: json(values) }),
