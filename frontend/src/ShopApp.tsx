@@ -851,6 +851,17 @@ const navigationRouteOptions = [
   { value: 'admin.orders', label: 'Administrador · Pedidos', roles: ['admin', 'superadmin'] },
   { value: 'admin.categories', label: 'Administrador · Categorías', roles: ['admin', 'superadmin'] },
 ] as const
+const navigationMinimumPermissions: Record<string, string[]> = {
+  'customer.orders': ['orders.view'], 'customer.designs': ['designs.view'], 'customer.profile': ['customers.view'],
+  'craftswoman.dashboard': ['products.view', 'orders.view'], 'craftswoman.products': ['products.view'],
+  'craftswoman.inventory': ['products.view'], 'craftswoman.orders': ['orders.view'],
+  'admin.dashboard': ['products.view', 'orders.view'], 'admin.products': ['products.view'],
+  'admin.orders': ['orders.view'], 'admin.categories': ['categories.view'],
+}
+const permissionHelpLabel = (key: string) => {
+  const [resource, action] = key.split('.')
+  return `${rbacResourceLabels[resource] ?? resource} · ${rbacActionLabels[action as RBACPermission['action']] ?? action}`
+}
 type RBACSection = 'roles' | 'users' | 'delegations' | 'audit' | 'navigation'
 
 function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
@@ -1193,7 +1204,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
           <div className="rbac-form-section-title"><span>1</span><div><strong>Identificación de la opción</strong><small>Los campos con * son obligatorios.</small></div></div>
           <label className="form-label">Nombre visible *<input name="label" required maxLength={80} placeholder="Ej. Mis pedidos" /><small>Es el texto que verá la persona en su menú.</small></label>
           <label className="form-label">Pantalla permitida *<select name="route_name" required value={newNavigationRoute} onChange={(event) => { const next = event.target.value; setNewNavigationRoute(next); const option = navigationRouteOptions.find((item) => item.value === next); setNewNavigationRoles(option ? [...option.roles] as SessionUser['role'][] : []) }}>{navigationRouteOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><small>Selecciona la función que se abrirá. Las opciones disponibles ya están conectadas al sistema.</small></label>
-          {newNavigationRoute === 'craftswoman.dashboard' && <p className="rbac-warning">Esta pantalla requiere que la tejedora tenga los permisos de consulta de <b>Productos</b> y <b>Pedidos</b>. Si le falta uno, el acceso no aparecerá.</p>}
+          <p className="rbac-warning">Esta pantalla exige estos permisos mínimos: <b>{(navigationMinimumPermissions[newNavigationRoute] ?? []).map(permissionHelpLabel).join(' + ') || 'sin permisos mínimos adicionales'}</b>. Si alguno no está activo para el rol seleccionado, el servidor ocultará esta opción aunque esté marcada como visible. Configúralos en la pestaña “Roles y permisos”.</p>
           <div className="rbac-form-section-title"><span>2</span><div><strong>Presentación y orden</strong><small>Estos datos organizan el menú; no habilitan permisos.</small></div></div>
           <label className="form-label">Sección (opcional)<input name="anchor" maxLength={80} placeholder="Ej. pedidos" /><small>Identificador auxiliar; puedes dejarlo vacío si no sabes qué colocar.</small></label>
           <label className="form-label">Descripción (opcional)<input name="description" maxLength={220} placeholder="Ej. Consulta el avance de tus compras" /><small>Texto informativo para identificar la finalidad de la opción.</small></label>
