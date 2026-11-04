@@ -130,8 +130,13 @@ export interface PublicCraftswoman extends CraftswomanSummary {}
 
 export interface CraftswomanDashboard {
   active: boolean
+  craftswoman: CraftswomanSummary
   available_orders: Order[]
   orders: Order[]
+  order_counts: {
+    available: number
+    assigned: number
+  }
   designs: CustomDesign[]
 }
 
