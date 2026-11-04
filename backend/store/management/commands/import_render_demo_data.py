@@ -103,10 +103,10 @@ class Command(BaseCommand):
                 "productos": (Product.objects.count(), 8),
                 "pedidos": (Order.objects.count(), 1),
                 "detalles de pedido": (OrderItem.objects.count(), 3),
-                "carritos": (CustomerCartItem.objects.count(), 2),
+                "carritos": (CustomerCartItem.objects.count(), 4),
                 "permisos de roles": (RolePermission.objects.count(), 31),
                 "elementos de navegación": (NavigationItem.objects.count(), 16),
-                "eventos de auditoría": (AuditEvent.objects.count(), 36),
+                "eventos de auditoría": (AuditEvent.objects.count(), 37),
             }
             mismatches = [
                 f"{name}: esperados {expected}, encontrados {actual}"
