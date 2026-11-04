@@ -23,6 +23,7 @@ urlpatterns = [
     path('admin/rbac/delegations/', api.PermissionDelegationsView.as_view(), name='rbac-delegations'),
     path('admin/rbac/users/<int:user_id>/permissions/', api.AdminUserPermissionsView.as_view(), name='rbac-user-permissions'),
     path('admin/rbac/audit/', api.SuperadminAuditView.as_view(), name='rbac-audit'),
+    path('navigation/menu/', api.RoleNavigationMenuView.as_view(), name='role-navigation-menu'),
     path('admin/rbac/navigation/', api.SuperadminNavigationView.as_view(), name='rbac-navigation'),
     path('admin/rbac/navigation/<int:item_id>/', api.SuperadminNavigationDetailView.as_view(), name='rbac-navigation-detail'),
     path('auth/register/', api.CustomerRegistrationView.as_view(), name='register'),
