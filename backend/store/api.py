@@ -1160,6 +1160,11 @@ class SuperadminNavigationDetailView(APIView):
         serializer.is_valid(raise_exception=True)
         values = serializer.validated_data
         role_codes = values.pop('role_codes', None)
+        next_route = values.get('route_name', item.route_name)
+        next_roles = set(role_codes) if role_codes is not None else set(item.roles.values_list('code', flat=True))
+        allowed_roles = NAVIGATION_ROUTE_RULES[next_route]['roles']
+        if next_roles - allowed_roles:
+            raise serializers.ValidationError({'role_codes': 'La pantalla seleccionada no está disponible para uno o más roles elegidos.'})
         resource = values.pop('permission_resource', serializers.empty)
         action = values.pop('permission_action', serializers.empty)
         if resource is not serializers.empty or action is not serializers.empty:
