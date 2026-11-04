@@ -585,7 +585,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
   </div>
 }
 
-function ProductPhoto({ alt, className, loading = 'lazy', variant = 0 }: { src: string; alt: string; className: string; loading?: 'eager' | 'lazy'; variant?: number }) {
+function ProductPhoto({ className, loading = 'lazy', variant = 0 }: { src: string; alt: string; className: string; loading?: 'eager' | 'lazy'; variant?: number }) {
   const mantaImage = PUBLIC_MANTA_IMAGES[Math.abs(variant) % PUBLIC_MANTA_IMAGES.length]
   return <img src={mantaImage} alt="Manta Wayúu artesanal" className={className} loading={loading} />
 }
