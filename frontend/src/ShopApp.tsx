@@ -86,6 +86,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
   const [accountSection, setAccountSection] = useState<AccountSection>('orders')
   const [dashboard, setDashboard] = useState<CraftswomanDashboard | null>(null)
   const [craftswomanProducts, setCraftswomanProducts] = useState<Product[]>([])
+  const [roleNavigation, setRoleNavigation] = useState<RBACNavigationItem[]>([])
   const [loading, setLoading] = useState(true)
   const [catalogError, setCatalogError] = useState('')
   const [notice, setNotice] = useState('')
@@ -119,6 +120,13 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
   useEffect(() => {
     setProfileDraft(null)
   }, [user?.id, user?.email, user?.username, user?.role])
+
+  useEffect(() => {
+    let active = true
+    if (!user) { setRoleNavigation([]); return }
+    api.roleNavigation().then((items) => { if (active) setRoleNavigation(items) }).catch(() => { if (active) setRoleNavigation([]) })
+    return () => { active = false }
+  }, [user?.id, user?.role, user?.permissions?.join('|')])
 
   const loadAdminData = useCallback(async () => {
     if (!user || (user.role !== 'admin' && user.role !== 'superadmin')) return
@@ -355,23 +363,27 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
         await loadAdminData()
         setScreen('admin')
       } else if (user.role === 'craftswoman') {
+        const visibleRoutes = roleNavigation.map((item) => item.route_name)
         const [craftswomanDashboard, ownProducts] = await Promise.all([
-          api.craftswomanDashboard(),
-          api.craftswomanProducts(),
+          visibleRoutes.includes('craftswoman.dashboard') || visibleRoutes.includes('craftswoman.orders') ? api.craftswomanDashboard() : Promise.resolve(null),
+          visibleRoutes.some((route) => ['craftswoman.dashboard', 'craftswoman.products', 'craftswoman.inventory'].includes(route)) ? api.craftswomanProducts() : Promise.resolve([]),
         ])
         setDashboard(craftswomanDashboard)
         setCraftswomanProducts(ownProducts)
         setScreen('craftswoman')
       } else {
-        const [orderPage, customerDesigns, customerProfile] = await Promise.all([
-          api.orders(),
-          api.designs(),
-          api.profile(),
+        const visibleRoutes = roleNavigation.map((item) => item.route_name)
+        const requests = await Promise.all([
+          visibleRoutes.includes('customer.orders') ? api.orders() : Promise.resolve({ results: [] as Order[] }),
+          visibleRoutes.includes('customer.designs') ? api.designs() : Promise.resolve([] as CustomDesign[]),
+          visibleRoutes.includes('customer.profile') ? api.profile() : Promise.resolve(null),
         ])
+        const [orderPage, customerDesigns, customerProfile] = requests
         setOrders(orderPage.results)
         setDesigns(customerDesigns)
         setProfileDraft(customerProfile)
-        setAccountSection('orders')
+        const firstSection = roleNavigation.find((item) => item.route_name.startsWith('customer.'))?.route_name.split('.')[1] as AccountSection | undefined
+        setAccountSection(firstSection ?? 'orders')
         setScreen('orders')
       }
     } catch (error) { setNotice(errorMessage(error)) } finally { setBusy(false) }
@@ -540,7 +552,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
 
     {screen === 'design' && <main className="inner-page design-page"><button className="back-link" onClick={() => setScreen('shop')}><ArrowLeft size={15} /> Volver a la colección</button><div className="inner-page-heading"><p className="eyebrow"><span className="eyebrow-line" /> HECHA A TU MANERA</p><h1>Imagina tu <em>manta.</em></h1><p>Elige una combinación de color, un patrón y una talla. La tejedora recibirá tus indicaciones junto con el pedido.</p></div><form className="designer-layout" onSubmit={createDesign}><div className="designer-preview"><div className={`weave-preview pattern-${designPattern}`} style={{ '--base': designColors[0], '--accent-one': designColors[1], '--accent-two': designColors[2] } as CSSProperties}><span /><span /><span /><span /></div><div className="preview-caption"><span>VISTA DE COLOR</span><span>{designPattern.toUpperCase()} · TALLA {designSize}</span></div></div><div className="designer-controls"><fieldset><legend>01 / Elige un patrón</legend><div className="pattern-options">{[['rombos', 'Rombos'], ['olas', 'Olas'], ['estrellas', 'Estrellas'], ['caminos', 'Caminos']].map(([value, label]) => <button type="button" key={value} className={designPattern === value ? 'pattern-choice active' : 'pattern-choice'} onClick={() => setDesignPattern(value)}><span className={`pattern-swatch pattern-${value}`} /><span>{label}</span>{designPattern === value && <Check size={14} />}</button>)}</div></fieldset><fieldset><legend>02 / Combina tus colores</legend><div className="color-pickers">{designColors.map((color, index) => <label key={index}><input type="color" value={color} onChange={(event) => setDesignColors((current) => current.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} /><span>{['Base', 'Acento 1', 'Acento 2'][index]}</span></label>)}</div></fieldset><fieldset><legend>03 / Escoge la talla</legend><div className="size-options">{['S', 'M', 'L', 'XL'].map((size) => <button type="button" key={size} className={designSize === size ? 'size-option selected' : 'size-option'} onClick={() => setDesignSize(size)}>{size}</button>)}</div></fieldset><label className="form-label">Cantidad<div className="stepper"><button type="button" onClick={() => setDesignQuantity((value) => Math.max(1, value - 1))} aria-label="Disminuir cantidad"><Minus size={14} /></button><span>{designQuantity}</span><button type="button" onClick={() => setDesignQuantity((value) => Math.min(20, value + 1))} aria-label="Aumentar cantidad"><Plus size={14} /></button></div></label><label className="form-label">Indicaciones para la tejedora<textarea value={designNotes} onChange={(event) => setDesignNotes(event.target.value)} placeholder="Cuéntanos qué te gustaría tener en cuenta…" rows={3} /></label><div className="design-total"><span>Precio estimado</span><strong>{money(customPrice)}</strong><small>El precio final se confirma con la tejedora.</small></div><button className="button button-dark full-button" disabled={busy}>{busy ? <LoaderCircle className="spin" size={16} /> : <ShoppingBag size={16} />} Agregar diseño al carrito</button></div></form></main>}
 
-    {screen === 'orders' && user && <CustomerAccountView user={user} orders={orders} designs={designs} profile={profileDraft} section={accountSection} busy={busy} onSection={setAccountSection} onProfileSubmit={saveProfile} onSignOut={signOut} onShop={() => setScreen('shop')} />}
+    {screen === 'orders' && user && <CustomerAccountView user={user} navigationItems={roleNavigation} orders={orders} designs={designs} profile={profileDraft} section={accountSection} busy={busy} onSection={setAccountSection} onProfileSubmit={saveProfile} onSignOut={signOut} onShop={() => setScreen('shop')} />}
 
     {screen === 'craftswoman' && dashboard && <CraftswomanAccountView user={user} dashboard={dashboard} products={craftswomanProducts} categories={categories} busy={busy} onCreateProduct={createCraftswomanProduct} onSignOut={signOut} onAcceptOrder={acceptOrder} onOrderStatus={updateOrder} onDesignStatus={updateDesignStatus} />}
 
@@ -579,8 +591,9 @@ function AuthDialog({ mode, busy, onMode, onClose, onSubmit }: { mode: AuthMode;
   return <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-title"><button className="close-button" onClick={onClose} aria-label="Cerrar"><X size={19} /></button><div className="auth-mark"><span className="wordmark-symbol"><span /><span /><span /></span></div><p className="eyebrow">WAYUUWAA · MI CUENTA</p><h2 id="auth-title">{mode === 'login' ? 'Qué bueno verte.' : mode === 'craftswoman' ? 'Tejamos juntas.' : 'Comienza por aquí.'}</h2><p className="auth-intro">{mode === 'craftswoman' ? 'Envía tu solicitud para vincular tu taller a la tienda.' : 'Inicia sesión para guardar tus piezas y seguir tus pedidos.'}</p><div className="auth-tabs"><button className={mode === 'login' ? 'active' : ''} onClick={() => onMode('login')}>Iniciar sesión</button><button className={mode === 'register' ? 'active' : ''} onClick={() => onMode('register')}>Crear cuenta</button></div><form className="auth-form" onSubmit={onSubmit}>{registering && <label className="form-label">Nombre completo<input name="name" required autoComplete="name" placeholder="Tu nombre" /></label>}<label className="form-label">Usuario<input name="username" required autoComplete="username" placeholder="Tu usuario" /></label>{registering && <label className="form-label">Correo electrónico<input name="email" type="email" required autoComplete="email" placeholder="tu@correo.com" /></label>}<label className="form-label">Contraseña<input name="password" type="password" required minLength={8} autoComplete={registering ? 'new-password' : 'current-password'} placeholder="Mínimo 8 caracteres" /></label>{registering && <label className="form-label">Teléfono <span className="optional">OPCIONAL</span><input name="phone" autoComplete="tel" placeholder="300 000 0000" /></label>}{mode === 'craftswoman' && <><label className="form-label">Comunidad<input name="community" placeholder="Tu comunidad" /></label><label className="form-label">Región<input name="region" placeholder="La Guajira" /></label></>}<button className="button button-dark full-button" disabled={busy}>{busy ? <LoaderCircle className="spin" size={16} /> : registering ? <ArrowRight size={16} /> : <LockKeyhole size={16} />}{mode === 'login' ? 'Entrar a mi cuenta' : mode === 'craftswoman' ? 'Enviar solicitud' : 'Crear cuenta'}</button></form>{mode !== 'craftswoman' && <button className="craftswoman-link" onClick={() => onMode('craftswoman')}>¿Eres tejedora? Solicita acceso <ArrowUpRight size={14} /></button>}</section></div>
 }
 
-function CustomerAccountView({ user, orders, designs, profile, section, busy, onSection, onProfileSubmit, onSignOut, onShop }: {
+function CustomerAccountView({ user, navigationItems, orders, designs, profile, section, busy, onSection, onProfileSubmit, onSignOut, onShop }: {
   user: SessionUser
+  navigationItems: RBACNavigationItem[]
   orders: Order[]
   designs: CustomDesign[]
   profile: UserProfile | null
@@ -594,9 +607,10 @@ function CustomerAccountView({ user, orders, designs, profile, section, busy, on
   const accountName = resolveUserDisplayName(user, profile)
   return <main className="inner-page account-page">
     <div className="account-heading"><div><p className="eyebrow"><span className="eyebrow-line" /> MI CUENTA</p><h1>Hola, <em>{accountName}.</em></h1><p>Pedidos, diseños y datos de entrega en un mismo lugar.</p></div><button className="text-button" onClick={onSignOut}>Cerrar sesión <ArrowUpRight size={15} /></button></div>
-    <div className="account-tabs"><div className="account-tab-buttons"><button className={section === 'orders' ? 'active' : ''} onClick={() => onSection('orders')}>Mis pedidos <span>{orders.length}</span></button><button className={section === 'designs' ? 'active' : ''} onClick={() => onSection('designs')}>Mis diseños <span>{designs.length}</span></button><button className={section === 'profile' ? 'active' : ''} onClick={() => onSection('profile')}>Mis datos</button></div><span>{user.email}</span></div>
+    <div className="account-tabs"><div className="account-tab-buttons">{navigationItems.filter((item) => item.route_name.startsWith('customer.')).map((item) => { const target = item.route_name.split('.')[1] as AccountSection; return <button key={item.id} className={section === target ? 'active' : ''} onClick={() => onSection(target)}>{item.label}{target === 'orders' && <span>{orders.length}</span>}{target === 'designs' && <span>{designs.length}</span>}</button> })}</div><span>{user.email}</span></div>
     {section === 'orders' && (orders.length ? <div className="orders-list">{orders.map((order) => <OrderCard key={order.id} order={order} />)}</div> : <div className="empty-account"><ShoppingBag size={30} strokeWidth={1.4} /><h2>Aún no tienes pedidos.</h2><p>Cuando encuentres la pieza indicada, la guardaremos aquí.</p><button className="button button-dark" onClick={onShop}>Explorar la colección <ArrowRight size={15} /></button></div>)}
     {section === 'designs' && (designs.length ? <div className="design-list">{designs.map((design) => <DesignSummary key={design.id} design={design} />)}</div> : <div className="empty-account"><Heart size={29} strokeWidth={1.4} /><h2>Aún no has creado diseños.</h2><p>Combina patrón y colores para imaginar una manta propia.</p><button className="button button-dark" onClick={onShop}>Diseñar una manta <ArrowRight size={15} /></button></div>)}
+    {navigationItems.filter((item) => item.route_name.startsWith('customer.')).length === 0 && <div className="empty-account"><LockKeyhole size={28} /><h2>No tienes secciones habilitadas</h2><p>El superadministrador debe asignarte las opciones y permisos correspondientes.</p></div>}
     {section === 'profile' && <form className="profile-form" onSubmit={onProfileSubmit}><div className="profile-form-heading"><div><p className="eyebrow">DATOS DE ENTREGA</p><h2>Tu información</h2></div><p>La usaremos para preparar tus pedidos.</p></div><label className="form-label">Nombre completo<input name="name" required maxLength={150} defaultValue={resolveUserDisplayName(user, profile)} autoComplete="name" /></label><label className="form-label">Correo electrónico<input value={user.email} readOnly /></label><label className="form-label">Teléfono<input name="phone" maxLength={30} defaultValue={profile?.phone ?? ''} autoComplete="tel" /></label><div className="profile-address-row"><label className="form-label">Dirección<input name="address" defaultValue={profile?.address ?? ''} autoComplete="street-address" /></label><label className="form-label">Ciudad<input name="city" maxLength={100} defaultValue={profile?.city ?? ''} autoComplete="address-level2" /></label></div><button className="button button-dark" disabled={busy}>{busy ? <LoaderCircle className="spin" size={16} /> : <Check size={15} />} Guardar datos</button></form>}
   </main>
 }
