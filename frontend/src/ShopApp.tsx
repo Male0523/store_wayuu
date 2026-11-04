@@ -799,12 +799,13 @@ const rbacResourceLabels: Record<string, string> = {
   role_assignments: 'Asignación de roles', permissions: 'Permisos',
   delegations: 'Delegaciones', navigation: 'Menú y navegación', audit: 'Registro de actividad',
 }
-type RBACSection = 'roles' | 'users' | 'delegations' | 'audit'
+type RBACSection = 'roles' | 'users' | 'delegations' | 'audit' | 'navigation'
 
 function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   const [catalog, setCatalog] = useState<RBACPermission[]>([])
   const [users, setUsers] = useState<SuperadminUser[]>([])
   const [delegations, setDelegations] = useState<RBACDelegation[]>([])
+  const [navigationItems, setNavigationItems] = useState<RBACNavigationItem[]>([])
   const [audit, setAudit] = useState<AuditEvent[]>([])
   const [selectedRole, setSelectedRole] = useState<SessionUser['role']>('admin')
   const [rolePermissions, setRolePermissions] = useState<RBACRolePermissions | null>(null)
@@ -828,6 +829,10 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   const canViewDelegations = hasEffectivePermission(currentUser, 'delegations.view')
   const canAddDelegations = hasEffectivePermission(currentUser, 'delegations.add')
   const canViewAudit = hasEffectivePermission(currentUser, 'audit.view')
+  const canViewNavigation = hasEffectivePermission(currentUser, 'navigation.view')
+  const canAddNavigation = hasEffectivePermission(currentUser, 'navigation.add')
+  const canChangeNavigation = hasEffectivePermission(currentUser, 'navigation.change')
+  const canDeleteNavigation = hasEffectivePermission(currentUser, 'navigation.delete')
   const selectedUser = users.find((candidate) => String(candidate.id) === selectedUserId)
   const visibleRolePermissions = (rolePermissions?.permissions ?? []).filter((permission) => {
     const search = permissionSearch.trim().toLocaleLowerCase('es')
@@ -854,6 +859,11 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
       setSelectedUserId(String(firstManageable?.id ?? userRows[0]?.id ?? ''))
     }).catch((loadError: unknown) => setError(errorMessage(loadError)))
   }, [currentUser.id, canViewCatalog, canViewUsers, canViewDelegations, canViewAudit])
+
+  useEffect(() => {
+    if (!canViewNavigation) return
+    api.navigationItems().then(setNavigationItems).catch((loadError: unknown) => setError(errorMessage(loadError)))
+  }, [canViewNavigation])
 
   useEffect(() => {
     if (!canViewRoles) return
@@ -949,6 +959,53 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
     } catch (saveError) { setError(errorMessage(saveError)) } finally { setSaving(false) }
   }
 
+  async function createNavigationItem(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!canAddNavigation) return
+    const values = new FormData(event.currentTarget)
+    const roleCodes = values.getAll('role_codes').map(String) as SessionUser['role'][]
+    setSaving(true)
+    setError('')
+    try {
+      const created = await api.createNavigationItem({
+        label: String(values.get('label') ?? '').trim(),
+        route_name: String(values.get('route_name') ?? '').trim(),
+        description: String(values.get('description') ?? '').trim(),
+        anchor: String(values.get('anchor') ?? '').trim(),
+        role_codes: roleCodes,
+        permission_resource: String(values.get('permission_resource') ?? '') || null,
+        permission_action: String(values.get('permission_action') ?? '') as RBACPermission['action'] || null,
+        order: Number(values.get('order') ?? 10),
+        active: true,
+      })
+      setNavigationItems((current) => [...current, created].sort((a, b) => a.order - b.order))
+      event.currentTarget.reset()
+      setFeedback('Elemento de menú creado y guardado.')
+    } catch (saveError) { setError(errorMessage(saveError)) } finally { setSaving(false) }
+  }
+
+  async function toggleNavigationItem(item: RBACNavigationItem, active: boolean) {
+    if (!canChangeNavigation) return
+    setSaving(true)
+    setError('')
+    try {
+      const updated = await api.updateNavigationItem(item.id, { active })
+      setNavigationItems((current) => current.map((entry) => entry.id === item.id ? updated : entry))
+      setFeedback('Visibilidad del menú actualizada.')
+    } catch (saveError) { setError(errorMessage(saveError)) } finally { setSaving(false) }
+  }
+
+  async function removeNavigationItem(item: RBACNavigationItem) {
+    if (!canDeleteNavigation || !window.confirm(`¿Eliminar la opción "${item.label}" del menú?`)) return
+    setSaving(true)
+    setError('')
+    try {
+      await api.deleteNavigationItem(item.id)
+      setNavigationItems((current) => current.filter((entry) => entry.id !== item.id))
+      setFeedback('Opción de menú eliminada.')
+    } catch (saveError) { setError(errorMessage(saveError)) } finally { setSaving(false) }
+  }
+
   async function changeRolePermission(permission: RBACPermission, allowed: boolean) {
     if (!rolePermissions || !canChangeRoles) return
     setSaving(true)
@@ -1010,7 +1067,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   return <section className="rbac-panel" aria-labelledby="rbac-heading">
     <div className="rbac-hero"><div><p className="eyebrow">SEGURIDAD DE LA TIENDA</p><h2 id="rbac-heading">Roles y permisos</h2><p>Administra qué puede consultar y modificar cada tipo de cuenta.</p></div><div className="rbac-total"><strong>{catalog.length}</strong><span>permisos disponibles</span></div></div>
     <nav className="rbac-tabs" aria-label="Secciones de administración de acceso">
-      {([['roles', 'Permisos por rol'], ['users', 'Cuentas'], ['delegations', 'Delegaciones'], ['audit', 'Auditoría']] as [RBACSection, string][]).map(([section, label]) => <button type="button" key={section} className={activeSection === section ? 'active' : ''} onClick={() => setActiveSection(section)}>{label}</button>)}
+      {([['roles', 'Permisos por rol'], ['users', 'Cuentas'], ['delegations', 'Delegaciones'], ['navigation', 'Menú dinámico'], ['audit', 'Auditoría']] as [RBACSection, string][]).map(([section, label]) => <button type="button" key={section} className={activeSection === section ? 'active' : ''} onClick={() => setActiveSection(section)}>{label}</button>)}
     </nav>
     {error && <p className="rbac-error" role="alert">{error}</p>}
     {feedback && <p className="rbac-feedback" role="status">{feedback}</p>}
@@ -1058,6 +1115,22 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
           const delegated = delegations.some((item) => item.admin_user_id === selectedUser.id && item.resource === permission.resource && item.action === permission.action)
           return <label className="rbac-permission" key={`${permission.resource}.${permission.action}`}><input type="checkbox" checked={delegated} disabled={saving || !canAddDelegations} onChange={(event) => void changeDelegation(permission, event.target.checked)} /><span><strong>{permission.resource}</strong><small>{permission.action} · {permission.name}</small></span></label>
         })}</div> : <p className="muted-copy">Las delegaciones solo se pueden asignar a cuentas con rol admin.</p>}
+      </section>}
+      {activeSection === 'navigation' && canViewNavigation && <section className="rbac-block">
+        <div className="rbac-block-heading"><div><h3>Menú y vistas por rol</h3><p>Registra opciones de navegación, define a qué roles se muestran y cuál permiso deben tener.</p></div><span>{navigationItems.length} opciones</span></div>
+        {canAddNavigation && <form className="rbac-user-form" onSubmit={createNavigationItem}>
+          <label className="form-label">Nombre visible<input name="label" required maxLength={80} placeholder="Ej. Mis pedidos" /></label>
+          <label className="form-label">Ruta de la vista<input name="route_name" required maxLength={120} placeholder="Ej. /cliente/pedidos" /></label>
+          <label className="form-label">Sección (opcional)<input name="anchor" maxLength={80} placeholder="Ej. pedidos" /></label>
+          <label className="form-label">Descripción<input name="description" maxLength={220} placeholder="Describe qué encontrará el usuario" /></label>
+          <label className="form-label">Orden<input name="order" type="number" min="0" max="32767" defaultValue="10" /></label>
+          <label className="form-label">Permiso requerido · recurso<select name="permission_resource" defaultValue=""><option value="">Sin requisito adicional</option>{Object.entries(rbacResourceLabels).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>
+          <label className="form-label">Permiso requerido · acción<select name="permission_action" defaultValue=""><option value="">Sin acción</option>{Object.entries(rbacActionLabels).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>
+          <fieldset className="rbac-role-picker"><legend>Mostrar a estos roles</legend>{(['superadmin', 'admin', 'craftswoman', 'customer'] as const).map((role) => <label key={role}><input type="checkbox" name="role_codes" value={role} defaultChecked={role === 'customer'} /> {rbacRoleLabels[role]}</label>)}</fieldset>
+          <button className="button button-dark" disabled={saving}>{saving ? 'Guardando…' : 'Añadir opción al menú'}</button>
+        </form>}
+        <div className="rbac-nav-list">{navigationItems.map((item) => <article className="rbac-nav-row" key={item.id}><div><strong>{item.label}</strong><small>{item.route_name} · Orden {item.order}</small><small>{item.role_codes.map((role) => rbacRoleLabels[role]).join(', ')}</small><small>{item.permission_resource ? (rbacResourceLabels[item.permission_resource] ?? item.permission_resource) + ' · ' + rbacActionLabels[item.permission_action ?? 'view'] : 'Sin permiso adicional configurado'}</small></div><div className="rbac-nav-actions"><label><input type="checkbox" checked={item.active} disabled={saving || !canChangeNavigation} onChange={(event) => void toggleNavigationItem(item, event.target.checked)} /> Visible</label>{canDeleteNavigation && <button type="button" className="button button-outline" disabled={saving} onClick={() => void removeNavigationItem(item)}>Eliminar</button>}</div></article>)}</div>
+        {navigationItems.length === 0 && <p className="muted-copy">Todavía no hay opciones de menú configuradas.</p>}
       </section>}
       {activeSection === "audit" && canViewAudit && <section className="rbac-block"><div className="rbac-block-heading"><h3>Actividad sensible</h3><span>{audit.length} eventos recientes</span></div>
         <div className="rbac-audit-list">{audit.slice(0, 12).map((event) => <article className="rbac-audit-row" key={event.id}><time>{new Date(event.created_at).toLocaleString('es-CO')}</time><strong>{event.action}</strong><span>{event.actor ?? 'Sistema'} · {event.affected_user ?? event.resource}</span><small>{event.result === 'denied' ? 'Denegado' : 'Correcto'}</small></article>)}</div>
