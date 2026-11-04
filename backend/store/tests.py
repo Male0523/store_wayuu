@@ -2242,6 +2242,60 @@ class StoreAPITests(TestCase):
         response = self.client.get('/api/v1/admin/rbac/navigation/')
         self.assertEqual(response.status_code, 403)
 
+    def test_admin_order_list_filters_by_status_and_craftswoman_and_identifies_customer(self):
+        admin = self.create_role_user('admin-order-filter-superadmin', AccessRole.Code.SUPERADMIN)
+        craft_user = self.create_role_user('admin-order-filter-craftswoman', AccessRole.Code.CRAFTSWOMAN)
+        craftswoman = Craftswoman.objects.create(user=craft_user, name='Tejedora Filtro', active=True)
+        order = Order.objects.create(
+            customer=self.customer,
+            craftswoman=craftswoman,
+            status=Order.Status.PENDING,
+            shipping_address='Riohacha, La Guajira',
+        )
+        OrderItem.objects.create(order=order, product=self.product, quantity=1, unit_price=self.product.price)
+
+        self.client.force_login(admin)
+        response = self.client.get(
+            f'/api/v1/admin/orders/?status=pending&craftswoman_id={craftswoman.id}&search=Cliente API'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['count'], 1)
+        result = response.json()['results'][0]
+        self.assertEqual(result['id'], order.id)
+        self.assertEqual(result['customer_name'], 'Cliente API')
+        self.assertEqual(result['craftswoman']['name'], 'Tejedora Filtro')
+
+    def test_public_craftswomen_endpoint_only_lists_active_profiles(self):
+        active_user = self.create_role_user('public-active-craftswoman', AccessRole.Code.CRAFTSWOMAN)
+        inactive_user = self.create_role_user('public-inactive-craftswoman', AccessRole.Code.CRAFTSWOMAN)
+        Craftswoman.objects.create(user=active_user, name='Artesana Visible', community='Mayapo', active=True)
+        Craftswoman.objects.create(user=inactive_user, name='Artesana Inactiva', active=False)
+
+        response = self.client.get('/api/v1/craftswomen/public/')
+
+        self.assertEqual(response.status_code, 200)
+        names = [item['name'] for item in response.json()]
+        self.assertIn('Artesana Visible', names)
+        self.assertNotIn('Artesana Inactiva', names)
+
+    def test_craftswoman_can_accept_normal_order_without_design_permission(self):
+        superadmin = self.create_role_user('normal-order-permission-superadmin', AccessRole.Code.SUPERADMIN)
+        craft_user = self.create_role_user('normal-order-permission-craftswoman', AccessRole.Code.CRAFTSWOMAN)
+        craftswoman = Craftswoman.objects.create(user=craft_user, name='Tejedora Pedido Normal', active=True)
+        set_role_permission(superadmin, AccessRole.Code.CRAFTSWOMAN, 'orders', 'change', True)
+        order = Order.objects.create(customer=self.customer, shipping_address='Maicao, La Guajira')
+        OrderItem.objects.create(order=order, product=self.product, quantity=1, unit_price=self.product.price)
+
+        self.client.force_login(craft_user)
+        response = self.client.post(f'/api/v1/craftswoman/orders/{order.id}/accept/')
+
+        self.assertEqual(response.status_code, 200)
+        order.refresh_from_db()
+        self.assertEqual(order.craftswoman_id, craftswoman.id)
+        self.assertEqual(order.status, Order.Status.ACCEPTED)
+
+
 class RBACProtectionTransactionTests(TransactionTestCase):
     def create_superadmin(self, username):
         user = User.objects.create_user(username=username, password='ClaveSegura2026!')
