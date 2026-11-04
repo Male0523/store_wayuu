@@ -241,6 +241,51 @@ class StoreAPITests(TestCase):
         self.assertEqual(removed.status_code, 204)
         self.assertFalse(CustomerCartItem.objects.filter(customer=self.customer, product=custom_product).exists())
 
+    def test_custom_design_products_never_appear_in_public_catalog_or_other_customers_cart(self):
+        other_user = User.objects.create_user(
+            username='cliente-diseno-privado',
+            email='cliente-diseno-privado@example.com',
+            password='ClaveSegura2026!',
+        )
+        other_customer = Customer.objects.create(
+            user=other_user,
+            name='Cliente diseño privado',
+            email='cliente-diseno-privado@example.com',
+        )
+        design = CustomDesign.objects.create(
+            customer=other_customer,
+            pattern='rombos',
+            base_color='#112233',
+            accent_color_one='#445566',
+            accent_color_two='#778899',
+            size='M',
+            estimated_price=Decimal('120000'),
+        )
+        private_product = Product.objects.create(
+            sku='CUSTOM-PRIVATE-CATALOG-001',
+            name='Diseño que debe ser privado',
+            category=self.category,
+            custom_design=design,
+            price=Decimal('120000'),
+            stock=1,
+            active=True,
+            made_to_order=True,
+        )
+
+        self.assertNotIn(
+            private_product.id,
+            [item['id'] for item in self.client.get('/api/v1/products/').json()['results']],
+        )
+        self.assertEqual(self.client.get(f'/api/v1/products/{private_product.id}/').status_code, 404)
+
+        self.client.force_login(self.user)
+        add_attempt = self.client.post('/api/v1/cart/items/', {
+            'product_id': private_product.id,
+            'quantity': 1,
+        }, content_type='application/json')
+        self.assertEqual(add_attempt.status_code, 404)
+        self.assertEqual(self.client.get('/api/v1/cart/').json()['count'], 0)
+
     def test_customer_cannot_update_another_customers_inactive_product(self):
         other_user = User.objects.create_user(
             username='otro-cliente-diseno',
