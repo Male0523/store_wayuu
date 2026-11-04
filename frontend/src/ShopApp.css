@@ -752,3 +752,34 @@
 /* Botón principal del formulario de menú dinámico: contraste explícito */
 .rbac-panel .rbac-user-form > button.button-dark { display:inline-flex !important; visibility:visible !important; opacity:1; min-height:44px; padding:0 20px; background:#51252a !important; color:#fff !important; border:1px solid #51252a !important; font-weight:700; }
 .rbac-panel .rbac-user-form > button.button-dark:hover:not(:disabled) { background:#71363d !important; color:#fff !important; }
+
+
+/* Guía de configuración del menú dinámico: claridad, jerarquía y alertas */
+.rbac-guide {
+  margin: 16px 0 20px; padding: 16px 18px; border: 1px solid #e7d8ce;
+  border-left: 4px solid #8a4b50; border-radius: 8px; background: #fffaf6;
+  color: #594743; font-size: 12px; line-height: 1.65;
+}
+.rbac-guide > strong { color: #51252a; font: 18px Georgia,serif; }
+.rbac-guide ol { display: grid; gap: 6px; margin: 10px 0; padding-left: 20px; }
+.rbac-guide p { margin: 10px 0 0; padding-top: 9px; border-top: 1px solid #eee2da; }
+.rbac-navigation-form { gap: 14px; }
+.rbac-navigation-form .form-label { display: grid; gap: 6px; }
+.rbac-navigation-form .form-label > small { color: #897872; font-size: 10px; line-height: 1.45; }
+.rbac-navigation-form .form-label:has(input:required),
+.rbac-navigation-form .form-label:has(select:required) { color: #632a32; }
+.rbac-navigation-form input:required,
+.rbac-navigation-form select:required { border-color: #cdaeb0; }
+.rbac-form-section-title { display:flex; align-items:center; gap:10px; grid-column:1/-1; margin-top:8px; padding:10px 0; border-bottom:1px solid #eadfd8; }
+.rbac-form-section-title > span { display:grid; place-items:center; width:25px; height:25px; border-radius:50%; background:#f2e5e1; color:#632a32; font-size:11px; font-weight:800; }
+.rbac-form-section-title > div { display:grid; gap:2px; }
+.rbac-form-section-title strong { color:#51252a; font:16px Georgia,serif; }
+.rbac-form-section-title small { color:#897872; font-size:10px; }
+.rbac-warning { grid-column:1/-1; margin:0; padding:10px 12px; border:1px solid #ead2a9; border-left:3px solid #b77b32; border-radius:6px; background:#fff8e9; color:#76501f; font-size:11px; line-height:1.5; }
+.rbac-navigation-form .rbac-role-picker { grid-column:1/-1; }
+.rbac-navigation-form > button { grid-column:1/-1; justify-self:start; }
+@media (max-width:650px) {
+  .rbac-guide { padding:13px; }
+  .rbac-form-section-title { margin-top:4px; }
+  .rbac-navigation-form > button { width:100%; }
+}
