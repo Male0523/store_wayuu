@@ -32,7 +32,7 @@
 .button { min-height: 46px; display: inline-flex; align-items: center; justify-content: center; gap: 12px; padding: 0 19px; border: 1px solid transparent; cursor: pointer; font-size: 12px; font-weight: 600; transition: background .2s ease, border-color .2s ease, color .2s ease; }
 .button:disabled { opacity: .55; cursor: wait; }
 .button-dark { background: var(--forest); color: #fffaf0; }
-.button-dark:hover:not(:disabled) { background: var(--clay); }
+.button-dark:hover:not(:disabled) { background:#5c1d24; border-color:#5c1d24; color:#fff; }
 .button-outline { border-color: var(--ink); background: transparent; color: var(--ink); }
 .button-outline:hover:not(:disabled) { border-color: var(--forest); background: var(--forest); color: white; }
 .full-button { width: 100%; }
@@ -498,7 +498,7 @@
 .craftswoman-nav { flex: 1; padding: 25px 14px; }
 .craftswoman-nav > p { margin: 0 10px 13px; color: rgba(255,225,229,.55); font: 9px var(--mono); letter-spacing: .12em; }
 .craftswoman-nav button { width: 100%; min-height: 45px; display: flex; align-items: center; gap: 12px; margin: 4px 0; padding: 0 13px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: #f2dfe1; cursor: pointer; text-align: left; font-size: 11px; transition: .18s ease; }
-.craftswoman-nav button:hover { background: rgba(255,255,255,.09); }
+.craftswoman-nav button:hover:not(.active) { border-color:rgba(255,255,255,.24); background:#783c45; color:#fff; }
 .craftswoman-nav button.active { background: #fdfbf7; color: #5c1d24; font-weight: 700; box-shadow: 0 5px 14px rgba(0,0,0,.12); }
 .craftswoman-sidebar-profile { display: flex; align-items: center; gap: 10px; margin: 12px; padding: 13px 10px; border: 1px solid rgba(255,255,255,.13); border-radius: 13px; background: rgba(0,0,0,.16); }
 .craftswoman-avatar { width: 35px; height: 35px; flex: 0 0 35px; display: grid; place-items: center; border-radius: 50%; background: #fdfbf7; color: #5c1d24; font-size: 10px; font-weight: 800; }
@@ -527,6 +527,8 @@
 .craftswoman-welcome-actions { position: relative; z-index: 1; display: grid; gap: 9px; min-width: 180px; }
 .craftswoman-welcome-actions button, .craftswoman-primary-action { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 39px; padding: 0 13px; border: 1px solid #fdfbf7; border-radius: 8px; background: #fdfbf7; color: #5c1d24; cursor: pointer; font-size: 10px; font-weight: 700; }
 .craftswoman-welcome-actions button.secondary { border-color: rgba(255,255,255,.25); background: rgba(255,255,255,.1); color: white; }
+.craftswoman-welcome-actions button:not(.secondary):hover:not(:disabled), .craftswoman-primary-action:hover:not(:disabled) { border-color:#5c1d24; background:#5c1d24; color:#fff; box-shadow:0 5px 13px rgba(35,12,16,.2); }
+.craftswoman-welcome-actions button.secondary:hover:not(:disabled) { border-color:rgba(255,255,255,.65); background:rgba(255,255,255,.22); color:#fff; }
 .craftswoman-stats { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); margin: 22px 0 25px; border: 1px solid #e8dfdb; border-radius: 12px; background: white; }
 .craftswoman-stats article { display: grid; gap: 7px; padding: 16px 18px; border-right: 1px solid #eee7e3; }
 .craftswoman-stats article:last-child { border: 0; }
@@ -696,6 +698,21 @@
 .rbac-tabs { display:flex; gap:6px; overflow-x:auto; padding:16px 0 0; border-bottom:1px solid var(--line); }
 .rbac-tabs button { flex:0 0 auto; padding:10px 14px; border:0; border-bottom:2px solid transparent; background:transparent; color:var(--muted); font:11px var(--sans); cursor:pointer; }
 .rbac-tabs button.active { border-bottom-color:var(--clay); color:var(--ink); font-weight:700; }
+.rbac-tabs button:hover:not(:disabled) { background:#f1e7e3; color:#3d1e16; }
+.rbac-tabs button.active:hover:not(:disabled) { background:#f1e7e3; color:#3d1e16; }
+.rbac-tabs button:focus-visible, .rbac-relationship-card button:focus-visible,
+.craftswoman-nav button:focus-visible, .craftswoman-welcome-actions button:focus-visible,
+.craftswoman-primary-action:focus-visible { outline:3px solid #93636a; outline-offset:3px; }
+.rbac-relationship-guide { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin:18px 0 22px; }
+.rbac-relationship-card { display:grid; grid-template-columns:32px minmax(0,1fr); gap:12px; min-width:0; padding:16px; border:1px solid var(--line); background:var(--white); }
+.rbac-guide-number { width:30px; height:30px; display:grid; place-items:center; border-radius:50%; background:#5c1d24; color:#fff; font:11px var(--mono); }
+.rbac-guide-kicker { color:#7d4148; font:9px var(--mono); letter-spacing:.07em; }
+.rbac-relationship-card h3 { margin:5px 0 6px; color:var(--ink); font:19px var(--serif); }
+.rbac-relationship-card p { margin:0; color:#514849; font-size:11px; line-height:1.65; }
+.rbac-relationship-card small { display:block; margin-top:8px; color:#625457; font-size:10px; line-height:1.5; }
+.rbac-relationship-card button { display:inline-flex; align-items:center; gap:7px; margin-top:12px; padding:8px 11px; border:1px solid #5c1d24; border-radius:3px; background:#5c1d24; color:#fff; cursor:pointer; font-size:10px; font-weight:700; transition:background .18s ease,border-color .18s ease; }
+.rbac-relationship-card button:hover:not(:disabled) { border-color:#3d1e16; background:#3d1e16; color:#fff; }
+.rbac-relationship-flow { grid-column:1/-1; padding:12px 14px; border-left:3px solid #7d4148; background:#f1e8e3; color:#3d1e16; font-size:11px; line-height:1.6; }
 .rbac-main-block { padding-top:20px; }
 .rbac-block-heading { align-items:center; }
 .rbac-block-heading p { margin:5px 0 0; color:var(--muted); font-size:11px; }
@@ -782,4 +799,9 @@
   .rbac-guide { padding:13px; }
   .rbac-form-section-title { margin-top:4px; }
   .rbac-navigation-form > button { width:100%; }
+}
+
+@media (max-width: 760px) {
+  .rbac-relationship-guide { grid-template-columns:1fr; }
+  .rbac-relationship-flow { grid-column:auto; }
 }
