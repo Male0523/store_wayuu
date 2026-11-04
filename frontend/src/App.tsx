@@ -14,6 +14,14 @@ const roleRoutes: { path: string; label: string; role: Role }[] = [
 	{ path: '/superadmin', label: 'Superadministración', role: 'superadmin' },
 ]
 
+function DemoNotice() {
+	return (
+		<div className="demo-notice" role="note">
+			Interfaz original · datos demostrativos temporales; los cambios no se guardan en Django.
+		</div>
+	)
+}
+
 function AccessGate({ user, onLogin }: {
 	user: SessionUser | null
 	onLogin: (event: FormEvent<HTMLFormElement>) => Promise<void>
