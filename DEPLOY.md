@@ -64,6 +64,7 @@ Las migraciones de Django crean registros iniciales de roles, permisos y navegac
 - Se niega a importar si encuentra datos de negocio preexistentes.
 - Sustituye únicamente los registros iniciales de RBAC creados por las migraciones.
 - Carga el fixture dentro de una transacción; si falla, revierte los cambios.
+- Verifica los conteos del respaldo: 13 usuarios, 4 roles, 13 asignaciones, 6 tejedoras, 4 clientes, 8 productos, 1 pedido, 3 detalles, 2 carritos, 31 permisos, 16 elementos de navegación y 36 eventos de auditoría. Si algún conteo no coincide, revierte la importación.
 
 ### Ejecutar la importación desde Codespaces
 
