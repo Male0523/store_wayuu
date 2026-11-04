@@ -1411,7 +1411,12 @@ class CartItemDetailView(APIView):
         customer = _customer_for(request.user)
         serializer = CartQuantitySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        product = get_object_or_404(Product, id=product_id, active=True)
+        product = get_object_or_404(
+            Product.objects.filter(
+                models.Q(active=True) | models.Q(custom_design__customer=customer),
+            ).distinct(),
+            id=product_id,
+        )
         quantity = serializer.validated_data['quantity']
         _sync_legacy_session_cart(request, customer)
         if quantity > product.stock:
