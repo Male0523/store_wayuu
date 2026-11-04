@@ -925,15 +925,7 @@ class SuperadminRolePermissionsView(APIView):
         role = get_object_or_404(AccessRole, code=role_code)
         grants = set(role.permission_grants.values_list('permission_id', flat=True))
         entries = []
-        role_entries = permission_catalog()
-        actor_role = role_for_user(request.user)
-        if actor_role and actor_role.code == AccessRole.Code.ADMIN:
-            delegated_ids = set(PermissionDelegation.objects.filter(admin=request.user).values_list('permission_id', flat=True))
-            role_entries = [
-                item for item in role_entries
-                if permission_for(item['resource'], item['action']).pk in delegated_ids
-            ]
-        for item in role_entries:
+        for item in permission_catalog():
             permission = permission_for(item['resource'], item['action'])
             entries.append({
                 **item,
