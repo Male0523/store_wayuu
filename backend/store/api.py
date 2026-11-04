@@ -1620,14 +1620,12 @@ class CraftswomanDashboardView(APIView):
     rbac_resource = 'orders'
 
     def get(self, request):
-        if not has_rbac_permission(request.user, 'designs', 'view'):
-            raise PermissionDenied('No tienes permiso para consultar los diseños de tu taller.')
         craftswoman = get_object_or_404(Craftswoman, user=request.user)
         available = Order.objects.filter(
             craftswoman__isnull=True, status=Order.Status.PENDING,
         ).select_related('craftswoman').prefetch_related('items__product') if craftswoman.active else Order.objects.none()
         assigned = craftswoman.orders.select_related('craftswoman').prefetch_related('items__product')
-        designs = craftswoman.custom_designs.select_related('customer')
+        designs = craftswoman.custom_designs.select_related('customer') if has_rbac_permission(request.user, 'designs', 'view') else CustomDesign.objects.none()
         return Response({
             'active': craftswoman.active,
             'available_orders': OrderSerializer(available, many=True).data,
