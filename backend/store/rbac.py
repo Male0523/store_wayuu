@@ -307,6 +307,9 @@ def revoke_admin_delegations(admin_user, actor=None):
             affected_user=admin_user,
             details={'action': key[1] if key else delegation.permission.codename},
         )
+    delegated_permission_ids = [delegation.permission_id for delegation in delegations]
+    if delegated_permission_ids:
+        admin_user.user_permissions.remove(*delegated_permission_ids)
     UserPermissionGrant.objects.filter(granted_by=admin_user).delete()
     PermissionDelegation.objects.filter(admin=admin_user).delete()
 
