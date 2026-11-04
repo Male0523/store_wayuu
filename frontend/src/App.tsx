@@ -2,8 +2,6 @@ import { lazy, Suspense, useEffect, useState, type ComponentType, type FormEvent
 import { useUserSession } from './context/user-context'
 import type { SessionUser } from './types'
 
-const legacyViews = import.meta.glob<ComponentType>('../../*.tsx', { import: 'default' })
-const PublicSite = lazy(() => legacyViews['../../sitio_p_blico_tienda_artesanal_way_u.tsx']().then((module) => ({ default: module })))
 const CustomerPanel = lazy(() => import('./CustomerPanel'))
 const ConnectedShop = lazy(() => import('./ShopApp').then((module) => ({ default: module.ConnectedShop })))
 
