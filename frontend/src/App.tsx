@@ -73,6 +73,7 @@ function RolePage({ user, role, onLogin, children, connected = false }: {
 }
 
 export default function App() {
+	const standaloneStorefront = window.location.pathname === '/' || window.location.pathname === '/tienda'
 	const [path, setPath] = useState(window.location.pathname)
 	const [logoutError, setLogoutError] = useState('')
 	const { user, loaded: sessionLoaded, sessionError, login: loginUser, logout: logoutUser } = useUserSession()
@@ -131,7 +132,7 @@ export default function App() {
 
 	return (
 		<>
-			<header className="unified-header">
+			{!standaloneStorefront && <header className="unified-header">
 				<a className="unified-brand" href="/" onClick={(event) => navigate(event, '/')}>STORE WAYUU</a>
 				<nav aria-label="Navegación de la aplicación">
 					<a href="/" onClick={(event) => navigate(event, '/')}>Sitio público</a>
@@ -141,7 +142,7 @@ export default function App() {
 					))}
 				</nav>
 				{user && <button className="session-button" type="button" onClick={logout}>Cerrar sesión</button>}
-			</header>
+			</header>}
 			{logoutError && <p className="form-error" role="alert">{logoutError}</p>}
 			{sessionError && <p className="form-error" role="status">{sessionError}</p>}
 			<main>
@@ -149,9 +150,9 @@ export default function App() {
 					{page}
 				</Suspense>
 			</main>
-			<footer className="authorization-note">
+			{!standaloneStorefront && <footer className="authorization-note">
 				La protección de rutas en el navegador es solo de navegación. Django debe autorizar cada operación y endpoint.
-			</footer>
+			</footer>}
 		</>
 	)
 }
