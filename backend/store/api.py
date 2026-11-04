@@ -1665,8 +1665,8 @@ class AcceptOrderView(APIView):
     rbac_actions = {'POST': 'change'}
 
     def post(self, request, order_id):
-        if not has_rbac_permission(request.user, 'designs', 'change'):
-            raise PermissionDenied('No tienes permiso para actualizar los diseños asociados al pedido.')
+        if not has_rbac_permission(request.user, 'orders', 'change'):
+            raise PermissionDenied('No tienes permiso para aceptar pedidos.')
         craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
         with transaction.atomic():
             order = get_object_or_404(
