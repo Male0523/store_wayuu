@@ -997,3 +997,8 @@
 .cart-drawer {
   border-left: 1px solid #e7d8d0;
 }
+
+.rbac-nav-edit-form { display:grid; gap:8px; max-width:360px; }
+.rbac-nav-edit-form .form-label { margin:0; }
+.rbac-nav-edit-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.rbac-nav-actions .button { white-space:nowrap; }
