@@ -70,3 +70,158 @@ a { color: inherit; }
 .unified-header nav a:focus-visible { color: #8a3b45; }
 .unified-header .unified-brand,
 .unified-header .session-button { color: #5c1d24; }
+
+
+/* Acceso con identidad visual Wayúu */
+.access-page {
+  width: min(1180px, calc(100% - 48px));
+  min-height: min(760px, calc(100vh - 96px));
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(360px, .85fr);
+  align-items: stretch;
+  gap: clamp(28px, 6vw, 82px);
+  margin: 42px auto;
+  padding: clamp(28px, 5vw, 64px);
+  border: 1px solid #e9ddd5;
+  background: #f6eee8;
+}
+.access-story {
+  position: relative;
+  min-height: 520px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+  padding: clamp(26px, 4vw, 48px);
+  background: linear-gradient(145deg, #57252b 0%, #713c40 54%, #8b5c59 100%);
+  color: #fff8f2;
+}
+.access-kicker, .access-card-kicker {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .17em;
+}
+.access-kicker { color: #ead2c9; }
+.access-weave {
+  position: absolute;
+  inset: 18% 8% 17%;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  transform: rotate(-8deg) scale(1.1);
+  opacity: .9;
+}
+.access-weave span {
+  border: 1px solid rgba(255,239,221,.55);
+  background: repeating-linear-gradient(135deg, transparent 0 17px, rgba(231,193,160,.8) 18px 22px, transparent 23px 38px);
+}
+.access-weave span:nth-child(2n) { transform: translateY(28px); background-color: rgba(222,177,150,.13); }
+.access-weave span:nth-child(3n) { transform: translateY(-17px); border-color: rgba(226,192,139,.8); }
+.access-story-note {
+  position: relative;
+  z-index: 1;
+  max-width: 370px;
+  margin: 0;
+  color: #f2e2d8;
+  font-family: Georgia, serif;
+  font-size: clamp(22px, 2.4vw, 32px);
+  line-height: 1.28;
+}
+.access-card {
+  align-self: center;
+  width: 100%;
+  max-width: 440px;
+  margin: 0 auto;
+  padding: clamp(12px, 2vw, 26px);
+  color: #39302e;
+}
+.access-back {
+  display: inline-block;
+  margin-bottom: clamp(42px, 6vw, 72px);
+  color: #795d58;
+  font-size: 11px;
+  text-decoration: none;
+}
+.access-back:hover { color: #682d35; }
+.access-card-kicker { margin-bottom: 16px; color: #98676a; }
+.access-card h1 {
+  margin: 0;
+  color: #48272b;
+  font-family: Georgia, serif;
+  font-size: clamp(34px, 4vw, 48px);
+  font-weight: 400;
+  line-height: 1.06;
+  letter-spacing: -.03em;
+}
+.access-card > p:not(.access-card-kicker):not(.access-security-note) {
+  margin: 16px 0 30px;
+  color: #796c67;
+  font-size: 13px;
+  line-height: 1.75;
+}
+.access-form { display: grid; gap: 18px; }
+.access-form label {
+  display: grid;
+  gap: 8px;
+  color: #60494a;
+  font-size: 11px;
+  font-weight: 700;
+}
+.access-form input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid #dfd0c8;
+  border-radius: 2px;
+  background: #fffdfa;
+  color: #392e2d;
+  font-size: 13px;
+  transition: border-color .18s ease, box-shadow .18s ease;
+}
+.access-form input:focus {
+  border-color: #9c6269;
+  box-shadow: 0 0 0 3px rgba(156,98,105,.12);
+  outline: none;
+}
+.access-form input::placeholder { color: #b1a29b; }
+.access-submit {
+  width: 100%;
+  min-height: 49px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 5px;
+  padding: 0 18px;
+  border: 1px solid #57252b;
+  background: #57252b;
+  color: #fffaf5;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background .18s ease, transform .18s ease;
+}
+.access-submit:hover:not(:disabled) { background: #75363e; transform: translateY(-1px); }
+.access-submit:disabled { opacity: .6; cursor: wait; }
+.access-security-note {
+  margin: 20px 0 0;
+  color: #95847d;
+  font-size: 10px;
+  line-height: 1.6;
+}
+@media (max-width: 760px) {
+  .access-page {
+    width: min(100% - 24px, 540px);
+    min-height: auto;
+    grid-template-columns: 1fr;
+    gap: 22px;
+    margin: 18px auto;
+    padding: 12px;
+  }
+  .access-story { min-height: 230px; padding: 24px; }
+  .access-weave { inset: 15% 14% 14%; }
+  .access-story-note { max-width: 300px; font-size: 23px; }
+  .access-card { padding: 20px 12px 26px; }
+  .access-back { margin-bottom: 34px; }
+}
