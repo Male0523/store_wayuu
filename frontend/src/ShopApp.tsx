@@ -77,6 +77,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
   const [screen, setScreen] = useState<Screen>(initialScreen)
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<Category[]>([])
+  const [publicCraftswomen, setPublicCraftswomen] = useState<import('./types').CraftswomanSummary[]>([])
   const [cart, setCart] = useState<Cart | null>(null)
   const [orders, setOrders] = useState<Order[]>([])
   const [adminProducts, setAdminProducts] = useState<AdminProduct[]>([])
@@ -142,7 +143,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
       Promise<AdminProduct[]>,
       Promise<AdminCategory[]>,
     ] = [
-      hasEffectivePermission(user, 'orders.view') ? api.orders() : Promise.resolve(emptyOrderPage),
+      hasEffectivePermission(user, 'orders.view') ? api.adminOrders() : Promise.resolve(emptyOrderPage),
       hasEffectivePermission(user, 'products.view') ? api.adminProducts() : Promise.resolve([]),
       hasEffectivePermission(user, 'categories.view') ? api.adminCategories() : Promise.resolve([]),
     ]
@@ -226,6 +227,12 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
     void run()
     return () => { cancelled = true }
   }, [initialScreen, loadAdminData, user])
+
+  useEffect(() => {
+    let active = true
+    api.publicCraftswomen().then((rows) => { if (active) setPublicCraftswomen(rows) }).catch(() => { if (active) setPublicCraftswomen([]) })
+    return () => { active = false }
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -558,7 +565,11 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
           <p className="product-count" aria-live="polite">{loading ? 'Cargando piezas…' : `${products.length} ${products.length === 1 ? 'pieza' : 'piezas'}`}</p>
           {catalogError ? <div className="catalog-error"><p>{catalogError}</p><button className="button button-outline" onClick={() => window.location.reload()}>Volver a intentar <ArrowRight size={15} /></button></div> : <div className="product-grid">{loading && products.length === 0 ? Array.from({ length: 4 }, (_, index) => <div className="product-skeleton" key={index}><div /><span /><i /></div>) : products.map((product, index) => <article className="product-card" key={product.id} style={{ animationDelay: `${index * 70}ms` }}><button className="product-image-button" onClick={() => setSelectedProduct(product)} aria-label={`Ver ${product.name}`}><ProductPhoto src={product.image_url} alt={product.name} className="product-card-photo" loading={index > 3 ? 'lazy' : 'eager'} />{product.stock === 0 && <span className="product-label">AGOTADA</span>}<span className="quick-view">Ver pieza <ArrowUpRight size={15} /></span></button><div className="product-info"><div><p className="product-origin">{product.region || product.category.name}</p><h3>{product.name}</h3></div><p className="product-price">{money(product.price)}</p></div><div className="product-meta"><span>Talla {product.size}</span><span>{product.production_time || 'Tejido artesanal'}</span></div></article>)}{!loading && !catalogError && products.length === 0 && <div className="empty-results"><Search size={24} /><h3>No encontramos esa pieza</h3><p>Prueba con otra búsqueda o categoría.</p><button className="text-button" onClick={() => { setQuery(''); setCategoryId('all'); setColorFilter('') }}>Limpiar filtros <ArrowRight size={15} /></button></div>}</div>}
         </section>
-        <section className="origin-band" id="origen"><div className="origin-copy"><p className="eyebrow">NUESTRO ORIGEN</p><h2>Tejido con <em>memoria.</em></h2></div><p className="origin-text">Cada manta nace del tiempo, el conocimiento y las manos de una tejedora Wayuu.</p>{canRequestDesign && <button className="origin-link" onClick={() => setScreen('design')}>Diseña tu pieza <ArrowUpRight size={17} /></button>}</section>
+        <section className="origin-band" id="origen"><div className="origin-copy"><p className="eyebrow">NUESTRO ORIGEN</p><h2>Tejido con <em>memoria.</em></h2></div><p className="origin-text">Cada manta nace del tiempo, el conocimiento y las manos de una tejedora Wayuu.</p></section>
+        <section className="artisan-directory section-shell" id="tejedoras">
+          <div className="section-heading"><div><p className="eyebrow"><span className="eyebrow-line" /> QUIÉNES TEJEN</p><h2>Nuestras <em>tejedoras.</em></h2></div><p className="collection-intro">Conoce a las artesanas registradas en nuestra comunidad.</p></div>
+          {publicCraftswomen.length ? <div className="artisan-directory-grid">{publicCraftswomen.map((artisan) => <article className="artisan-directory-card" key={artisan.id}><span className="artisan-initials">{artisan.name.split(/\\s+/).slice(0,2).map((part) => part[0]).join('').toUpperCase()}</span><div><h3>{artisan.name}</h3><p>{[artisan.community, artisan.region].filter(Boolean).join(' · ') || 'Comunidad Wayúu'}</p>{artisan.biography && <small>{artisan.biography}</small>}</div></article>)}</div> : <p className="empty-results">La información de las tejedoras se mostrará cuando existan perfiles activos registrados.</p>}
+        </section>
       </main>
     </>}
 
