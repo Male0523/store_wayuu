@@ -500,6 +500,41 @@ class StoreAPITests(TestCase):
         self.assertEqual(designs.json()[0]['accent_color_two'], '#87978c')
         self.assertEqual(designs.json()[0]['status_label'], 'Pendiente')
 
+    def test_craftswoman_can_accept_order_without_design_change_permission(self):
+        craft_user = self.create_role_user(
+            'tejedora-order-without-design-change',
+            AccessRole.Code.CRAFTSWOMAN,
+        )
+        craftswoman = Craftswoman.objects.create(
+            user=craft_user,
+            name='Tejedora Pedido Normal',
+            active=True,
+        )
+        role = AccessRole.objects.get(code=AccessRole.Code.CRAFTSWOMAN)
+        orders_permission = permission_for('orders', 'change')
+        designs_permission = permission_for('designs', 'change')
+        RolePermission.objects.get_or_create(role=role, permission=orders_permission)
+        RolePermission.objects.filter(role=role, permission=designs_permission).delete()
+
+        order = Order.objects.create(
+            customer=self.customer,
+            shipping_address='Maicao, La Guajira',
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            quantity=1,
+            unit_price=self.product.price,
+        )
+        self.client.force_login(craft_user)
+
+        response = self.client.post(f'/api/v1/craftswoman/orders/{order.id}/accept/')
+
+        self.assertEqual(response.status_code, 200)
+        order.refresh_from_db()
+        self.assertEqual(order.craftswoman_id, craftswoman.id)
+        self.assertEqual(order.status, Order.Status.ACCEPTED)
+
     def test_craftswoman_can_accept_orders_and_update_design_status(self):
         craft_user = User.objects.create_user(
             username='tejedora-api',
