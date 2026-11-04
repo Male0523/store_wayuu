@@ -1160,7 +1160,10 @@ class SuperadminNavigationDetailView(APIView):
         role_codes = values.pop('role_codes', None)
         next_route = values.get('route_name', item.route_name)
         next_roles = set(role_codes) if role_codes is not None else set(item.roles.values_list('code', flat=True))
-        allowed_roles = NAVIGATION_ROUTE_RULES[next_route]['roles']
+        route_rule = NAVIGATION_ROUTE_RULES.get(next_route)
+        if route_rule is None:
+            raise serializers.ValidationError({'route_name': 'Esta opción usa una ruta antigua no permitida. Elimínala y créala de nuevo con una pantalla disponible.'})
+        allowed_roles = route_rule['roles']
         if next_roles - allowed_roles:
             raise serializers.ValidationError({'role_codes': 'La pantalla seleccionada no está disponible para uno o más roles elegidos.'})
         resource = values.pop('permission_resource', serializers.empty)
