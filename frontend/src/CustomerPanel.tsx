@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { ArrowLeft, Heart, Home, LogOut, Minus, Plus, Search, ShoppingBag, ShoppingCart, UserRound, X } from 'lucide-react'
 import { api, ApiError } from './lib/api'
 import { useUserSession } from './context/user-context'
-import type { Cart, Category, Order, Product, UserProfile } from './types'
+import type { Cart, Category, CustomDesign, Order, Product, RBACNavigationItem, UserProfile } from './types'
 import './CustomerPanel.css'
 
 type View = 'catalog' | 'favorites' | 'cart' | 'account' | 'detail'
+type AccountSection = 'orders' | 'designs' | 'profile'
 const money = (value: string | number) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(Number(value || 0))
 const messageOf = (error: unknown) => error instanceof ApiError ? error.message : 'No fue posible completar la operación. Comprueba que Django esté activo e inténtalo de nuevo.'
 
@@ -17,6 +18,9 @@ export default function CustomerPanel() {
   const [categories, setCategories] = useState<Category[]>([])
   const [cart, setCart] = useState<Cart>({ items: [], total: '0', count: 0 })
   const [orders, setOrders] = useState<Order[]>([])
+  const [designs, setDesigns] = useState<CustomDesign[]>([])
+  const [navigationItems, setNavigationItems] = useState<RBACNavigationItem[]>([])
+  const [accountSection, setAccountSection] = useState<AccountSection>('orders')
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [selected, setSelected] = useState<Product | null>(null)
   const [favorites, setFavorites] = useState<number[]>([])
@@ -49,6 +53,13 @@ export default function CustomerPanel() {
 
   useEffect(() => {
     let active = true
+    if (user?.role === 'customer') {
+      api.roleNavigation().then((items) => { if (active) setNavigationItems(items) }).catch((error) => {
+        if (active) setNotice(messageOf(error))
+      })
+    } else {
+      setNavigationItems([])
+    }
     const params = new URLSearchParams({ page_size: '100', ordering: 'name' })
     Promise.all([api.products(params), api.categories()]).then(([page, list]) => {
       if (!active) return
@@ -125,9 +136,19 @@ export default function CustomerPanel() {
   async function openAccount() {
     setBusy(true)
     try {
-      const [page, data] = await Promise.all([api.orders(), api.profile()])
-      setOrders(page.results)
-      setProfile(data)
+      const items = await api.roleNavigation()
+      setNavigationItems(items)
+      const routes = items.map((item) => item.route_name)
+      const [orderPage, customerDesigns, customerProfile] = await Promise.all([
+        routes.includes('customer.orders') ? api.orders() : Promise.resolve({ results: [] as Order[] }),
+        routes.includes('customer.designs') ? api.designs() : Promise.resolve([] as CustomDesign[]),
+        routes.includes('customer.profile') ? api.profile() : Promise.resolve(null),
+      ])
+      setOrders(orderPage.results)
+      setDesigns(customerDesigns)
+      setProfile(customerProfile)
+      const firstSection = items.find((item) => item.route_name.startsWith('customer.'))?.route_name.split('.')[1] as AccountSection | undefined
+      setAccountSection(firstSection ?? 'orders')
       setView('account')
     } catch (error) { setNotice(messageOf(error)) } finally { setBusy(false) }
   }
@@ -180,6 +201,8 @@ export default function CustomerPanel() {
   }
 
   const fullName = profile?.name || user?.name || user?.username || 'Cliente'
+  const accountNavigation = navigationItems.filter((item) => item.route_name.startsWith('customer.'))
+  const canEditProfile = Boolean(user?.permissions?.includes('customers.change'))
 
   return <div className="customer-shell">
     <aside className="customer-sidebar">
@@ -189,7 +212,7 @@ export default function CustomerPanel() {
         <button className={view === 'catalog' || view === 'detail' ? 'active' : ''} onClick={() => navigate('catalog')}><Home size={17}/>Inicio y catálogo</button>
         <button className={view === 'favorites' ? 'active' : ''} onClick={() => navigate('favorites')}><Heart size={17}/>Mis favoritos</button>
         <button className={view === 'cart' ? 'active' : ''} onClick={() => navigate('cart')}><ShoppingCart size={17}/>Mi carrito <span>{cart.count}</span></button>
-        <button className={view === 'account' ? 'active' : ''} onClick={openAccount}><UserRound size={17}/>Mi cuenta y pedidos</button>
+        {accountNavigation.length > 0 && <button className={view === 'account' ? 'active' : ''} onClick={openAccount} disabled={busy}><UserRound size={17}/>Mi cuenta</button>}
       </nav>
       <div className="customer-sidebar-bottom"><div className="customer-user"><span className="customer-avatar">{fullName.slice(0,1).toUpperCase()}</span><div><strong>{fullName}</strong><small>Cliente</small></div></div><button className="customer-logout" onClick={signOut} disabled={busy}><LogOut size={16}/>Cerrar sesión</button></div>
     </aside>
@@ -217,8 +240,18 @@ export default function CustomerPanel() {
 
       {view === 'cart' && <section className="customer-account-section"><div className="customer-section-heading"><div><span className="customer-kicker">RESUMEN DE COMPRA</span><h2>Tu carrito</h2></div><span>{cart.count} unidades</span></div>{!cart.items.length ? <p className="customer-empty">Tu carrito está vacío. Explora el catálogo para encontrar una pieza.</p> : <><div className="customer-cart-list">{cart.items.map((item) => <article className="customer-cart-row" key={item.product.id}><img src={item.product.image_url || ''} alt={item.product.name}/><div><h3>{item.product.name}</h3><p>{money(item.product.price)}</p><div className="customer-quantity"><button onClick={() => changeQuantity(item.product.id, item.quantity - 1)} disabled={busy}><Minus size={14}/></button><span>{item.quantity}</span><button onClick={() => changeQuantity(item.product.id, item.quantity + 1)} disabled={busy}><Plus size={14}/></button></div></div><strong>{money(item.subtotal)}</strong><button className="customer-remove" onClick={() => changeQuantity(item.product.id, 0)} aria-label="Retirar producto" disabled={busy}><X size={17}/></button></article>)}</div><div className="customer-cart-total"><span>Total de productos</span><strong>{money(cart.total)}</strong></div><button className="customer-primary" disabled={busy} onClick={() => setCheckoutOpen(true)}>Continuar con la compra</button></>}</section>}
 
-      {view === 'account' && <section className="customer-account-section"><div className="customer-section-heading"><div><span className="customer-kicker">TU ACTIVIDAD</span><h2>Mis pedidos</h2></div><span>{orders.length} pedidos</span></div>{!orders.length ? <p className="customer-empty">Aún no tienes pedidos registrados.</p> : <div className="customer-order-list">{orders.map((order) => <article className="customer-order-card" key={order.id}><div><small>PEDIDO #{order.id} · {new Date(order.created_at).toLocaleDateString('es-CO')}</small><h3>{order.items.map((item) => item.product.name).join(', ')}</h3><p>{order.items.reduce((sum, item) => sum + item.quantity, 0)} unidades · {money(order.total)}</p></div><span className="customer-order-status">{order.status_label || order.status}</span></article>)}</div>}
-        <div className="customer-profile-block"><div className="customer-section-heading"><div><span className="customer-kicker">DATOS PERSONALES</span><h2>Mi perfil</h2></div><button className="customer-text-button" onClick={() => setProfileEditing((value) => !value)}>{profileEditing ? 'Cancelar' : 'Editar datos'}</button></div>{profile && (profileEditing ? <form className="customer-profile-form" onSubmit={saveProfile}><label>Nombre completo<input name="name" defaultValue={profile.name}/></label><label>Teléfono<input name="phone" defaultValue={profile.phone || ''}/></label><label>Dirección<input name="address" defaultValue={profile.address || ''}/></label><label>Ciudad<input name="city" defaultValue={profile.city || ''}/></label><button className="customer-primary" disabled={busy}>Guardar cambios</button></form> : <div className="customer-profile-grid"><p><small>Nombre</small>{profile.name}</p><p><small>Correo</small>{profile.email}</p><p><small>Teléfono</small>{profile.phone || 'Sin registrar'}</p><p><small>Dirección</small>{profile.address || 'Sin registrar'}</p><p><small>Ciudad</small>{profile.city || 'Sin registrar'}</p></div>)}</div>
+      {view === 'account' && <section className="customer-account-section">
+        <div className="customer-section-heading"><div><span className="customer-kicker">TU ACTIVIDAD</span><h2>Mi cuenta</h2></div><span>{accountNavigation.length} secciones habilitadas</span></div>
+        <div className="customer-category-tabs" role="tablist" aria-label="Secciones de mi cuenta">
+          {accountNavigation.map((item) => {
+            const section = item.route_name.split('.')[1] as AccountSection
+            return <button type="button" role="tab" aria-selected={accountSection === section} className={accountSection === section ? 'active' : ''} key={item.id} onClick={() => { setAccountSection(section); setProfileEditing(false) }}>{item.label}</button>
+          })}
+        </div>
+        {accountSection === 'orders' && accountNavigation.some((item) => item.route_name === 'customer.orders') && <><div className="customer-section-heading"><h2>Mis pedidos</h2><span>{orders.length} pedidos</span></div>{!orders.length ? <p className="customer-empty">Aún no tienes pedidos registrados.</p> : <div className="customer-order-list">{orders.map((order) => <article className="customer-order-card" key={order.id}><div><small>PEDIDO #{order.id} · {new Date(order.created_at).toLocaleDateString('es-CO')}</small><h3>{order.items.map((item) => item.product.name).join(', ')}</h3><p>{order.items.reduce((sum, item) => sum + item.quantity, 0)} unidades · {money(order.total)}</p></div><span className="customer-order-status">{order.status_label || order.status}</span></article>)}</div>}</>}
+        {accountSection === 'designs' && accountNavigation.some((item) => item.route_name === 'customer.designs') && <><div className="customer-section-heading"><h2>Mis diseños personalizados</h2><span>{designs.length} diseños</span></div>{!designs.length ? <p className="customer-empty">Aún no has creado diseños personalizados. Puedes diseñar tu manta desde la tienda.</p> : <div className="customer-order-list">{designs.map((design) => <article className="customer-order-card" key={design.id}><div><small>DISEÑO #{design.id} · {new Date(design.created_at).toLocaleDateString('es-CO')}</small><h3>{design.pattern.charAt(0).toUpperCase() + design.pattern.slice(1)} · Talla {design.size}</h3><p>Base {design.base_color} · Acentos {design.accent_color_one} y {design.accent_color_two} · {design.quantity} unidad(es)</p><p>{money(design.estimated_price)}</p></div><span className="customer-order-status">{design.status_label || design.status}</span></article>)}</div>}</>}
+        {accountSection === 'profile' && accountNavigation.some((item) => item.route_name === 'customer.profile') && <div className="customer-profile-block"><div className="customer-section-heading"><div><span className="customer-kicker">DATOS PERSONALES</span><h2>Mi perfil</h2></div>{canEditProfile && <button className="customer-text-button" onClick={() => setProfileEditing((value) => !value)}>{profileEditing ? 'Cancelar' : 'Editar datos'}</button>}</div>{profile && (profileEditing && canEditProfile ? <form className="customer-profile-form" onSubmit={saveProfile}><label>Nombre completo<input name="name" defaultValue={profile.name}/></label><label>Teléfono<input name="phone" defaultValue={profile.phone || ''}/></label><label>Dirección<input name="address" defaultValue={profile.address || ''}/></label><label>Ciudad<input name="city" defaultValue={profile.city || ''}/></label><button className="customer-primary" disabled={busy}>Guardar cambios</button></form> : <div className="customer-profile-grid"><p><small>Nombre</small>{profile.name}</p><p><small>Correo</small>{profile.email}</p><p><small>Teléfono</small>{profile.phone || 'Sin registrar'}</p><p><small>Dirección</small>{profile.address || 'Sin registrar'}</p><p><small>Ciudad</small>{profile.city || 'Sin registrar'}</p></div>)}</div>}
+        {!accountNavigation.length && <p className="customer-empty">No tienes secciones habilitadas. El superadministrador debe revisar tu menú y permisos.</p>}
       </section>}
 
     </main>
