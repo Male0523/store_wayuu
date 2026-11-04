@@ -5,6 +5,7 @@ import type {
   Category,
   CustomDesign,
   CraftswomanDashboard,
+  CraftswomanSummary,
   AuditEvent,
   Order,
   Page,
