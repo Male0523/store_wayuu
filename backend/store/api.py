@@ -900,8 +900,6 @@ class RBACCatalogView(APIView):
                 result=AuditEvent.Result.DENIED,
             )
             raise PermissionDenied('No tienes permiso para consultar el catálogo RBAC.')
-        if is_explicitly_denied(request.user, 'permissions', 'view'):
-            raise PermissionDenied('No tienes permiso para consultar el catálogo RBAC.')
         entries = permission_catalog()
         role = role_for_user(request.user)
         if role.code == AccessRole.Code.ADMIN:
