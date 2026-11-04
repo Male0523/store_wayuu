@@ -31,6 +31,7 @@ export interface Product {
   stock: number
   image_url: string
   made_to_order: boolean
+  is_custom_design?: boolean
   created_at: string
   updated_at: string
   active?: boolean
