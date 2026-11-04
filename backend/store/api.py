@@ -664,7 +664,7 @@ def _customer_orders(user):
     if role.code in (AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN):
         return Order.objects.all()
     if role.code == AccessRole.Code.CRAFTSWOMAN:
-        craftswoman = Craftswoman.objects.filter(user=user).first()
+        craftswoman = Craftswoman.objects.filter(user=user, active=True).first()
         return craftswoman.orders.all() if craftswoman else Order.objects.none()
     if role.code == AccessRole.Code.CUSTOMER:
         return Order.objects.filter(customer__user=user)
@@ -1548,13 +1548,31 @@ class AdminOrderListView(PaginatedAPIView):
             if not craftswoman_id.isdigit():
                 raise serializers.ValidationError({'craftswoman_id': 'Selecciona una tejedora válida.'})
             orders = orders.filter(craftswoman_id=int(craftswoman_id))
+        customer_id = request.query_params.get('customer_id', '').strip()
+        if customer_id:
+            if not customer_id.isdigit():
+                raise serializers.ValidationError({'customer_id': 'Selecciona un cliente válido.'})
+            orders = orders.filter(customer_id=int(customer_id))
+
         search = request.query_params.get('search', '').strip()
         if search:
             orders = orders.filter(
                 models.Q(customer__name__icontains=search)
+                | models.Q(customer__email__icontains=search)
                 | models.Q(customer__user__username__icontains=search)
+                | models.Q(customer__user__first_name__icontains=search)
+                | models.Q(customer__user__last_name__icontains=search)
                 | models.Q(craftswoman__name__icontains=search)
                 | models.Q(items__product__name__icontains=search)
+                | models.Q(pk__iexact=search) if search.isdigit() else (
+                    models.Q(customer__name__icontains=search)
+                    | models.Q(customer__email__icontains=search)
+                    | models.Q(customer__user__username__icontains=search)
+                    | models.Q(customer__user__first_name__icontains=search)
+                    | models.Q(customer__user__last_name__icontains=search)
+                    | models.Q(craftswoman__name__icontains=search)
+                    | models.Q(items__product__name__icontains=search)
+                )
             ).distinct()
         return self.get_paginated_response(OrderSerializer(self.paginate_queryset(orders), many=True).data)
 
@@ -1698,9 +1716,17 @@ class CraftswomanDashboardView(APIView):
         designs = craftswoman.custom_designs.select_related('customer') if has_rbac_permission(request.user, 'designs', 'view') else CustomDesign.objects.none()
         return Response({
             'active': craftswoman.active,
+            'craftswoman': CraftswomanSummarySerializer(craftswoman).data,
             'available_orders': OrderSerializer(available, many=True).data,
             'orders': OrderSerializer(assigned, many=True).data,
             'designs': CustomDesignSerializer(designs, many=True).data,
+            'order_counts': {
+                'available': available.count(),
+                'assigned': assigned.count(),
+                'pending': assigned.filter(status=Order.Status.ACCEPTED).count(),
+                'weaving': assigned.filter(status=Order.Status.WEAVING).count(),
+                'completed': assigned.filter(status=Order.Status.COMPLETED).count(),
+            },
         })
 
 

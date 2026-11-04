@@ -2267,6 +2267,87 @@ class StoreAPITests(TestCase):
         self.assertEqual(result['customer_name'], 'Cliente API')
         self.assertEqual(result['craftswoman']['name'], 'Tejedora Filtro')
 
+    def test_craftswoman_dashboard_only_lists_open_unassigned_and_own_orders(self):
+        first_user = self.create_role_user('dashboard-first-craftswoman', AccessRole.Code.CRAFTSWOMAN)
+        second_user = self.create_role_user('dashboard-second-craftswoman', AccessRole.Code.CRAFTSWOMAN)
+        first = Craftswoman.objects.create(user=first_user, name='Tejedora Uno', active=True)
+        second = Craftswoman.objects.create(user=second_user, name='Tejedora Dos', active=True)
+        own = Order.objects.create(customer=self.customer, craftswoman=first, status=Order.Status.ACCEPTED, shipping_address='Riohacha')
+        other = Order.objects.create(customer=self.customer, craftswoman=second, status=Order.Status.ACCEPTED, shipping_address='Maicao')
+        available = Order.objects.create(customer=self.customer, status=Order.Status.PENDING, shipping_address='Uribia')
+        completed_unassigned = Order.objects.create(customer=self.customer, status=Order.Status.COMPLETED, shipping_address='Manaure')
+        for order in (own, other, available, completed_unassigned):
+            OrderItem.objects.create(order=order, product=self.product, quantity=1, unit_price=self.product.price)
+
+        self.client.force_login(first_user)
+        response = self.client.get('/api/v1/craftswoman/dashboard/')
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual([item['id'] for item in data['orders']], [own.id])
+        self.assertEqual([item['id'] for item in data['available_orders']], [available.id])
+        self.assertEqual(data['craftswoman']['name'], 'Tejedora Uno')
+        self.assertEqual(data['order_counts']['available'], 1)
+        self.assertEqual(data['order_counts']['assigned'], 1)
+
+    def test_craftswoman_cannot_list_or_open_another_craftswomans_order(self):
+        first_user = self.create_role_user('isolation-first-craftswoman', AccessRole.Code.CRAFTSWOMAN)
+        second_user = self.create_role_user('isolation-second-craftswoman', AccessRole.Code.CRAFTSWOMAN)
+        first = Craftswoman.objects.create(user=first_user, name='Tejedora Propietaria', active=True)
+        second = Craftswoman.objects.create(user=second_user, name='Tejedora Ajena', active=True)
+        other_order = Order.objects.create(customer=self.customer, craftswoman=second, status=Order.Status.WEAVING, shipping_address='Maicao')
+        OrderItem.objects.create(order=other_order, product=self.product, quantity=1, unit_price=self.product.price)
+
+        self.client.force_login(first_user)
+        listing = self.client.get('/api/v1/orders/')
+        detail = self.client.get(f'/api/v1/orders/{other_order.id}/')
+        status_change = self.client.patch(
+            f'/api/v1/craftswoman/orders/{other_order.id}/status/',
+            {'status': Order.Status.COMPLETED},
+            content_type='application/json',
+        )
+
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(listing.json()['count'], 0)
+        self.assertEqual(detail.status_code, 404)
+        self.assertEqual(status_change.status_code, 404)
+        other_order.refresh_from_db()
+        self.assertEqual(other_order.craftswoman_id, second.id)
+        self.assertEqual(other_order.status, Order.Status.WEAVING)
+
+    def test_admin_order_filters_by_customer_id_and_searches_email_and_order_number(self):
+        admin = self.create_role_user('admin-order-customer-filter', AccessRole.Code.SUPERADMIN)
+        another_user = self.create_role_user('another-customer-filter', AccessRole.Code.CUSTOMER)
+        another_customer = Customer.objects.create(user=another_user, name='Otra Compradora', email='otra@example.com')
+        target = Order.objects.create(customer=another_customer, shipping_address='Riohacha')
+        OrderItem.objects.create(order=target, product=self.product, quantity=1, unit_price=self.product.price)
+
+        self.client.force_login(admin)
+        by_customer = self.client.get(f'/api/v1/admin/orders/?customer_id={another_customer.id}')
+        by_email = self.client.get('/api/v1/admin/orders/?search=otra@example.com')
+        by_number = self.client.get(f'/api/v1/admin/orders/?search={target.id}')
+        invalid_customer = self.client.get('/api/v1/admin/orders/?customer_id=abc')
+
+        self.assertEqual(by_customer.status_code, 200)
+        self.assertEqual([item['id'] for item in by_customer.json()['results']], [target.id])
+        self.assertEqual([item['id'] for item in by_email.json()['results']], [target.id])
+        self.assertEqual([item['id'] for item in by_number.json()['results']], [target.id])
+        self.assertEqual(invalid_customer.status_code, 400)
+
+    def test_inactive_craftswoman_cannot_view_orders_even_if_role_is_still_assigned(self):
+        craft_user = self.create_role_user('inactive-profile-craftswoman', AccessRole.Code.CRAFTSWOMAN)
+        craft = Craftswoman.objects.create(user=craft_user, name='Perfil Desactivado', active=False)
+        order = Order.objects.create(customer=self.customer, craftswoman=craft, shipping_address='Riohacha')
+
+        self.client.force_login(craft_user)
+        response = self.client.get('/api/v1/orders/')
+        dashboard = self.client.get('/api/v1/craftswoman/dashboard/')
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(dashboard.status_code, 403)
+        order.refresh_from_db()
+        self.assertEqual(order.craftswoman_id, craft.id)
+
     def test_public_craftswomen_endpoint_only_lists_active_profiles(self):
         active_user = self.create_role_user('public-active-craftswoman', AccessRole.Code.CRAFTSWOMAN)
         inactive_user = self.create_role_user('public-inactive-craftswoman', AccessRole.Code.CRAFTSWOMAN)
