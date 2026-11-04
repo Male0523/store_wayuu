@@ -32,7 +32,9 @@
 .button { min-height: 46px; display: inline-flex; align-items: center; justify-content: center; gap: 12px; padding: 0 19px; border: 1px solid transparent; cursor: pointer; font-size: 12px; font-weight: 600; transition: background .2s ease, border-color .2s ease, color .2s ease; }
 .button:disabled { opacity: .55; cursor: wait; }
 .button-dark { background: var(--forest); color: #fffaf0; }
-.button-dark:hover:not(:disabled) { background: var(--clay); }
+.button-dark:hover:not(:disabled) { background: var(--ink); color: #fffaf0; border-color: var(--ink); }
+.button-dark:focus-visible, .button-outline:focus-visible, .main-nav button:focus-visible { outline: 3px solid var(--clay); outline-offset: 3px; }
+.button-dark:active:not(:disabled) { background: var(--forest); color: #fffaf0; }
 .button-outline { border-color: var(--ink); background: transparent; color: var(--ink); }
 .button-outline:hover:not(:disabled) { border-color: var(--forest); background: var(--forest); color: white; }
 .full-button { width: 100%; }
@@ -783,3 +785,10 @@
   .rbac-form-section-title { margin-top:4px; }
   .rbac-navigation-form > button { width:100%; }
 }
+
+.artisan-directory { padding-top: 64px; padding-bottom: 72px; }
+.artisan-directory-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
+.artisan-directory-card { display: flex; align-items: flex-start; gap: 14px; padding: 20px; border: 1px solid var(--line); background: var(--paper, #fffaf0); }
+.artisan-initials { width: 46px; height: 46px; flex: 0 0 46px; display: grid; place-items: center; border-radius: 50%; background: var(--forest); color: #fffaf0; font-weight: 700; }
+.artisan-directory-card h3 { margin: 0 0 5px; color: var(--ink); font-weight: 700; }
+.artisan-directory-card p, .artisan-directory-card small { display: block; margin: 0; color: var(--muted); line-height: 1.6; }
