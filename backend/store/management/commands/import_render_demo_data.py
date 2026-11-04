@@ -2,7 +2,8 @@ from pathlib import Path
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.core.management import BaseCommand, CommandError, call_command
+from django.core.management import call_command
+from django.core.management.base import BaseCommand, CommandError
 from django.db import connection, transaction
 
 from store.models import (
