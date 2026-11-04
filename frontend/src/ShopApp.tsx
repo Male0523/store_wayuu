@@ -652,13 +652,14 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, products, ca
     stock: number; image_url?: string; made_to_order?: boolean;
   }) => void
   onSignOut: () => void
-  onAcceptOrder: (orderId: number) => void
+  onAcceptOrder: (orderId: number) => Promise<void>
   onOrderStatus: (orderId: number, status: string) => void
   onDesignStatus: (designId: number, status: string) => void
 }) {
   const [activeSection, setActiveSection] = useState<'dashboard' | 'products' | 'inventory' | 'orders'>('dashboard')
   const [showProductForm, setShowProductForm] = useState(false)
   const [assignedOrderStatusFilter, setAssignedOrderStatusFilter] = useState('all')
+  const [acceptingOrderId, setAcceptingOrderId] = useState<number | null>(null)
   const visibleAssignedOrders = (dashboard?.orders ?? []).filter((order) => assignedOrderStatusFilter === 'all' || order.status === assignedOrderStatusFilter)
   const canChangeOrders = Boolean(user && hasEffectivePermission(user, 'orders.change'))
   const canAddProducts = Boolean(user && hasEffectivePermission(user, 'products.add'))
@@ -677,6 +678,15 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, products, ca
   useEffect(() => {
     if (!canOpenSection(activeSection) && navItems[0]) setActiveSection(navItems[0].id)
   }, [navigationItems, activeSection])
+  async function handleAcceptOrder(orderId: number) {
+    if (acceptingOrderId !== null) return
+    setAcceptingOrderId(orderId)
+    try {
+      await onAcceptOrder(orderId)
+    } finally {
+      setAcceptingOrderId(null)
+    }
+  }
   function submitProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const values = Object.fromEntries(new FormData(event.currentTarget).entries()) as Record<string, string>
@@ -714,7 +724,7 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, products, ca
               <article><span>Pedidos asignados</span><strong>{(dashboard?.orders ?? []).length}</strong><small>De tu taller</small></article>
             </section>
             <div className="craftswoman-columns">
-              <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>ACTIVIDAD</small><h2>Pedidos por aceptar</h2></div><span>{(dashboard?.available_orders ?? []).length}</span></div>{(dashboard?.available_orders ?? []).length ? (dashboard?.available_orders ?? []).slice(0,3).map((order) => <div className="artisan-order" key={order.id}><OrderCard order={order} />{canChangeOrders && <button className="button button-dark" onClick={() => onAcceptOrder(order.id)}>Aceptar pedido <ArrowRight size={15} /></button>}</div>) : <p className="muted-copy">No hay pedidos disponibles en este momento.</p>}</section>
+              <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>ACTIVIDAD</small><h2>Pedidos por aceptar</h2></div><span>{(dashboard?.available_orders ?? []).length}</span></div>{(dashboard?.available_orders ?? []).length ? (dashboard?.available_orders ?? []).slice(0,3).map((order) => <div className="artisan-order" key={order.id}><OrderCard order={order} />{canChangeOrders && <button className="button button-dark" disabled={acceptingOrderId !== null} onClick={() => void handleAcceptOrder(order.id)}>{acceptingOrderId === order.id ? <><LoaderCircle className="spin" size={15} /> Aceptando pedido…</> : <>Aceptar pedido <ArrowRight size={15} /></>}</button>}</div>) : <p className="muted-copy">No hay pedidos disponibles en este momento.</p>}</section>
               <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>TU TALLER</small><h2>Mis productos recientes</h2></div>{canOpenSection('products') && <button onClick={() => setActiveSection('products')}>Ver todos <ArrowRight size={14} /></button>}</div>{products.slice(0,4).map((product) => <div className="craftswoman-product-mini" key={product.id}><span><strong>{product.name}</strong><small>{product.category.name} · Stock {product.stock}</small></span><em className={product.active ? 'published' : ''}>{product.active ? 'Publicado' : 'En revisión'}</em></div>)}{!products.length && <p className="muted-copy">Registra tu primera pieza para comenzar.</p>}</section>
             </div>
           </div>}
@@ -725,7 +735,7 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, products, ca
             <div className="craftswoman-product-list">{products.map((product) => <article key={product.id}><div><strong>{product.name}</strong><small>{product.sku} · {product.category.name} · Talla {product.size}</small></div><span>{money(product.price)}</span><span>Stock {product.stock}</span><em className={product.active ? 'published' : ''}>{product.active ? 'Publicado' : 'Pendiente de revisión'}</em></article>)}{!products.length && <p className="muted-copy">Todavía no has registrado productos en tu taller.</p>}</div>
           </section>}
           {canOpenSection('inventory') && activeSection === 'inventory' && <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>CONTROL DE EXISTENCIAS</small><h1>Mi inventario</h1><p>Consulta las piezas y las unidades registradas en tu taller.</p></div><span className="craftswoman-total-stock">{stock} unidades</span></div><div className="craftswoman-product-list">{products.map((product) => <article key={product.id}><div><strong>{product.name}</strong><small>{product.sku} · {product.category.name}</small></div><span>{money(product.price)}</span><span>Disponibles: {product.stock}</span><em className={product.stock > 0 ? 'published' : ''}>{product.stock > 0 ? 'Con existencias' : 'Agotado'}</em></article>)}{!products.length && <p className="muted-copy">Tu inventario aparecerá aquí cuando registres productos.</p>}</div></section>}
-          {canOpenSection('orders') && activeSection === 'orders' && <div className="craftswoman-orders"><section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>OPORTUNIDADES DE TRABAJO</small><h1>Pedidos por aceptar</h1></div><span>{(dashboard?.available_orders ?? []).length}</span></div>{(dashboard?.available_orders ?? []).length ? (dashboard?.available_orders ?? []).map((order) => <div className="artisan-order" key={order.id}><OrderCard order={order} />{canChangeOrders && <button className="button button-dark" onClick={() => onAcceptOrder(order.id)}>Aceptar pedido <ArrowRight size={15} /></button>}</div>) : <p className="muted-copy">No hay pedidos disponibles.</p>}</section>
+          {canOpenSection('orders') && activeSection === 'orders' && <div className="craftswoman-orders"><section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>OPORTUNIDADES DE TRABAJO</small><h1>Pedidos por aceptar</h1></div><span>{(dashboard?.available_orders ?? []).length}</span></div>{(dashboard?.available_orders ?? []).length ? (dashboard?.available_orders ?? []).map((order) => <div className="artisan-order" key={order.id}><OrderCard order={order} />{canChangeOrders && <button className="button button-dark" disabled={acceptingOrderId !== null} onClick={() => void handleAcceptOrder(order.id)}>{acceptingOrderId === order.id ? <><LoaderCircle className="spin" size={15} /> Aceptando pedido…</> : <>Aceptar pedido <ArrowRight size={15} /></>}</button>}</div>) : <p className="muted-copy">No hay pedidos disponibles.</p>}</section>
             <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>PRODUCCIÓN</small><h1>Pedidos de mi taller</h1><p>Estos pedidos están asignados exclusivamente a tu taller.</p></div><span>{visibleAssignedOrders.length} de {(dashboard?.orders ?? []).length}</span></div><label className="order-status-filter">Filtrar por estado<select value={assignedOrderStatusFilter} onChange={(event) => setAssignedOrderStatusFilter(event.target.value)}><option value="all">Todos los estados</option>{Object.entries(orderStatusLabels).map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></label>{visibleAssignedOrders.length ? visibleAssignedOrders.map((order) => <div className="artisan-order" key={order.id}><OrderCard order={order} />{canChangeOrders && order.status === 'accepted' && <button className="button button-outline" onClick={() => onOrderStatus(order.id, 'weaving')}>Iniciar tejido <ArrowRight size={15} /></button>}{canChangeOrders && order.status === 'weaving' && <button className="button button-outline" onClick={() => onOrderStatus(order.id, 'completed')}>Marcar como terminado <Check size={15} /></button>}</div>) : <p className="muted-copy">No hay pedidos de tu taller con este estado.</p>}</section></div>}
           {activeSection !== 'orders' && activeSection !== 'dashboard' && (dashboard?.designs.length ?? 0) > 0 && <section className="craftswoman-panel craftswoman-designs"><div className="craftswoman-panel-heading"><div><small>DISEÑOS PERSONALIZADOS</small><h2>Diseños de mi taller</h2></div><span>{dashboard?.designs.length ?? 0}</span></div><div className="design-list">{(dashboard?.designs ?? []).map((design) => <article className="artisan-design" key={design.id}><DesignSummary design={design} /><div className="design-actions">{canChangeDesigns && design.status === 'accepted' && <button className="button button-outline" onClick={() => onDesignStatus(design.id, 'weaving')}>Iniciar tejido <ArrowRight size={15} /></button>}{canChangeDesigns && design.status === 'weaving' && <button className="button button-outline" onClick={() => onDesignStatus(design.id, 'completed')}>Marcar terminado <Check size={15} /></button>}</div></article>)}</div></section>}
         </>}
@@ -1186,6 +1196,15 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
     <nav className="rbac-tabs" aria-label="Secciones de administración de acceso">
       {([['roles', 'Permisos por rol'], ['users', 'Cuentas'], ['delegations', 'Delegaciones'], ['navigation', 'Menú dinámico'], ['audit', 'Auditoría']] as [RBACSection, string][]).map(([section, label]) => <button type="button" key={section} className={activeSection === section ? 'active' : ''} onClick={() => setActiveSection(section)}>{label}</button>)}
     </nav>
+    {(canViewRoles || canViewNavigation) && <section className="rbac-relationship-guide" aria-label="Cómo se relacionan los permisos y el menú">
+      {canViewRoles && <article className="rbac-relationship-card">
+        <span className="rbac-guide-number">01</span><div><span className="rbac-guide-kicker">SEGURIDAD · QUÉ PUEDE HACER</span><h3>Permisos por rol</h3><p>Autoriza acciones reales dentro del sistema: consultar, crear, editar o eliminar. Django comprueba estos permisos cuando se intenta realizar una operación.</p><small>Ejemplo: permitir que una tejedora consulte y actualice sus pedidos.</small><button type="button" onClick={() => setActiveSection('roles')}>Configurar permisos <ArrowRight size={14} /></button></div>
+      </article>}
+      {canViewNavigation && <article className="rbac-relationship-card">
+        <span className="rbac-guide-number">02</span><div><span className="rbac-guide-kicker">NAVEGACIÓN · QUÉ PUEDE VER</span><h3>Menú dinámico</h3><p>Decide qué enlaces aparecen en el panel, a qué pantalla existente llevan y para cuáles roles están visibles. No concede permisos de seguridad.</p><small>Ejemplo: mostrar la opción «Pedidos» en el menú de Tejedora.</small><button type="button" onClick={() => setActiveSection('navigation')}>Configurar menú <ArrowRight size={14} /></button></div>
+      </article>}
+      <p className="rbac-relationship-flow"><strong>Orden recomendado:</strong> primero habilita las acciones en «Permisos por rol»; después activa la pantalla y asígnala al mismo rol en «Menú dinámico». Si la pantalla exige permisos mínimos, también deben estar habilitados.</p>
+    </section>}
     {error && <p className="rbac-error" role="alert">{error}</p>}
     {feedback && <p className="rbac-feedback" role="status">{feedback}</p>}
     {activeSection === "users" && canAddUsers && canAssignRoles && <section className="rbac-block rbac-user-create">
