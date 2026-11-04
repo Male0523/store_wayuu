@@ -78,6 +78,7 @@ export interface CustomDesign {
   notes: string
   estimated_price: string
   status: string
+  status_label?: string
   created_at: string
   craftswoman_name?: string | null
 }
