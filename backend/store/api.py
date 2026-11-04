@@ -209,12 +209,15 @@ class OrderSerializer(serializers.ModelSerializer):
     total = serializers.DecimalField(max_digits=14, decimal_places=0, read_only=True)
     status_label = serializers.CharField(source='get_status_display', read_only=True)
     craftswoman = CraftswomanSummarySerializer(read_only=True)
+    customer_name = serializers.CharField(source='customer.name', read_only=True)
+    customer_username = serializers.CharField(source='customer.user.username', read_only=True)
 
     class Meta:
         model = Order
         fields = (
             'id', 'status', 'status_label', 'payment_method', 'shipping_address',
             'notes', 'created_at', 'updated_at', 'items', 'total', 'craftswoman',
+            'customer_name', 'customer_username',
         )
 
 
@@ -701,6 +704,14 @@ class CategoryListView(APIView):
     def get(self, request):
         categories = Category.objects.filter(active=True, products__active=True).distinct()
         return Response(CategorySerializer(categories, many=True).data)
+
+
+class PublicCraftswomenListView(APIView):
+    permission_classes = (AllowAny,)
+
+    def get(self, request):
+        craftswomen = Craftswoman.objects.filter(active=True).order_by('name')
+        return Response(CraftswomanSummarySerializer(craftswomen, many=True).data)
 
 
 class ProductListView(PaginatedAPIView):
@@ -1514,6 +1525,36 @@ class OrderListView(PaginatedAPIView):
         return self.get_paginated_response(OrderSerializer(self.paginate_queryset(orders), many=True).data)
 
 
+class AdminOrderListView(PaginatedAPIView):
+    permission_classes = (AdminOrSuperadmin,)
+    rbac_resource = 'orders'
+
+    def get(self, request):
+        orders = Order.objects.select_related('customer__user', 'craftswoman').prefetch_related('items__product').all()
+        selected_status = request.query_params.get('status', '').strip()
+        if selected_status:
+            valid_statuses = {value for value, _label in Order.Status.choices}
+            if selected_status not in valid_statuses:
+                raise serializers.ValidationError({'status': 'Selecciona un estado de pedido válido.'})
+            orders = orders.filter(status=selected_status)
+        craftswoman_id = request.query_params.get('craftswoman_id', '').strip()
+        if craftswoman_id == 'unassigned':
+            orders = orders.filter(craftswoman__isnull=True)
+        elif craftswoman_id:
+            if not craftswoman_id.isdigit():
+                raise serializers.ValidationError({'craftswoman_id': 'Selecciona una tejedora válida.'})
+            orders = orders.filter(craftswoman_id=int(craftswoman_id))
+        search = request.query_params.get('search', '').strip()
+        if search:
+            orders = orders.filter(
+                models.Q(customer__name__icontains=search)
+                | models.Q(customer__user__username__icontains=search)
+                | models.Q(craftswoman__name__icontains=search)
+                | models.Q(items__product__name__icontains=search)
+            ).distinct()
+        return self.get_paginated_response(OrderSerializer(self.paginate_queryset(orders), many=True).data)
+
+
 class OrderDetailView(APIView):
     permission_classes = (OrderAccess,)
     rbac_resource = 'orders'
@@ -1665,8 +1706,6 @@ class AcceptOrderView(APIView):
     rbac_actions = {'POST': 'change'}
 
     def post(self, request, order_id):
-        if not has_rbac_permission(request.user, 'designs', 'change'):
-            raise PermissionDenied('No tienes permiso para actualizar los diseños asociados al pedido.')
         craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
         with transaction.atomic():
             order = get_object_or_404(
@@ -1675,10 +1714,13 @@ class AcceptOrderView(APIView):
                 craftswoman__isnull=True,
                 status=Order.Status.PENDING,
             )
+            items = list(order.items.select_related('product__custom_design'))
+            if any(item.product.custom_design_id for item in items) and not has_rbac_permission(request.user, 'designs', 'change'):
+                raise PermissionDenied('Este pedido incluye un diseño personalizado y necesitas permiso para gestionarlo.')
             order.craftswoman = craftswoman
             order.status = Order.Status.ACCEPTED
             order.save(update_fields=('craftswoman', 'status', 'updated_at'))
-            for item in order.items.select_related('product__custom_design'):
+            for item in items:
                 design = getattr(item.product, 'custom_design', None)
                 if design:
                     design.craftswoman = craftswoman
