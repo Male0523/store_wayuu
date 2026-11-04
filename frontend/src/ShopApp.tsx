@@ -1041,12 +1041,17 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
       })
       setNavigationItems((current) => [...current, created].sort((a, b) => a.order - b.order))
       form.reset()
+      setNewNavigationRoute('customer.orders')
+      setNewNavigationRoles(['customer'])
+      setNewNavigationResource('')
+      setNewNavigationAction('')
       setFeedback('Elemento de menú creado y guardado.')
     } catch (saveError) { setError(errorMessage(saveError)) } finally { setSaving(false) }
   }
 
   async function toggleNavigationItem(item: RBACNavigationItem, active: boolean) {
     if (!canChangeNavigation) return
+    if (!active && !window.confirm(`Al ocultar “${item.label}”, dejará de aparecer para todos los roles asignados. No se borrarán sus permisos. ¿Deseas continuar?`)) return
     setSaving(true)
     setError('')
     try {
