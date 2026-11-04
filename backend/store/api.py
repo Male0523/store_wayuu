@@ -209,6 +209,7 @@ class OrderSerializer(serializers.ModelSerializer):
     total = serializers.DecimalField(max_digits=14, decimal_places=0, read_only=True)
     status_label = serializers.CharField(source='get_status_display', read_only=True)
     craftswoman = CraftswomanSummarySerializer(read_only=True)
+    customer_id = serializers.IntegerField(read_only=True)
     customer_name = serializers.CharField(source='customer.name', read_only=True)
     customer_username = serializers.SerializerMethodField()
 
@@ -221,7 +222,7 @@ class OrderSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'status', 'status_label', 'payment_method', 'shipping_address',
             'notes', 'created_at', 'updated_at', 'items', 'total', 'craftswoman',
-            'customer_name', 'customer_username',
+            'customer_id', 'customer_name', 'customer_username',
         )
 
 
@@ -1548,14 +1549,25 @@ class AdminOrderListView(PaginatedAPIView):
             if not craftswoman_id.isdigit():
                 raise serializers.ValidationError({'craftswoman_id': 'Selecciona una tejedora válida.'})
             orders = orders.filter(craftswoman_id=int(craftswoman_id))
+        customer_id = request.query_params.get('customer_id', '').strip()
+        if customer_id:
+            if not customer_id.isdigit():
+                raise serializers.ValidationError({'customer_id': 'Selecciona un cliente válido.'})
+            orders = orders.filter(customer_id=int(customer_id))
         search = request.query_params.get('search', '').strip()
         if search:
-            orders = orders.filter(
+            search_filter = (
                 models.Q(customer__name__icontains=search)
+                | models.Q(customer__email__icontains=search)
                 | models.Q(customer__user__username__icontains=search)
+                | models.Q(customer__user__first_name__icontains=search)
+                | models.Q(customer__user__last_name__icontains=search)
                 | models.Q(craftswoman__name__icontains=search)
                 | models.Q(items__product__name__icontains=search)
-            ).distinct()
+            )
+            if search.isdigit():
+                search_filter |= models.Q(pk=int(search))
+            orders = orders.filter(search_filter).distinct()
         return self.get_paginated_response(OrderSerializer(self.paginate_queryset(orders), many=True).data)
 
 
@@ -1698,8 +1710,13 @@ class CraftswomanDashboardView(APIView):
         designs = craftswoman.custom_designs.select_related('customer') if has_rbac_permission(request.user, 'designs', 'view') else CustomDesign.objects.none()
         return Response({
             'active': craftswoman.active,
+            'craftswoman': CraftswomanSummarySerializer(craftswoman).data,
             'available_orders': OrderSerializer(available, many=True).data,
             'orders': OrderSerializer(assigned, many=True).data,
+            'order_counts': {
+                'available': available.count(),
+                'assigned': assigned.count(),
+            },
             'designs': CustomDesignSerializer(designs, many=True).data,
         })
 

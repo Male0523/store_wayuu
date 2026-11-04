@@ -104,6 +104,7 @@ export interface OrderItem {
 
 export interface Order {
   id: number
+  customer_id: number
   customer_name?: string
   customer_username?: string
   status: string
@@ -129,8 +130,13 @@ export interface PublicCraftswoman extends CraftswomanSummary {}
 
 export interface CraftswomanDashboard {
   active: boolean
+  craftswoman: CraftswomanSummary
   available_orders: Order[]
   orders: Order[]
+  order_counts: {
+    available: number
+    assigned: number
+  }
   designs: CustomDesign[]
 }
 

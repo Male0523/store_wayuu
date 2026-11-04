@@ -44,24 +44,42 @@ function AccessGate({ user, onLogin }: {
 	if (user) {
 		const destination = roleRoutes.find((route) => route.role === user.role)
 		return (
-			<section className="access-panel" aria-live="polite">
-				<h1>Esta vista no está disponible para tu cuenta</h1>
-				<p>La sesión actual no tiene el rol requerido. Los permisos reales se validan en Django.</p>
-				{destination && <a className="primary-link" href={destination.path}>{destination.label}</a>}
+			<section className="access-page">
+				<div className="access-story">
+					<p className="access-kicker">WAYUUWAA · TEJIDO CON ORIGEN</p>
+					<div className="access-weave" aria-hidden="true"><span /><span /><span /><span /><span /></div>
+					<p className="access-story-note">Cada pieza guarda una historia. Cada acceso cuida el trabajo de quienes la hacen posible.</p>
+				</div>
+				<div className="access-card" aria-live="polite">
+					<p className="access-card-kicker">ACCESO A LA PLATAFORMA</p>
+					<h1>Esta vista no está disponible para tu cuenta.</h1>
+					<p>Tu sesión está activa, pero corresponde a otro perfil. Los permisos se validan de forma segura en Django.</p>
+					{destination && <a className="access-submit" href={destination.path}>Ir a {destination.label}</a>}
+				</div>
 			</section>
 		)
 	}
 
 	return (
-		<section className="access-panel">
-			<h1>Inicia sesión para continuar</h1>
-			<p>El acceso se consulta en Django. Esta pantalla no asigna ni permite cambiar roles.</p>
-			<form className="access-form" onSubmit={submit}>
-				<label>Usuario<input name="username" autoComplete="username" required /></label>
-				<label>Contraseña<input name="password" type="password" autoComplete="current-password" required /></label>
-				{error && <p className="form-error" role="alert">{error}</p>}
-				<button className="primary-link" type="submit" disabled={busy}>{busy ? 'Validando…' : 'Iniciar sesión'}</button>
-			</form>
+		<section className="access-page">
+			<div className="access-story">
+				<p className="access-kicker">WAYUUWAA · TEJIDO CON ORIGEN</p>
+				<div className="access-weave" aria-hidden="true"><span /><span /><span /><span /><span /></div>
+				<p className="access-story-note">Una tienda construida alrededor del oficio, la memoria y las manos de las tejedoras Wayúu.</p>
+			</div>
+			<div className="access-card">
+				<a className="access-back" href="/">Volver a la tienda</a>
+				<p className="access-card-kicker">BIENVENIDA DE NUEVO</p>
+				<h1>Tu espacio en Wayúu.</h1>
+				<p>Inicia sesión para continuar con tu cuenta y acceder a las funciones que corresponden a tu perfil.</p>
+				<form className="access-form" onSubmit={submit}>
+					<label>Usuario<input name="username" autoComplete="username" placeholder="Escribe tu usuario" required /></label>
+					<label>Contraseña<input name="password" type="password" autoComplete="current-password" placeholder="Tu contraseña" required /></label>
+					{error && <p className="form-error" role="alert">{error}</p>}
+					<button className="access-submit" type="submit" disabled={busy}>{busy ? 'Validando acceso…' : 'Iniciar sesión'}</button>
+				</form>
+				<p className="access-security-note">Acceso protegido · La plataforma valida tu identidad y tus permisos.</p>
+			</div>
 		</section>
 	)
 }
