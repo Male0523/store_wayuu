@@ -5,6 +5,7 @@ from datetime import timedelta
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from django.contrib import admin as django_admin
 from django.contrib.auth.models import Permission, User
@@ -968,7 +969,8 @@ class StoreAPITests(TestCase):
         )
         self.assertEqual(UserRole.objects.get(user=candidate).role.code, AccessRole.Code.CUSTOMER)
 
-    def test_seed_rbac_users_dry_run_create_profiles_and_remain_idempotent(self):
+    @patch('store.management.commands.seed_rbac_test_users.Command.assert_local_database')
+    def test_seed_rbac_users_dry_run_create_profiles_and_remain_idempotent(self, _database_guard):
         usernames = (
             'maleja.superadmin', 'oscar.admin', 'matthew.admin',
             'dayana.craftswoman', 'thania.craftswoman', 'zharik.craftswoman',
