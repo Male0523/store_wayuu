@@ -1746,10 +1746,10 @@ class CraftswomanOrderStatusView(APIView):
     }
 
     def patch(self, request, order_id):
-        if not has_rbac_permission(request.user, 'designs', 'change'):
-            raise PermissionDenied('No tienes permiso para actualizar los diseños asociados al pedido.')
         craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
         order = get_object_or_404(Order, id=order_id, craftswoman=craftswoman)
+        if order.items.filter(product__custom_design__isnull=False).exists() and not has_rbac_permission(request.user, 'designs', 'change'):
+            raise PermissionDenied('Este pedido contiene un diseño personalizado y necesitas permiso para gestionarlo.')
         serializer = StatusInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         new_status = serializer.validated_data['status']
