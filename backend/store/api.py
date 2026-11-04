@@ -429,18 +429,25 @@ class SuperadminUserWriteSerializer(serializers.Serializer):
         return attrs
 
 
+ALL_NAVIGATION_ROLES = {
+    AccessRole.Code.SUPERADMIN,
+    AccessRole.Code.ADMIN,
+    AccessRole.Code.CRAFTSWOMAN,
+    AccessRole.Code.CUSTOMER,
+}
+
 NAVIGATION_ROUTE_RULES = {
-    'customer.orders': {'roles': {AccessRole.Code.CUSTOMER}, 'permissions': (('orders', 'view'),)},
-    'customer.designs': {'roles': {AccessRole.Code.CUSTOMER}, 'permissions': (('designs', 'view'),)},
-    'customer.profile': {'roles': {AccessRole.Code.CUSTOMER}, 'permissions': (('customers', 'view'),)},
-    'craftswoman.dashboard': {'roles': {AccessRole.Code.CRAFTSWOMAN}, 'permissions': (('products', 'view'), ('orders', 'view'))},
-    'craftswoman.products': {'roles': {AccessRole.Code.CRAFTSWOMAN}, 'permissions': (('products', 'view'),)},
-    'craftswoman.inventory': {'roles': {AccessRole.Code.CRAFTSWOMAN}, 'permissions': (('products', 'view'),)},
-    'craftswoman.orders': {'roles': {AccessRole.Code.CRAFTSWOMAN}, 'permissions': (('orders', 'view'),)},
-    'admin.dashboard': {'roles': {AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN}, 'permissions': (('products', 'view'), ('orders', 'view'))},
-    'admin.products': {'roles': {AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN}, 'permissions': (('products', 'view'),)},
-    'admin.orders': {'roles': {AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN}, 'permissions': (('orders', 'view'),)},
-    'admin.categories': {'roles': {AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN}, 'permissions': (('categories', 'view'),)},
+    'customer.orders': {'roles': ALL_NAVIGATION_ROLES, 'permissions': (('orders', 'view'),)},
+    'customer.designs': {'roles': ALL_NAVIGATION_ROLES, 'permissions': (('designs', 'view'),)},
+    'customer.profile': {'roles': ALL_NAVIGATION_ROLES, 'permissions': (('customers', 'view'),)},
+    'craftswoman.dashboard': {'roles': ALL_NAVIGATION_ROLES, 'permissions': (('products', 'view'), ('orders', 'view'))},
+    'craftswoman.products': {'roles': ALL_NAVIGATION_ROLES, 'permissions': (('products', 'view'),)},
+    'craftswoman.inventory': {'roles': ALL_NAVIGATION_ROLES, 'permissions': (('products', 'view'),)},
+    'craftswoman.orders': {'roles': ALL_NAVIGATION_ROLES, 'permissions': (('orders', 'view'),)},
+    'admin.dashboard': {'roles': ALL_NAVIGATION_ROLES, 'permissions': (('products', 'view'), ('orders', 'view'))},
+    'admin.products': {'roles': ALL_NAVIGATION_ROLES, 'permissions': (('products', 'view'),)},
+    'admin.orders': {'roles': ALL_NAVIGATION_ROLES, 'permissions': (('orders', 'view'),)},
+    'admin.categories': {'roles': ALL_NAVIGATION_ROLES, 'permissions': (('categories', 'view'),)},
 }
 class NavigationItemWriteSerializer(serializers.Serializer):
     label = serializers.CharField(max_length=80)
@@ -1214,7 +1221,7 @@ class RoleNavigationMenuView(APIView):
         items = NavigationItem.objects.filter(active=True, roles=role).select_related('permission__content_type').order_by('order', 'label')
         for item in items:
             rule = NAVIGATION_ROUTE_RULES.get(item.route_name)
-            if not rule or role.code not in rule['roles']:
+            if not rule:
                 continue
             if not all(has_rbac_permission(request.user, resource, action) for resource, action in rule['permissions']):
                 continue
