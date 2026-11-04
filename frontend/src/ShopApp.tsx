@@ -641,6 +641,7 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, products, ca
   const [activeSection, setActiveSection] = useState<'dashboard' | 'products' | 'inventory' | 'orders'>('dashboard')
   const [showProductForm, setShowProductForm] = useState(false)
   const canChangeOrders = Boolean(user && hasEffectivePermission(user, 'orders.change'))
+  const canAddProducts = Boolean(user && hasEffectivePermission(user, 'products.add'))
   const canChangeDesigns = Boolean(user && hasEffectivePermission(user, 'designs.change'))
   const accountName = resolveUserDisplayName(user)
   const published = products.filter((product) => product.active).length
