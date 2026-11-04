@@ -1189,7 +1189,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
     : [['roles', 'Permisos por rol']]
 
   return <section className="rbac-panel" aria-labelledby="rbac-heading">
-    <div className="rbac-hero"><div><p className="eyebrow">SEGURIDAD DE LA TIENDA</p><h2 id="rbac-heading">Roles y permisos</h2><p>{currentUser.role === 'superadmin' ? 'Administra qué puede consultar y modificar cada tipo de cuenta.' : 'Consulta los permisos que el superadministrador ha autorizado para esta cuenta de administración.'}</p></div><div className="rbac-total"><strong>{catalog.length}</strong><span>permisos disponibles</span></div></div>
+    <div className="rbac-hero"><div><p className="eyebrow">SEGURIDAD DE LA TIENDA</p><h2 id="rbac-heading">Roles y permisos</h2><p>{currentUser.role === 'superadmin' ? 'Administra qué puede consultar y modificar cada tipo de cuenta.' : 'Consulta los permisos que el superadministrador ha autorizado para esta cuenta de administración.'}</p></div><div className="rbac-total"><strong>{currentUser.role === 'superadmin' ? catalog.length : (rolePermissions?.permissions.length ?? 0)}</strong><span>{currentUser.role === 'superadmin' ? 'permisos disponibles' : 'permisos en la matriz'}</span></div></div>
     <nav className="rbac-tabs" aria-label="Secciones de administración de acceso">
       {availableSections.map(([section, label]) => <button type="button" key={section} className={activeSection === section ? 'active' : ''} onClick={() => setActiveSection(section)}>{label}</button>)}
     </nav>
