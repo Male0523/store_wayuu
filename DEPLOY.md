@@ -1,80 +1,76 @@
-# Despliegue de Wayúwaa en Render
+# Publicación de Wayuuwaa en Render
 
-Esta rama (codex/render-deploy-wayuuwaa) prepara el frontend React/Vite, el backend Django y PostgreSQL en Render. El despliegue conserva la lógica de la tienda y no modifica el RBAC.
+Este documento corresponde a los servicios existentes del proyecto. No aplicar el `render.yaml` actual como Blueprint sobre esta infraestructura: ese archivo define nombres y una base PostgreSQL diferentes, lo que podría crear recursos duplicados.
 
-## 1. Recursos que crea el Blueprint
+## 1. Backend existente
 
-El archivo render.yaml define:
+Servicio: `wayuu-store-backend`  
+Repositorio: `Male0523/store_wayuu`  
+Rama: `main`  
+Root Directory: `backend`  
+URL: https://wayuu-store-backend.onrender.com
 
-| Recurso | Nombre | Configuración |
-|---|---|---|
-| Frontend | wayuuwaa-frontend | Sitio estático React/Vite |
-| Backend | wayuuwaa-backend | Django + Gunicorn |
-| Base de datos | wayuuwaa-db | PostgreSQL |
+Configuración:
 
-Las URLs previstas son:
+- Build Command: `pip install -r requirements.txt && python manage.py collectstatic --noinput`
+- Start Command: `python manage.py migrate --noinput && gunicorn config.wsgi --log-file - --bind 0.0.0.0:$PORT`
+- Auto-Deploy: On Commit
 
-- Frontend: https://wayuuwaa-frontend.onrender.com
-- API: https://wayuuwaa-backend.onrender.com/api/v1
+Variables requeridas:
 
-Render asigna el subdominio .onrender.com a cada servicio. Si el nombre no está disponible y Render asigna otro, hay que actualizar CORS_ALLOWED_ORIGINS, CSRF_TRUSTED_ORIGINS y VITE_API_BASE_URL con las URLs reales antes de probar el inicio de sesión.
+- `DJANGO_ENV=production`
+- `DJANGO_DEBUG=False`
+- `DJANGO_SECRET_KEY`: valor secreto configurado en Render.
+- `DATABASE_URL`: conexión PostgreSQL de Render.
+- `ALLOWED_HOSTS=wayuu-store-backend.onrender.com`
+- `CORS_ALLOWED_ORIGINS=https://wayuu-store-frontend.onrender.com`
+- `CSRF_TRUSTED_ORIGINS=https://wayuu-store-frontend.onrender.com`
 
-## 2. Crear los servicios desde Render
+El comando de inicio aplica las migraciones antes de iniciar Gunicorn. No ejecutes `migrate` contra otra base de datos por accidente.
 
-1. Abre https://dashboard.render.com/.
-2. Selecciona **New → Blueprint**.
-3. Conecta el repositorio Male0523/store_wayuu.
-4. Selecciona la rama codex/render-deploy-wayuuwaa.
-5. Comprueba que el archivo Blueprint sea render.yaml.
-6. Revisa los tres recursos y sus planes antes de confirmar **Apply**.
-7. Espera a que el backend y el frontend terminen su primer despliegue.
+## 2. Frontend React/Vite
 
-No selecciones ni conectes la rama de trabajo original para este despliegue. No introduzcas contraseñas ni claves dentro de este archivo.
+Comprueba si ya existe el Static Site `wayuu-store-frontend`. Si no existe, créalo desde **New → Static Site** con:
 
-### Variables configuradas por el Blueprint
+- Repositorio: `Male0523/store_wayuu`
+- Rama: `main`
+- Root Directory: `frontend`
+- Build Command: `npm ci && npm run build`
+- Publish Directory: `dist`
+- Auto-Deploy: On Commit
 
-Backend:
+El archivo versionado `frontend/.env.production` define:
 
-- DJANGO_SECRET_KEY: generada por Render.
-- DJANGO_DEBUG=False.
-- DJANGO_ENV=production.
-- DATABASE_URL: conexión interna a PostgreSQL.
-- CORS y CSRF: origen exacto del frontend de Render.
+```env
+VITE_API_BASE_URL=https://wayuu-store-backend.onrender.com/api/v1
+```
 
-Frontend:
+Vite lo carga al ejecutar el build de producción. Si se define `VITE_API_BASE_URL` directamente en Render, ese valor prevalece y debe coincidir con la URL anterior.
 
-- VITE_API_BASE_URL: URL pública de la API.
+El dominio público esperado para el Static Site es https://wayuu-store-frontend.onrender.com. Confirma la URL que Render asigne al crear el servicio y mantén el mismo origen en las variables CORS y CSRF del backend.
 
-El comando de inicio del backend ejecuta migrate --noinput antes de Gunicorn. Así se crean/actualizan las tablas antes de iniciar la API. No se cargan fixtures automáticamente en cada despliegue.
+## 3. Importar los datos locales una sola vez
 
-## 3. Importar los datos de demostración
+El respaldo final debe permanecer fuera del repositorio:
 
-El archivo exportado desde SQLite debe permanecer fuera del repositorio:
+`/workspaces/wayuuwaa-data-final.json`
 
-/workspaces/wayuuwaa-data-pre-render.json
+No subas este JSON ni una copia de SQLite a GitHub: contienen datos de usuarios y hashes de contraseñas.
 
-No lo subas a GitHub: contiene cuentas y hashes de contraseñas. La copia SQLite y el JSON deben mantenerse privados.
+El comando `import_render_demo_data`:
 
-### Por qué existe un comando de importación especial
+- Solo permite PostgreSQL con `DJANGO_ENV=production`.
+- Rechaza archivos de fixture dentro del repositorio.
+- Ejecuta las migraciones.
+- Se niega a importar si ya hay datos de negocio en la base destino.
+- Sustituye en una transacción los registros iniciales de roles, asignaciones, permisos y navegación.
+- Verifica el respaldo final: 13 usuarios, 4 roles, 13 asignaciones, 6 tejedoras, 4 clientes, 1 categoría, 8 productos, 1 pedido, 3 detalles de pedido, 4 carritos, 31 permisos de rol, 16 elementos de navegación y 37 eventos de auditoría.
 
-Las migraciones de Django crean registros iniciales de roles, permisos y navegación. Cargar directamente el JSON encima de esos registros podría provocar duplicados. El comando import_render_demo_data:
+Antes de importar, confirma en Render que se está usando la base PostgreSQL correcta y que no hay usuarios, productos, pedidos u otros datos de negocio que deban conservarse. El comando está diseñado para una base destino vacía; no lo ejecutes sobre una base poblada.
 
-- Solo funciona si DJANGO_ENV=production y la conexión es PostgreSQL.
-- Comprueba que el fixture esté fuera del repositorio.
-- Se niega a importar si encuentra datos de negocio preexistentes.
-- Sustituye únicamente los registros iniciales de RBAC creados por las migraciones.
-- Carga el fixture dentro de una transacción; si falla, revierte los cambios.
-- Verifica los conteos del respaldo: 13 usuarios, 4 roles, 13 asignaciones, 6 tejedoras, 4 clientes, 8 productos, 1 pedido, 3 detalles, 2 carritos, 31 permisos, 16 elementos de navegación y 36 eventos de auditoría. Si algún conteo no coincide, revierte la importación.
+Para importar desde Codespaces, abre una terminal:
 
-### Ejecutar la importación desde Codespaces
-
-Render Free no ofrece Shell/SSH para el servicio gratuito. Para importar una sola vez, se usa la conexión externa de PostgreSQL desde Codespaces.
-
-1. En Render, abre el recurso PostgreSQL wayuuwaa-db.
-2. Busca **Connect** y copia la **External Database URL**. No uses la URL interna en Codespaces.
-3. En Codespaces, abre una terminal y ejecuta:
-
-~~~bash
+```bash
 cd /workspaces/store_wayuu/backend
 source ../.venv/bin/activate
 
@@ -84,41 +80,33 @@ export DATABASE_URL
 export DJANGO_ENV=production
 export DJANGO_DEBUG=False
 
-python manage.py import_render_demo_data --fixture /workspaces/wayuuwaa-data-pre-render.json
+python manage.py import_render_demo_data --fixture /workspaces/wayuuwaa-data-final.json
 
 unset DATABASE_URL DJANGO_ENV DJANGO_DEBUG
-~~~
+```
 
-No pegues la URL en el chat, en un archivo del repositorio ni en una captura. El comando necesita que backend/.env tenga DJANGO_SECRET_KEY configurada para cargar los ajustes de Django; no muestres ese archivo.
+Usa la **External Database URL** del recurso PostgreSQL de Render desde Codespaces. No la compartas por chat, no la guardes en el repositorio y no la pegues en capturas. El entorno local debe tener una `DJANGO_SECRET_KEY` disponible para que Django cargue sus ajustes.
 
-Si el comando termina correctamente, informa los conteos y prueba el inicio de sesión con las cuentas de demostración. No ejecutes el comando una segunda vez sobre una base ya poblada: está diseñado para una importación inicial en una base vacía.
+Si la importación informa que la base ya contiene datos, detente. No borres tablas ni recrees la base: primero revisa qué datos hay y decide cómo conservarlos.
 
-## 4. Verificaciones funcionales después de importar
+## 4. Comprobaciones tras desplegar
 
-Realiza estas pruebas en la URL pública:
+API: abre https://wayuu-store-backend.onrender.com/api/v1/ y comprueba que responda con el estado de salud.
 
-1. Iniciar sesión como superadministrador y comprobar roles, permisos y menú dinámico.
-2. Iniciar sesión como administrador de tienda y comprobar las funciones comerciales autorizadas.
-3. Iniciar sesión como tejedora y comprobar que solo ve sus productos y pedidos relacionados.
-4. Iniciar sesión como cliente y comprobar catálogo, favoritos, carrito, pedidos y cancelación permitida.
-5. Comprobar que las peticiones de API no devuelvan errores CORS/CSRF.
-6. Crear un registro de prueba y comprobar que queda guardado al recargar.
+Frontend: abre https://wayuu-store-frontend.onrender.com y confirma que carga la aplicación.
 
-No cambies las reglas RBAC para solucionar un problema de despliegue: primero revisa logs, variables de entorno, cookies, CORS, CSRF y conexión a PostgreSQL.
+Después prueba:
 
-## 5. Imágenes y archivos
+1. Inicio y cierre de sesión para superadministrador, administrador de tienda, tejedora y cliente.
+2. Catálogo, detalle de producto y favoritos.
+3. Persistencia del carrito al recargar.
+4. Creación, consulta y estados de pedidos.
+5. Productos y pedidos propios de las tejedoras.
+6. Menú dinámico y protección real de permisos en el backend.
+7. Ausencia de errores CORS y CSRF en la consola del navegador.
 
-La revisión previa no encontró archivos dentro de backend/media. Los archivos locales de un servicio web gratuito de Render son efímeros; no guardes allí imágenes que deban persistir. Las imágenes que estén referenciadas mediante URLs externas pueden seguir mostrándose si esas URLs continúan disponibles.
+Si el backend gratuito está inactivo, la primera solicitud puede tardar en despertar. Un error HTTP 503 persistente requiere revisar Events y Logs del servicio en Render.
 
-## 6. Límites del plan gratuito
+## 5. Persistencia y límites
 
-Esta publicación es una demo, no una tienda de producción:
-
-- Los servicios web gratuitos se duermen tras 15 minutos sin tráfico y pueden tardar alrededor de un minuto en despertar.
-- El sistema de archivos del backend gratuito es efímero.
-- PostgreSQL gratuito tiene límite de 1 GB y expira a los 30 días. Después hay un período de gracia de 14 días para actualizarlo antes de su eliminación.
-- No hay copias de seguridad administradas para PostgreSQL gratuito.
-
-Conserva la copia SQLite y el JSON fuera del repositorio. Antes de que venza PostgreSQL, exporta los datos o actualiza la base a un plan persistente.
-
-Documentación oficial: https://render.com/docs/free
+Los servicios gratuitos pueden suspenderse por inactividad y el almacenamiento local del servicio web es efímero. No guardes allí archivos que deban persistir. La base PostgreSQL gratuita tiene límites y vencimiento; conserva el respaldo fuera del repositorio y verifica la política vigente de Render antes de usarla como almacén permanente.
