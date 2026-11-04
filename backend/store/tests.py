@@ -2032,7 +2032,7 @@ class StoreAPITests(TestCase):
         self.client.force_login(superadmin)
         create = self.client.post('/api/v1/admin/rbac/navigation/', {
             'label': 'Mis pedidos',
-            'route_name': '/cliente/pedidos',
+            'route_name': 'customer.orders',
             'description': 'Consulta tus pedidos.',
             'role_codes': ['customer'],
             'permission_resource': 'orders',
@@ -2057,6 +2057,60 @@ class StoreAPITests(TestCase):
         delete = self.client.delete(f'/api/v1/admin/rbac/navigation/{item_id}/')
         self.assertEqual(delete.status_code, 204)
         self.assertFalse(NavigationItem.objects.filter(pk=item_id).exists())
+
+    def test_role_navigation_endpoint_filters_by_role_and_effective_permissions(self):
+        craftswoman = self.create_role_user('role-menu-craftswoman', AccessRole.Code.CRAFTSWOMAN)
+        role = AccessRole.objects.get(code=AccessRole.Code.CRAFTSWOMAN)
+        RolePermission.objects.create(role=role, permission=permission_for('products', 'view'))
+        visible_item = NavigationItem.objects.create(
+            label='Mis tejidos',
+            route_name='craftswoman.products',
+            active=True,
+        )
+        visible_item.roles.add(role)
+        inactive_item = NavigationItem.objects.create(
+            label='Panel oculto',
+            route_name='craftswoman.dashboard',
+            active=False,
+        )
+        inactive_item.roles.add(role)
+        wrong_role_item = NavigationItem.objects.create(
+            label='Pedidos de cliente',
+            route_name='customer.orders',
+            active=True,
+        )
+        wrong_role_item.roles.add(role)
+
+        self.client.force_login(craftswoman)
+        response = self.client.get('/api/v1/navigation/menu/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item['route_name'] for item in response.json()], ['craftswoman.products'])
+
+        UserPermissionGrant.objects.create(
+            user=craftswoman,
+            permission=permission_for('products', 'view'),
+            effect=UserPermissionGrant.Effect.DENY,
+        )
+        denied = self.client.get('/api/v1/navigation/menu/')
+        self.assertEqual(denied.status_code, 200)
+        self.assertEqual(denied.json(), [])
+
+    def test_navigation_route_allowlist_rejects_arbitrary_routes_and_wrong_roles(self):
+        superadmin = self.create_role_user('role-menu-superadmin', AccessRole.Code.SUPERADMIN)
+        self.client.force_login(superadmin)
+        invalid_route = self.client.post('/api/v1/admin/rbac/navigation/', {
+            'label': 'Ruta libre',
+            'route_name': '/admin/secreto',
+            'role_codes': ['admin'],
+        }, content_type='application/json')
+        self.assertEqual(invalid_route.status_code, 400)
+
+        invalid_role = self.client.post('/api/v1/admin/rbac/navigation/', {
+            'label': 'Pantalla de cliente',
+            'route_name': 'customer.orders',
+            'role_codes': ['admin'],
+        }, content_type='application/json')
+        self.assertEqual(invalid_role.status_code, 400)
 
     def test_non_superadmin_cannot_manage_navigation(self):
         admin_user = self.create_role_user('rbac-navigation-admin', AccessRole.Code.ADMIN)
