@@ -748,3 +748,7 @@
 .rbac-role-heading-actions { display:flex; align-items:center; justify-content:flex-end; gap:10px; flex-wrap:wrap; }
 .rbac-role-heading-actions .button { white-space:nowrap; }
 @media (max-width:760px) { .rbac-role-heading-actions { width:100%; justify-content:stretch; } .rbac-role-heading-actions .button, .rbac-role-heading-actions select { flex:1 1 100%; } }
+
+/* Botón principal del formulario de menú dinámico: contraste explícito */
+.rbac-panel .rbac-user-form > button.button-dark { display:inline-flex !important; visibility:visible !important; opacity:1; min-height:44px; padding:0 20px; background:#51252a !important; color:#fff !important; border:1px solid #51252a !important; font-weight:700; }
+.rbac-panel .rbac-user-form > button.button-dark:hover:not(:disabled) { background:#71363d !important; color:#fff !important; }
