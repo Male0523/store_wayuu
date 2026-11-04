@@ -169,12 +169,18 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
     if (user?.role !== 'customer') {
       return () => { active = false }
     }
-    api.profile().then((profile) => {
-      if (!active) return
-      setCheckoutAddress(profile.address ?? '')
-      setCheckoutCity(profile.city ?? '')
-    }).catch(() => undefined)
-    api.cart().then((nextCart) => { if (active) setCart(nextCart) }).catch(() => { if (active) setCart(null) })
+    if (hasEffectivePermission(user, 'customers.view')) {
+      api.profile().then((profile) => {
+        if (!active) return
+        setCheckoutAddress(profile.address ?? '')
+        setCheckoutCity(profile.city ?? '')
+      }).catch(() => undefined)
+    }
+    if (hasEffectivePermission(user, 'cart.view')) {
+      api.cart().then((nextCart) => { if (active) setCart(nextCart) }).catch(() => { if (active) setCart(null) })
+    } else {
+      setCart(null)
+    }
     return () => { active = false }
   }, [user])
 
