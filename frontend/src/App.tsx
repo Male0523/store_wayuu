@@ -73,8 +73,8 @@ function RolePage({ user, role, onLogin, children, connected = false }: {
 }
 
 export default function App() {
-	const standaloneStorefront = window.location.pathname === '/' || window.location.pathname === '/tienda'
 	const [path, setPath] = useState(window.location.pathname)
+	const standaloneStorefront = path === '/' || path === '/tienda'
 	const [logoutError, setLogoutError] = useState('')
 	const { user, loaded: sessionLoaded, sessionError, login: loginUser, logout: logoutUser } = useUserSession()
 
