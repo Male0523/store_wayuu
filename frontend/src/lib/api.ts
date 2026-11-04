@@ -84,6 +84,7 @@ const json = (value: unknown): string => JSON.stringify(value)
 export const api = {
   health: () => request<{ status: string }>('/'),
   categories: () => request<Category[]>('/categories/'),
+  publicCraftswomen: () => request<CraftswomanSummary[]>('/craftswomen/public/'),
   products: (params: URLSearchParams) => request<Page<Product>>(`/products/?${params}`),
   product: (id: number) => request<Product>(`/products/${id}/`),
   me: () => request<{ user: SessionUser }>('/auth/me/'),
@@ -108,6 +109,7 @@ export const api = {
   checkout: (values: { address: string; city: string; payment_method: string; notes: string }) =>
     request<Order>('/checkout/', { method: 'POST', body: json(values) }),
   orders: () => request<Page<Order>>('/orders/'),
+  adminOrders: () => request<Page<Order>>('/admin/orders/'),
   designs: () => request<CustomDesign[]>('/designs/'),
   createDesign: (values: Record<string, string | number>) =>
     request('/designs/', { method: 'POST', body: json(values) }),
