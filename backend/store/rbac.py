@@ -422,12 +422,16 @@ def set_permission_delegation(actor, admin_user, resource, action, allowed):
                 permission=permission,
                 defaults={'granted_by': actor},
             )
+            # The RBAC evaluator also verifies Django's underlying permission
+            # for delegated administrators; persist both parts of the grant.
+            admin_user.user_permissions.add(permission)
         else:
             PermissionDelegation.objects.filter(admin=admin_user, permission=permission).delete()
             UserPermissionGrant.objects.filter(
                 granted_by=admin_user,
                 permission=permission,
             ).delete()
+            admin_user.user_permissions.remove(permission)
         record_audit(
             actor,
             'set_permission_delegation',
