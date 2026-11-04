@@ -1184,10 +1184,14 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
     } catch (saveError) { setError(errorMessage(saveError)) } finally { setSaving(false) }
   }
 
+  const availableSections: [RBACSection, string][] = currentUser.role === 'superadmin'
+    ? [['roles', 'Permisos por rol'], ['users', 'Cuentas'], ['navigation', 'Menú dinámico'], ['audit', 'Auditoría']]
+    : [['roles', 'Permisos por rol']]
+
   return <section className="rbac-panel" aria-labelledby="rbac-heading">
-    <div className="rbac-hero"><div><p className="eyebrow">SEGURIDAD DE LA TIENDA</p><h2 id="rbac-heading">Roles y permisos</h2><p>Administra qué puede consultar y modificar cada tipo de cuenta.</p></div><div className="rbac-total"><strong>{catalog.length}</strong><span>permisos disponibles</span></div></div>
+    <div className="rbac-hero"><div><p className="eyebrow">SEGURIDAD DE LA TIENDA</p><h2 id="rbac-heading">Roles y permisos</h2><p>{currentUser.role === 'superadmin' ? 'Administra qué puede consultar y modificar cada tipo de cuenta.' : 'Consulta los permisos que el superadministrador ha autorizado para esta cuenta de administración.'}</p></div><div className="rbac-total"><strong>{catalog.length}</strong><span>permisos disponibles</span></div></div>
     <nav className="rbac-tabs" aria-label="Secciones de administración de acceso">
-      {([['roles', 'Permisos por rol'], ['users', 'Cuentas'], ['navigation', 'Menú dinámico'], ['audit', 'Auditoría']] as [RBACSection, string][]).map(([section, label]) => <button type="button" key={section} className={activeSection === section ? 'active' : ''} onClick={() => setActiveSection(section)}>{label}</button>)}
+      {availableSections.map(([section, label]) => <button type="button" key={section} className={activeSection === section ? 'active' : ''} onClick={() => setActiveSection(section)}>{label}</button>)}
     </nav>
     {(canViewRoles || canViewNavigation) && <section className="rbac-relationship-guide" aria-label="Cómo se relacionan los permisos y el menú">
       {canViewRoles && <article className="rbac-relationship-card">
