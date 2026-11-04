@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from './lib/api'
 import { useUserSession } from './context/user-context'
-import type { AdminCategory, AdminProduct, AuditEvent, Cart, Category, CustomDesign, CraftswomanDashboard, Order, Product, RBACDelegation, RBACPermission, RBACRolePermissions, RBACUserPermissions, SessionUser, SuperadminUser, SuperadminUserInput, UserProfile } from './types'
+import type { AdminCategory, AdminProduct, AuditEvent, Cart, Category, CustomDesign, CraftswomanDashboard, Order, Product, RBACDelegation, RBACNavigationItem, RBACPermission, RBACRolePermissions, RBACUserPermissions, SessionUser, SuperadminUser, SuperadminUserInput, UserProfile } from './types'
 import './ShopApp.css'
 
 type Screen = 'shop' | 'orders' | 'craftswoman' | 'design' | 'admin'
