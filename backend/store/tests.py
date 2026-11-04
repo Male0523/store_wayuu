@@ -1875,6 +1875,7 @@ class StoreAPITests(TestCase):
             'allowed': True,
         }, content_type='application/json')
         self.assertEqual(delegated.status_code, 200)
+        self.assertTrue(admin.has_perm('store.view_product'))
         order_delegation = self.client.post(delegation_url, {
             'admin_user_id': admin.id,
             'resource': 'orders',
