@@ -1893,8 +1893,9 @@ class StoreAPITests(TestCase):
 
         dashboard = self.client.get('/api/v1/craftswoman/dashboard/')
         html_dashboard = self.client.get('/panel-tejedora/')
-        self.assertEqual(dashboard.status_code, 403)
-        self.assertEqual(html_dashboard.status_code, 403)
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertEqual(dashboard.json()['designs'], [])
+        self.assertEqual(html_dashboard.status_code, 200)
 
         UserPermissionGrant.objects.filter(user=craft_user).delete()
         UserPermissionGrant.objects.create(
@@ -2061,7 +2062,7 @@ class StoreAPITests(TestCase):
     def test_role_navigation_endpoint_filters_by_role_and_effective_permissions(self):
         craftswoman = self.create_role_user('role-menu-craftswoman', AccessRole.Code.CRAFTSWOMAN)
         role = AccessRole.objects.get(code=AccessRole.Code.CRAFTSWOMAN)
-        RolePermission.objects.create(role=role, permission=permission_for('products', 'view'))
+        RolePermission.objects.get_or_create(role=role, permission=permission_for('products', 'view'))
         visible_item = NavigationItem.objects.create(
             label='Mis tejidos',
             route_name='craftswoman.products',
