@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type ComponentType, type FormEvent, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { useUserSession } from './context/user-context'
 import type { SessionUser } from './types'
 
@@ -13,14 +13,6 @@ const roleRoutes: { path: string; label: string; role: Role }[] = [
 	{ path: '/admin', label: 'Administración', role: 'admin' },
 	{ path: '/superadmin', label: 'Superadministración', role: 'superadmin' },
 ]
-
-function DemoNotice() {
-	return (
-		<div className="demo-notice" role="note">
-			Interfaz original · datos demostrativos temporales; los cambios no se guardan en Django.
-		</div>
-	)
-}
 
 function AccessGate({ user, onLogin }: {
 	user: SessionUser | null
