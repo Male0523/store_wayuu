@@ -843,16 +843,16 @@
   background: repeating-linear-gradient(90deg, #6e3039 0 34px, #c49b78 34px 50px, #8b9a8a 50px 66px, #ead8c8 66px 82px);
   content: '';
 }
-.app-shell > main > .hero-copy { max-width: 490px; }
+.app-shell > main > .hero .hero-copy { max-width: 490px; }
 .app-shell > main > .hero h1 { max-width: 600px; font-size: clamp(48px, 5.2vw, 76px); line-height: .98; letter-spacing: -.035em; }
 .app-shell > main > .hero h1 em { color: #8a4b54; }
 .app-shell > main > .hero .eyebrow { color: #86545a; letter-spacing: .13em; }
 .app-shell > main > .hero-description { max-width: 390px; margin: 24px 0 29px; color: #6f5d59; font-size: 14px; line-height: 1.9; }
 .app-shell > main > .hero .button-dark { min-height: 50px; padding: 0 23px; border-radius: 2px; background: #5c252e; box-shadow: 0 8px 20px rgba(92,37,46,.12); }
 .app-shell > main > .hero .button-dark:hover:not(:disabled) { background: #793b44; }
-.app-shell > main > .hero-art { max-width: 650px; aspect-ratio: 1.12; padding: 12px; border: 1px solid rgba(121,82,78,.22); background: rgba(255,253,250,.6); box-shadow: 20px 20px 0 rgba(126,87,80,.09); }
-.app-shell > main > .hero-art > img { object-fit: cover; }
-.app-shell > main > .hero-art-caption { right: 12px; bottom: 12px; left: 12px; min-height: 54px; padding: 0 18px; background: rgba(70,35,39,.91); }
+.app-shell > main > .hero .hero-art { max-width: 650px; aspect-ratio: 1.12; padding: 12px; border: 1px solid rgba(121,82,78,.22); background: rgba(255,253,250,.6); box-shadow: 20px 20px 0 rgba(126,87,80,.09); }
+.app-shell > main > .hero .hero-art > img { object-fit: cover; }
+.app-shell > main > .hero .hero-art-caption { right: 12px; bottom: 12px; left: 12px; min-height: 54px; padding: 0 18px; background: rgba(70,35,39,.91); }
 .image-placeholder {
   position: relative;
   overflow: hidden;
@@ -950,7 +950,7 @@
 }
 @media (max-width: 680px) {
   .app-shell > main > .hero { grid-template-columns: 1fr; gap: 28px; padding: 48px 22px 44px; }
-  .app-shell > main > .hero-art { justify-self: stretch; max-width: none; aspect-ratio: 1.05; }
+  .app-shell > main > .hero .hero-art { justify-self: stretch; max-width: none; aspect-ratio: 1.05; }
   .app-shell > main > .collection { padding-top: 58px; padding-bottom: 56px; }
   .app-shell > main > .origin-band { grid-template-columns: 1fr; gap: 16px; padding: 30px 22px; }
   .app-shell .auth-dialog { padding: 38px 24px 27px; }
