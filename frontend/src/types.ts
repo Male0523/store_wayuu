@@ -104,6 +104,8 @@ export interface OrderItem {
 
 export interface Order {
   id: number
+  customer_name?: string
+  customer_username?: string
   status: string
   status_label: string
   payment_method: string
@@ -122,6 +124,8 @@ export interface Page<T> {
   previous: string | null
   results: T[]
 }
+
+export interface PublicCraftswoman extends CraftswomanSummary {}
 
 export interface CraftswomanDashboard {
   active: boolean
