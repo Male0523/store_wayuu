@@ -78,13 +78,18 @@ class CraftswomanSummarySerializer(serializers.ModelSerializer):
 class ProductSerializer(serializers.ModelSerializer):
     category = CategorySerializer(read_only=True)
     craftswoman = CraftswomanSummarySerializer(read_only=True)
+    is_custom_design = serializers.SerializerMethodField()
+
+    @staticmethod
+    def get_is_custom_design(product):
+        return bool(product.custom_design_id)
 
     class Meta:
         model = Product
         fields = (
             'id', 'sku', 'name', 'category', 'craftswoman', 'description', 'region',
             'color', 'size', 'production_time', 'price', 'stock', 'image_url',
-            'made_to_order', 'active', 'created_at', 'updated_at',
+            'made_to_order', 'active', 'is_custom_design', 'created_at', 'updated_at',
         )
 
 
@@ -1418,6 +1423,11 @@ class CartItemDetailView(APIView):
             id=product_id,
         )
         quantity = serializer.validated_data['quantity']
+        if product.custom_design_id and quantity != 1:
+            return Response(
+                {'detail': 'La cantidad del diseño personalizado ya está incluida en su precio. Puedes retirar el diseño del carrito, pero no multiplicarlo.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         _sync_legacy_session_cart(request, customer)
         if quantity > product.stock:
             return Response({'detail': 'No hay suficientes unidades disponibles.'}, status=status.HTTP_400_BAD_REQUEST)
