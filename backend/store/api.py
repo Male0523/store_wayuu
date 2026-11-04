@@ -419,9 +419,24 @@ class SuperadminUserWriteSerializer(serializers.Serializer):
         return attrs
 
 
+NAVIGATION_ROUTE_RULES = {
+    'customer.orders': {'roles': {AccessRole.Code.CUSTOMER}, 'permissions': (('orders', 'view'),)},
+    'customer.designs': {'roles': {AccessRole.Code.CUSTOMER}, 'permissions': (('designs', 'view'),)},
+    'customer.profile': {'roles': {AccessRole.Code.CUSTOMER}, 'permissions': (('customers', 'view'),)},
+    'craftswoman.dashboard': {'roles': {AccessRole.Code.CRAFTSWOMAN}, 'permissions': (('products', 'view'), ('orders', 'view'))},
+    'craftswoman.products': {'roles': {AccessRole.Code.CRAFTSWOMAN}, 'permissions': (('products', 'view'),)},
+    'craftswoman.inventory': {'roles': {AccessRole.Code.CRAFTSWOMAN}, 'permissions': (('products', 'view'),)},
+    'craftswoman.orders': {'roles': {AccessRole.Code.CRAFTSWOMAN}, 'permissions': (('orders', 'view'),)},
+    'admin.dashboard': {'roles': {AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN}, 'permissions': (('products', 'view'), ('orders', 'view'))},
+    'admin.products': {'roles': {AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN}, 'permissions': (('products', 'view'),)},
+    'admin.orders': {'roles': {AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN}, 'permissions': (('orders', 'view'),)},
+    'admin.categories': {'roles': {AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN}, 'permissions': (('categories', 'view'),)},
+    'admin.access': {'roles': {AccessRole.Code.SUPERADMIN}, 'permissions': (('roles', 'view'),)},
+    'superadmin.access': {'roles': {AccessRole.Code.SUPERADMIN}, 'permissions': (('roles', 'view'),)},
+}
 class NavigationItemWriteSerializer(serializers.Serializer):
     label = serializers.CharField(max_length=80)
-    route_name = serializers.CharField(max_length=120)
+    route_name = serializers.ChoiceField(choices=tuple((key, key) for key in NAVIGATION_ROUTE_RULES))
     anchor = serializers.CharField(max_length=80, required=False, allow_blank=True)
     description = serializers.CharField(max_length=220, required=False, allow_blank=True)
     role_codes = serializers.ListField(
@@ -450,6 +465,12 @@ class NavigationItemWriteSerializer(serializers.Serializer):
             raise serializers.ValidationError('El permiso seleccionado no existe.')
         if 'role_codes' in attrs and len(attrs['role_codes']) != len(set(attrs['role_codes'])):
             raise serializers.ValidationError({'role_codes': 'No repitas roles.'})
+        route_name = attrs.get('route_name')
+        role_codes = attrs.get('role_codes')
+        if route_name and role_codes is not None:
+            invalid_roles = set(role_codes) - NAVIGATION_ROUTE_RULES[route_name]['roles']
+            if invalid_roles:
+                raise serializers.ValidationError({'role_codes': 'La pantalla seleccionada no está disponible para uno o más roles elegidos.'})
         return attrs
 
 
@@ -1161,6 +1182,30 @@ class SuperadminNavigationDetailView(APIView):
         record_audit(request.user, 'delete_navigation_item', 'navigation', instance=item)
         item.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class RoleNavigationMenuView(APIView):
+    """Devuelve solo opciones permitidas para el rol y los permisos efectivos actuales."""
+    permission_classes = (IsAuthenticated, HasAssignedRole)
+
+    def get(self, request):
+        role = role_for_user(request.user)
+        if role is None:
+            return Response([])
+        visible = []
+        items = NavigationItem.objects.filter(active=True, roles=role).select_related('permission__content_type').order_by('order', 'label')
+        for item in items:
+            rule = NAVIGATION_ROUTE_RULES.get(item.route_name)
+            if not rule or role.code not in rule['roles']:
+                continue
+            if not all(has_rbac_permission(request.user, resource, action) for resource, action in rule['permissions']):
+                continue
+            if item.permission_id:
+                key = permission_key(item.permission)
+                if not key or not has_rbac_permission(request.user, *key):
+                    continue
+            visible.append(SuperadminNavigationView.serialize_item(item))
+        return Response(visible)
 
 
 class AdminCategoryListView(APIView):
