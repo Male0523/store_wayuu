@@ -2257,13 +2257,14 @@ class StoreAPITests(TestCase):
 
         self.client.force_login(admin)
         response = self.client.get(
-            f'/api/v1/admin/orders/?status=pending&craftswoman_id={craftswoman.id}&search=Cliente API'
+            f'/api/v1/admin/orders/?status=pending&craftswoman_id={craftswoman.id}&customer_id={self.customer.id}&search=Cliente API'
         )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['count'], 1)
         result = response.json()['results'][0]
         self.assertEqual(result['id'], order.id)
+        self.assertEqual(result['customer_id'], self.customer.id)
         self.assertEqual(result['customer_name'], 'Cliente API')
         self.assertEqual(result['craftswoman']['name'], 'Tejedora Filtro')
 
