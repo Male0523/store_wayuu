@@ -93,6 +93,32 @@ class Command(BaseCommand):
 
             call_command("loaddata", str(fixture_path), verbosity=1)
 
+            expected_counts = {
+                "usuarios": (User.objects.count(), 13),
+                "roles": (AccessRole.objects.count(), 4),
+                "asignaciones de rol": (UserRole.objects.count(), 13),
+                "tejedoras": (Craftswoman.objects.count(), 6),
+                "clientes": (Customer.objects.count(), 4),
+                "categorías": (Category.objects.count(), 1),
+                "productos": (Product.objects.count(), 8),
+                "pedidos": (Order.objects.count(), 1),
+                "detalles de pedido": (OrderItem.objects.count(), 3),
+                "carritos": (CustomerCartItem.objects.count(), 2),
+                "permisos de roles": (RolePermission.objects.count(), 31),
+                "elementos de navegación": (NavigationItem.objects.count(), 16),
+                "eventos de auditoría": (AuditEvent.objects.count(), 36),
+            }
+            mismatches = [
+                f"{name}: esperados {expected}, encontrados {actual}"
+                for name, (actual, expected) in expected_counts.items()
+                if actual != expected
+            ]
+            if mismatches:
+                raise CommandError(
+                    "La importación no coincide con el respaldo verificado; se revertirá: "
+                    + "; ".join(mismatches)
+                )
+
         self.stdout.write(self.style.SUCCESS("Importación completada correctamente."))
         self.stdout.write(f"Usuarios: {User.objects.count()}")
         self.stdout.write(f"Roles: {AccessRole.objects.count()}")
