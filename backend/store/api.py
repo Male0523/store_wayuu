@@ -1710,8 +1710,13 @@ class CraftswomanDashboardView(APIView):
         designs = craftswoman.custom_designs.select_related('customer') if has_rbac_permission(request.user, 'designs', 'view') else CustomDesign.objects.none()
         return Response({
             'active': craftswoman.active,
+            'craftswoman': CraftswomanSummarySerializer(craftswoman).data,
             'available_orders': OrderSerializer(available, many=True).data,
             'orders': OrderSerializer(assigned, many=True).data,
+            'order_counts': {
+                'available': available.count(),
+                'assigned': assigned.count(),
+            },
             'designs': CustomDesignSerializer(designs, many=True).data,
         })
 
