@@ -1675,6 +1675,18 @@ class AcceptOrderView(APIView):
                 craftswoman__isnull=True,
                 status=Order.Status.PENDING,
             )
+
+            # Los pedidos con diseños personalizados requieren permiso para modificarlos.
+            has_custom_design = order.items.filter(
+                product__custom_design__isnull=False,
+            ).exists()
+            if has_custom_design and not has_rbac_permission(
+                request.user, 'designs', 'change',
+            ):
+                raise PermissionDenied(
+                    'No tienes permiso para aceptar pedidos con diseños personalizados.'
+                )
+
             order.craftswoman = craftswoman
             order.status = Order.Status.ACCEPTED
             order.save(update_fields=('craftswoman', 'status', 'updated_at'))
