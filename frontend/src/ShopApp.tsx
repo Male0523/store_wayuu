@@ -115,7 +115,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
   const [designNotes, setDesignNotes] = useState('')
   const featuredProduct = products.find((product) => product.image_url) ?? products[0]
   const customPrice = ({ S: 100000, M: 120000, L: 145000, XL: 175000 }[designSize] ?? 120000) * designQuantity
-  const canRequestDesign = !user || hasEffectivePermission(user, 'designs.add')
+  const canRequestDesign = !user || (hasEffectivePermission(user, 'designs.add') && hasEffectivePermission(user, 'cart.add'))
 
   useEffect(() => {
     setProfileDraft(null)
