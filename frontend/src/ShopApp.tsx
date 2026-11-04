@@ -384,7 +384,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
         setCraftswomanProducts(ownProducts)
         setScreen('craftswoman')
       } else {
-        const visibleRoutes = roleNavigation.map((item) => item.route_name)
+        const visibleRoutes = configuredNavigation.map((item) => item.route_name)
         const requests = await Promise.all([
           visibleRoutes.includes('customer.orders') ? api.orders() : Promise.resolve({ results: [] as Order[] }),
           visibleRoutes.includes('customer.designs') ? api.designs() : Promise.resolve([] as CustomDesign[]),
