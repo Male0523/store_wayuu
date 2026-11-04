@@ -11,6 +11,7 @@ __pycache__/
 frontend/.env
 frontend/.env.*
 !frontend/.env.example
+!frontend/.env.production
 
 # Respaldos locales: nunca subir a GitHub
 STORE_WAYUU_*.zip
