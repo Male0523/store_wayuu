@@ -157,6 +157,7 @@ export const api = {
       method: 'PATCH', body: json({ role }),
     }),
   auditEvents: () => request<AuditEvent[]>('/admin/rbac/audit/'),
+  roleNavigation: () => request<RBACNavigationItem[]>('/navigation/menu/'),
   navigationItems: () => request<RBACNavigationItem[]>('/admin/rbac/navigation/'),
   createNavigationItem: (values: RBACNavigationInput) =>
     request<RBACNavigationItem>('/admin/rbac/navigation/', { method: 'POST', body: json(values) }),
