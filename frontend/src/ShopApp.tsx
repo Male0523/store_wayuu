@@ -962,7 +962,8 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   async function createNavigationItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!canAddNavigation) return
-    const values = new FormData(event.currentTarget)
+    const form = event.currentTarget
+    const values = new FormData(form)
     const roleCodes = values.getAll('role_codes').map(String) as SessionUser['role'][]
     setSaving(true)
     setError('')
@@ -979,7 +980,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
         active: true,
       })
       setNavigationItems((current) => [...current, created].sort((a, b) => a.order - b.order))
-      event.currentTarget.reset()
+      form.reset()
       setFeedback('Elemento de menú creado y guardado.')
     } catch (saveError) { setError(errorMessage(saveError)) } finally { setSaving(false) }
   }
