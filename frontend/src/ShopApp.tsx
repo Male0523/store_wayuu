@@ -796,13 +796,14 @@ function AdminAccountView({ user, isSuperadmin, navigationItems, orders, product
   const canAddCategories = hasEffectivePermission(user, 'categories.add')
   const canChangeCategories = hasEffectivePermission(user, 'categories.change')
   const accountName = resolveUserDisplayName(user)
+  const configuredAdminItems = navigationItems.filter((item) => item.route_name.startsWith('admin.')).map((item) => {
+    const id = item.route_name.split('.')[1] as 'dashboard' | 'products' | 'orders' | 'categories' | 'access'
+    const icon = id === 'dashboard' ? <LayoutDashboard size={17} /> : id === 'products' ? <ShoppingBag size={17} /> : id === 'orders' ? <ShoppingCart size={17} /> : id === 'access' ? <LockKeyhole size={17} /> : <Boxes size={17} />
+    return { id, label: item.label, icon }
+  })
   const navItems = [
-    ...navigationItems.filter((item) => item.route_name.startsWith('admin.') && item.route_name !== 'admin.access').map((item) => {
-      const id = item.route_name.split('.')[1] as 'dashboard' | 'products' | 'orders' | 'categories'
-      const icon = id === 'dashboard' ? <LayoutDashboard size={17} /> : id === 'products' ? <ShoppingBag size={17} /> : id === 'orders' ? <ShoppingCart size={17} /> : <Boxes size={17} />
-      return { id, label: item.label, icon }
-    }),
-    ...(isSuperadmin ? [{ id: 'access' as const, label: 'Roles y permisos', icon: <LockKeyhole size={17} /> }] : []),
+    ...configuredAdminItems,
+    ...(isSuperadmin && !configuredAdminItems.some((item) => item.id === 'access') ? [{ id: 'access' as const, label: 'Roles y permisos', icon: <LockKeyhole size={17} /> }] : []),
   ]
   const canOpenSection = (section: string) => navItems.some((item) => item.id === section)
   useEffect(() => {
@@ -845,7 +846,7 @@ function AdminAccountView({ user, isSuperadmin, navigationItems, orders, product
         </section>}
         {canOpenSection('orders') && activeSection === 'orders' && <section className="craftswoman-panel"><div className="craftswoman-panel-heading admin-orders-heading"><div><small>SEGUIMIENTO COMERCIAL</small><h1>Pedidos de clientes</h1><p>Consulta las compras registradas, identifica la tejedora asignada y actualiza su estado.</p></div><div className="admin-orders-heading-actions"><label className="admin-orders-filter">Filtrar por tejedora<select aria-label="Filtrar pedidos por tejedora" value={selectedCraftswomanId} onChange={(event) => setSelectedCraftswomanId(event.target.value)}><option value="all">Todas las tejedoras</option><option value="unassigned">Sin tejedora asignada</option>{craftswomanOptions.map((craftswoman) => <option key={craftswoman.id} value={String(craftswoman.id)}>{craftswoman.name}</option>)}</select></label><span>{filteredOrders.length} de {orders.length} pedidos</span></div></div>{canViewOrders ? orders.length ? filteredOrders.length ? <div className="orders-list">{filteredOrders.map((order) => <AdminOrderRow key={order.id} order={order} busy={busy} canChange={canChangeOrders} onStatus={onOrderStatus} />)}</div> : <p className="muted-copy">No hay pedidos para la tejedora seleccionada.</p> : <p className="muted-copy">Todavía no hay pedidos registrados.</p> : <p className="muted-copy">Tu rol no tiene permiso para consultar pedidos.</p>}</section>}
         {canOpenSection('categories') && activeSection === 'categories' && <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>ORGANIZACIÓN DEL CATÁLOGO</small><h1>Categorías</h1><p>Mantén las categorías disponibles para ordenar las piezas de la tienda.</p></div></div>{canAddCategories && <form className="admin-category-form" onSubmit={submitNewCategory}><label className="form-label">Nombre de categoría *<input name="name" required maxLength={100} placeholder="Ej. Mantas Wayúu" /></label><label className="form-label">Descripción<input name="description" maxLength={500} placeholder="Descripción breve" /></label><button className="button button-dark" disabled={busy}>{busy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} Crear categoría</button></form>}{canViewCategories && <div className="admin-category-list">{categories.map((category) => <div className="admin-category-row" key={category.id}><div><strong>{category.name}</strong><small>{category.description || 'Sin descripción'}</small></div><span className={category.active ? 'category-state active' : 'category-state'}>{category.active ? 'Activa' : 'Inactiva'}</span>{canChangeCategories && <button className="text-button" disabled={busy} onClick={() => onCategoryActive(category.id, !category.active)}>{category.active ? 'Desactivar' : 'Activar'}</button>}</div>)}</div>}</section>}
-        {canOpenSection('access') && activeSection === 'access' && isSuperadmin && <SuperadminRBACPanel currentUser={user} />}
+        {canOpenSection('access') && activeSection === 'access' && (isSuperadmin || (hasEffectivePermission(user, 'roles.view') && hasEffectivePermission(user, 'permissions.view'))) && <SuperadminRBACPanel currentUser={user} />}
       </main>
     </section>
   </div>
@@ -877,6 +878,7 @@ const navigationRouteOptions = [
   { value: 'admin.products', label: 'Administrador · Productos', roles: ['admin', 'superadmin'] },
   { value: 'admin.orders', label: 'Administrador · Pedidos', roles: ['admin', 'superadmin'] },
   { value: 'admin.categories', label: 'Administrador · Categorías', roles: ['admin', 'superadmin'] },
+  { value: 'admin.access', label: 'Administración · Roles y permisos', roles: ['admin', 'superadmin'] },
 ] as const
 const navigationMinimumPermissions: Record<string, string[]> = {
   'customer.orders': ['orders.view'], 'customer.designs': ['designs.view'], 'customer.profile': ['customers.view'],
@@ -884,6 +886,7 @@ const navigationMinimumPermissions: Record<string, string[]> = {
   'craftswoman.inventory': ['products.view'], 'craftswoman.orders': ['orders.view'],
   'admin.dashboard': ['products.view', 'orders.view'], 'admin.products': ['products.view'],
   'admin.orders': ['orders.view'], 'admin.categories': ['categories.view'],
+  'admin.access': ['roles.view', 'permissions.view'],
 }
 const permissionHelpLabel = (key: string) => {
   const [resource, action] = key.split('.')
@@ -895,6 +898,8 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   const [catalog, setCatalog] = useState<RBACPermission[]>([])
   const [users, setUsers] = useState<SuperadminUser[]>([])
   const [navigationItems, setNavigationItems] = useState<RBACNavigationItem[]>([])
+  const [editingNavigationId, setEditingNavigationId] = useState<number | null>(null)
+  const [navigationLabelDraft, setNavigationLabelDraft] = useState('')
   const [audit, setAudit] = useState<AuditEvent[]>([])
   const [selectedRole, setSelectedRole] = useState<SessionUser['role']>('admin')
   const [rolePermissions, setRolePermissions] = useState<RBACRolePermissions | null>(null)
@@ -913,14 +918,14 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   const [newNavigationAction, setNewNavigationAction] = useState('')
   const canViewCatalog = hasEffectivePermission(currentUser, 'permissions.view')
   const canChangePermissions = hasEffectivePermission(currentUser, 'permissions.change')
-  const canViewUsers = hasEffectivePermission(currentUser, 'users.view')
-  const canAddUsers = hasEffectivePermission(currentUser, 'users.add')
-  const canChangeUsers = hasEffectivePermission(currentUser, 'users.change')
-  const canAssignRoles = hasEffectivePermission(currentUser, 'role_assignments.change')
+  const canViewUsers = currentUser.role === 'superadmin' && hasEffectivePermission(currentUser, 'users.view')
+  const canAddUsers = currentUser.role === 'superadmin' && hasEffectivePermission(currentUser, 'users.add')
+  const canChangeUsers = currentUser.role === 'superadmin' && hasEffectivePermission(currentUser, 'users.change')
+  const canAssignRoles = currentUser.role === 'superadmin' && hasEffectivePermission(currentUser, 'role_assignments.change')
   const canViewRoles = hasEffectivePermission(currentUser, 'roles.view')
-  const canChangeRoles = hasEffectivePermission(currentUser, 'roles.change')
-  const canViewAudit = hasEffectivePermission(currentUser, 'audit.view')
-  const canViewNavigation = hasEffectivePermission(currentUser, 'navigation.view')
+  const canChangeRoles = currentUser.role === 'superadmin' && hasEffectivePermission(currentUser, 'roles.change')
+  const canViewAudit = currentUser.role === 'superadmin' && hasEffectivePermission(currentUser, 'audit.view')
+  const canViewNavigation = currentUser.role === 'superadmin' && hasEffectivePermission(currentUser, 'navigation.view')
   const canAddNavigation = hasEffectivePermission(currentUser, 'navigation.add')
   const canChangeNavigation = hasEffectivePermission(currentUser, 'navigation.change')
   const canDeleteNavigation = hasEffectivePermission(currentUser, 'navigation.delete')
@@ -1082,6 +1087,31 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
     } catch (saveError) { setError(errorMessage(saveError)) } finally { setSaving(false) }
   }
 
+  async function saveNavigationLabel(item: RBACNavigationItem) {
+    const label = navigationLabelDraft.trim()
+    if (!canChangeNavigation || !label) {
+      setError('Escribe un nombre válido para la opción de menú.')
+      return
+    }
+    setSaving(true)
+    setError('')
+    setFeedback('')
+    try {
+      const updated = await api.updateNavigationItem(item.id, { label })
+      setNavigationItems((current) => current.map((entry) => entry.id === item.id ? updated : entry).sort((a, b) => a.order - b.order || a.label.localeCompare(b.label)))
+      setEditingNavigationId(null)
+      setNavigationLabelDraft('')
+      setFeedback(`El nombre de “${item.label}” se actualizó sin crear otra opción.`)
+    } catch (saveError) {
+      setError(errorMessage(saveError))
+      try {
+        setNavigationItems((await api.navigationItems()).sort((a, b) => a.order - b.order || a.label.localeCompare(b.label)))
+      } catch {
+        setError(`${errorMessage(saveError)} No pudimos volver a consultar el estado guardado.`)
+      }
+    } finally { setSaving(false) }
+  }
+
   async function toggleNavigationItem(item: RBACNavigationItem, active: boolean) {
     if (!canChangeNavigation) {
       setError('Tu cuenta no tiene permiso para modificar la visibilidad del menú.')
@@ -1234,7 +1264,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
           {!newNavigationRoles.length && <p className="rbac-warning">Selecciona al menos un rol para que esta opción pueda mostrarse.</p>}
           <button className="button button-dark" disabled={saving || !newNavigationRoles.length || (Boolean(newNavigationResource) !== Boolean(newNavigationAction))}>{saving ? 'Guardando…' : 'Añadir opción al menú'}</button>
         </form>}
-        <div className="rbac-nav-list">{[...navigationItems].sort((a, b) => a.order - b.order || a.label.localeCompare(b.label)).map((item) => <article className="rbac-nav-row" key={item.id}><div><strong>{item.label}</strong><small>{item.route_name} · Posición {item.order}</small><small>{item.order <= 10 ? 'Aparece al inicio del menú' : item.order <= 20 ? 'Aparece después de las opciones con posición 10' : 'Aparece después de las opciones con posiciones menores'}</small><small>Visible para: {item.role_codes.map((role) => rbacRoleLabels[role]).join(', ')}</small><small>{item.permission_resource ? 'Filtro adicional: ' + (rbacResourceLabels[item.permission_resource] ?? item.permission_resource) + ' · ' + rbacActionLabels[item.permission_action ?? 'view'] : 'Sin permiso adicional configurado'}</small></div><div className="rbac-nav-actions"><label><input type="checkbox" checked={item.active} disabled={saving || !canChangeNavigation} onChange={(event) => void toggleNavigationItem(item, event.target.checked)} /> Visible</label>{canDeleteNavigation && <button type="button" className="button button-outline" disabled={saving} onClick={() => void removeNavigationItem(item)}>Eliminar</button>}</div></article>)}</div>
+        <div className="rbac-nav-list">{[...navigationItems].sort((a, b) => a.order - b.order || a.label.localeCompare(b.label)).map((item) => <article className="rbac-nav-row" key={item.id}><div>{editingNavigationId === item.id ? <form className="rbac-nav-edit-form" onSubmit={(event) => { event.preventDefault(); void saveNavigationLabel(item) }}><label className="form-label">Nombre visible<input autoFocus required maxLength={80} value={navigationLabelDraft} onChange={(event) => setNavigationLabelDraft(event.target.value)} /></label><div className="rbac-nav-edit-actions"><button type="submit" className="button button-dark" disabled={saving || !navigationLabelDraft.trim()}>{saving ? 'Guardando…' : 'Guardar'}</button><button type="button" className="button button-outline" disabled={saving} onClick={() => { setEditingNavigationId(null); setNavigationLabelDraft('') }}>Cancelar</button></div></form> : <strong>{item.label}</strong>}<small>{item.route_name} · Posición {item.order}</small><small>{item.order <= 10 ? 'Aparece al inicio del menú' : item.order <= 20 ? 'Aparece después de las opciones con posición 10' : 'Aparece después de las opciones con posiciones menores'}</small><small>Visible para: {item.role_codes.map((role) => rbacRoleLabels[role]).join(', ')}</small><small>{item.permission_resource ? 'Filtro adicional: ' + (rbacResourceLabels[item.permission_resource] ?? item.permission_resource) + ' · ' + rbacActionLabels[item.permission_action ?? 'view'] : 'Sin permiso adicional configurado'}</small></div><div className="rbac-nav-actions"><label><input type="checkbox" checked={item.active} disabled={saving || !canChangeNavigation} onChange={(event) => void toggleNavigationItem(item, event.target.checked)} /> Visible</label>{canChangeNavigation && editingNavigationId !== item.id && <button type="button" className="button button-outline" disabled={saving} onClick={() => { setEditingNavigationId(item.id); setNavigationLabelDraft(item.label) }}>Editar</button>}{canDeleteNavigation && <button type="button" className="button button-outline" disabled={saving} onClick={() => void removeNavigationItem(item)}>Eliminar</button>}</div></article>)}</div>
         {navigationItems.length === 0 && <p className="muted-copy">Todavía no hay opciones de menú configuradas.</p>}
       </section>}
       {activeSection === "audit" && canViewAudit && <section className="rbac-block"><div className="rbac-block-heading"><h3>Actividad sensible</h3><span>{audit.length} eventos recientes</span></div>
