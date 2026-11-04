@@ -884,6 +884,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   const [selectedRole, setSelectedRole] = useState<SessionUser['role']>('admin')
   const [rolePermissions, setRolePermissions] = useState<RBACRolePermissions | null>(null)
   const [selectedUserId, setSelectedUserId] = useState('')
+  const [selectedDelegationAdminId, setSelectedDelegationAdminId] = useState('')
   const [userPermissions, setUserPermissions] = useState<RBACUserPermissions | null>(null)
   const [error, setError] = useState('')
   const [feedback, setFeedback] = useState('')
@@ -912,6 +913,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   const canChangeNavigation = hasEffectivePermission(currentUser, 'navigation.change')
   const canDeleteNavigation = hasEffectivePermission(currentUser, 'navigation.delete')
   const selectedUser = users.find((candidate) => String(candidate.id) === selectedUserId)
+  const selectedDelegationAdmin = users.find((candidate) => String(candidate.id) === selectedDelegationAdminId && candidate.role === 'admin')
   const visibleRolePermissions = (rolePermissions?.permissions ?? []).filter((permission) => {
     const search = permissionSearch.trim().toLocaleLowerCase('es')
     return !search || (rbacResourceLabels[permission.resource] ?? permission.resource).toLocaleLowerCase('es').includes(search) || rbacActionLabels[permission.action].toLocaleLowerCase('es').includes(search) || permission.name.toLocaleLowerCase('es').includes(search)
@@ -934,7 +936,9 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
       setDelegations(delegationRows)
       setAudit(auditRows)
       const firstManageable = userRows.find((candidate) => candidate.role !== 'superadmin')
+      const firstAdmin = userRows.find((candidate) => candidate.role === 'admin' && candidate.is_active)
       setSelectedUserId(String(firstManageable?.id ?? userRows[0]?.id ?? ''))
+      setSelectedDelegationAdminId(String(firstAdmin?.id ?? ''))
     }).catch((loadError: unknown) => setError(errorMessage(loadError)))
   }, [currentUser.id, canViewCatalog, canViewUsers, canViewDelegations, canViewAudit])
 
@@ -1144,20 +1148,18 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   }
 
   async function changeDelegation(permission: RBACPermission, allowed: boolean) {
-    if (!selectedUser || !canAddDelegations) return
+    if (!selectedDelegationAdmin || !canAddDelegations) return
     setSaving(true)
     setError('')
     try {
       await api.setPermissionDelegation({
-        admin_user_id: selectedUser.id,
+        admin_user_id: selectedDelegationAdmin.id,
         resource: permission.resource,
         action: permission.action,
         allowed,
       })
       if (canViewDelegations) setDelegations(await api.permissionDelegations())
-      if (String(selectedUser.id) === selectedUserId && canViewUsers && canViewCatalog) {
-        setUserPermissions(await api.userPermissions(selectedUser.id))
-      }
+
       if (canViewAudit) setAudit(await api.auditEvents())
     } catch (saveError) { setError(errorMessage(saveError)) } finally { setSaving(false) }
   }
@@ -1186,7 +1188,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
       </form>}
     </section>}
     <div className="rbac-layout">
-      {activeSection === 'roles' && canViewRoles && <section className="rbac-block rbac-main-block"><div className="rbac-block-heading"><div><h3>Configurar permisos por rol</h3><p>Selecciona un rol y activa únicamente las acciones que necesita.</p></div><div className="rbac-role-heading-actions">{canAddNavigation && <button type="button" className="button button-outline" onClick={() => setActiveSection('navigation')}><Plus size={15} /> Añadir al menú</button>}<select aria-label="Rol a configurar" value={selectedRole} onChange={(event) => { setSelectedRole(event.target.value as SessionUser['role']); setPermissionSearch('') }}>{(['superadmin', 'admin', 'craftswoman', 'customer'] as const).map((role) => <option key={role} value={role}>{rbacRoleLabels[role]}</option>)}</select></div></div>
+      {activeSection === 'roles' && canViewRoles && <section className="rbac-block rbac-main-block"><div className="rbac-block-heading"><div><h3>Configurar permisos por rol</h3><p>Define qué puede hacer cada tipo de cuenta en los módulos del sistema. Estos permisos protegen las operaciones en Django.</p></div><div className="rbac-role-heading-actions">{canAddNavigation && <button type="button" className="button button-outline" onClick={() => setActiveSection('navigation')}><Plus size={15} /> Añadir al menú</button>}<select aria-label="Rol a configurar" value={selectedRole} onChange={(event) => { setSelectedRole(event.target.value as SessionUser['role']); setPermissionSearch('') }}>{(['superadmin', 'admin', 'craftswoman', 'customer'] as const).map((role) => <option key={role} value={role}>{rbacRoleLabels[role]}</option>)}</select></div></div>
         {rolePermissions && <div className="rbac-role-status"><label className="admin-check rbac-active"><input type="checkbox" checked={rolePermissions.active} disabled={saving || !canChangeRoles || selectedRole === 'superadmin'} onChange={(event) => void changeRoleActive(event.target.checked)} /> Rol activo</label><span>{rolePermissions.active ? 'Este rol puede acceder al sistema.' : 'Este rol está desactivado y no puede acceder al sistema.'}</span></div>}
         {selectedRole === 'superadmin' && <p className="rbac-info">El superadministrador conserva acceso global. Esta matriz es solo informativa y no se puede modificar.</p>}
         <label className="rbac-search"><Search size={16} /><input value={permissionSearch} onChange={(event) => setPermissionSearch(event.target.value)} placeholder="Buscar recurso o acción..." /></label>
@@ -1208,11 +1210,19 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
         </form>}
         <div className="rbac-permission-list">{userPermissions?.permissions.map((permission) => <label className="rbac-permission" key={`${permission.resource}.${permission.action}`}><span><strong>{rbacResourceLabels[permission.resource] ?? permission.resource}</strong><small>{rbacActionLabels[permission.action]} · {permission.name}</small></span><select aria-label={`${permission.resource} ${permission.action} para ${userPermissions.username}`} value={permission.effect ?? ''} disabled={saving || !canChangePermissions} onChange={(event) => void changeUserPermission(permission, event.target.value ? event.target.value as 'allow' | 'deny' : null)}><option value="">Heredado</option><option value="allow">Permitir</option><option value="deny">Denegar</option></select></label>)}</div>
       </section>}
-      {activeSection === "delegations" && canViewDelegations && <section className="rbac-block"><div className="rbac-block-heading"><h3>Delegaciones para admin</h3><span>{selectedUser?.role === 'admin' ? selectedUser.username : 'Selecciona un admin'}</span></div>
-        {selectedUser?.role === 'admin' ? <div className="rbac-permission-list">{catalog.map((permission) => {
-          const delegated = delegations.some((item) => item.admin_user_id === selectedUser.id && item.resource === permission.resource && item.action === permission.action)
-          return <label className="rbac-permission" key={`${permission.resource}.${permission.action}`}><input type="checkbox" checked={delegated} disabled={saving || !canAddDelegations} onChange={(event) => void changeDelegation(permission, event.target.checked)} /><span><strong>{permission.resource}</strong><small>{permission.action} · {permission.name}</small></span></label>
-        })}</div> : <p className="muted-copy">Las delegaciones solo se pueden asignar a cuentas con rol admin.</p>}
+      {activeSection === "delegations" && canViewDelegations && <section className="rbac-block">
+        <div className="rbac-block-heading"><div><h3>Delegaciones para administradores</h3><p>El superadministrador elige qué permisos puede administrar cada cuenta de Administrador de tienda.</p></div><span>{delegations.length} permisos delegados</span></div>
+        <div className="rbac-guide"><strong>¿Cómo funciona?</strong><p>Marca una acción para autorizarla al administrador seleccionado. Luego, en la pestaña Cuentas, podrás asignar o denegar esa acción a clientes y tejedoras. La delegación no cambia los permisos de todos los usuarios ni modifica el menú.</p></div>
+        <label className="form-label">Cuenta de administrador
+          <select value={selectedDelegationAdminId} onChange={(event) => setSelectedDelegationAdminId(event.target.value)}>
+            <option value="">Selecciona un administrador activo</option>
+            {users.filter((candidate) => candidate.role === 'admin' && candidate.is_active).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.full_name || candidate.username} · @{candidate.username}</option>)}
+          </select>
+        </label>
+        {selectedDelegationAdmin ? <div className="rbac-permission-list">{catalog.map((permission) => {
+          const delegated = delegations.some((item) => item.admin_user_id === selectedDelegationAdmin.id && item.resource === permission.resource && item.action === permission.action)
+          return <label className="rbac-permission" key={`${permission.resource}.${permission.action}`}><input type="checkbox" checked={delegated} disabled={saving || !canAddDelegations} onChange={(event) => void changeDelegation(permission, event.target.checked)} /><span><strong>{rbacResourceLabels[permission.resource] ?? permission.resource}</strong><small>{rbacActionLabels[permission.action]} · {permission.name}</small></span></label>
+        })}</div> : <p className="muted-copy">No hay una cuenta de Administrador de tienda activa disponible. Crea o activa una cuenta desde Cuentas para poder delegar permisos.</p>}
       </section>}
       {activeSection === 'navigation' && canViewNavigation && <section className="rbac-block">
         <div className="rbac-block-heading"><div><h3>Menú y vistas por rol</h3><p>Configura qué pantallas aparecen en cada cuenta. Esta sección no crea pantallas nuevas: habilita accesos a funciones que ya existen.</p></div><span>{navigationItems.length} opciones</span></div>
