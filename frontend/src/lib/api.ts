@@ -109,7 +109,7 @@ export const api = {
   checkout: (values: { address: string; city: string; payment_method: string; notes: string }) =>
     request<Order>('/checkout/', { method: 'POST', body: json(values) }),
   orders: () => request<Page<Order>>('/orders/'),
-  adminOrders: () => request<Page<Order>>('/admin/orders/'),
+  adminOrders: () => request<Page<Order>>('/admin/orders/?page_size=100'),
   designs: () => request<CustomDesign[]>('/designs/'),
   createDesign: (values: Record<string, string | number>) =>
     request('/designs/', { method: 'POST', body: json(values) }),
