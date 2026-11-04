@@ -67,13 +67,21 @@ export default function CustomerPanel() {
       setCategories(list)
     }).catch((error) => { if (active) setNotice(messageOf(error)) })
     if (user?.role === 'customer') {
-      api.cart().then((value) => { if (active) setCart(value) }).catch((error) => { if (active) setNotice(messageOf(error)) })
-      api.profile().then((value) => {
-        if (!active) return
-        setProfile(value)
-        setAddress(value.address ?? '')
-        setCity(value.city ?? '')
-      }).catch((error) => { if (active) setNotice(messageOf(error)) })
+      if (user.permissions?.includes('cart.view')) {
+        api.cart().then((value) => { if (active) setCart(value) }).catch((error) => { if (active) setNotice(messageOf(error)) })
+      } else {
+        setCart({ items: [], total: '0', count: 0 })
+      }
+      if (user.permissions?.includes('customers.view')) {
+        api.profile().then((value) => {
+          if (!active) return
+          setProfile(value)
+          setAddress(value.address ?? '')
+          setCity(value.city ?? '')
+        }).catch((error) => { if (active) setNotice(messageOf(error)) })
+      } else {
+        setProfile(null)
+      }
     }
     return () => { active = false }
   }, [user?.id, user?.role])
