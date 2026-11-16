@@ -404,6 +404,8 @@ class StoreAPITests(TestCase):
         customer_orders = self.client.get('/api/v1/orders/').json()['results']
         customer_designs = self.client.get('/api/v1/designs/').json()
         self.assertEqual([order['id'] for order in customer_orders], [own_order.id])
+        self.assertEqual(customer_orders[0]['customer_id'], self.customer.id)
+        self.assertEqual(customer_orders[0]['customer_name'], self.customer.name)
         self.assertEqual(customer_designs, [])
         self.assertEqual(self.client.get(f'/api/v1/orders/{foreign_order.id}/').status_code, 404)
         self.assertEqual(self.client.get(f'/pedido-confirmado/{foreign_order.id}/').status_code, 404)
@@ -535,6 +537,90 @@ class StoreAPITests(TestCase):
         self.assertEqual(order.craftswoman_id, craftswoman.id)
         self.assertEqual(order.status, Order.Status.ACCEPTED)
 
+        assignment_event = AuditEvent.objects.get(action='accept_order', object_id=str(order.id))
+        self.assertEqual(assignment_event.actor, craft_user)
+        self.assertEqual(assignment_event.details['craftswoman_id'], craftswoman.id)
+
+        status_response = self.client.patch(
+            f'/api/v1/craftswoman/orders/{order.id}/status/',
+            {'status': Order.Status.WEAVING},
+            content_type='application/json',
+        )
+        self.assertEqual(status_response.status_code, 200)
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.WEAVING)
+        status_event = AuditEvent.objects.get(
+            action='craftswoman_change_order_status', object_id=str(order.id),
+        )
+        self.assertEqual(status_event.actor, craft_user)
+        self.assertEqual(status_event.details, {
+            'from': Order.Status.ACCEPTED,
+            'to': Order.Status.WEAVING,
+        })
+
+    def test_craftswoman_order_status_requires_design_permission_only_for_custom_designs(self):
+        craft_user = self.create_role_user('normal-and-custom-order-craftswoman', AccessRole.Code.CRAFTSWOMAN)
+        craftswoman = Craftswoman.objects.create(user=craft_user, name='Tejedora Pedidos', active=True)
+        role = AccessRole.objects.get(code=AccessRole.Code.CRAFTSWOMAN)
+        RolePermission.objects.get_or_create(role=role, permission=permission_for('orders', 'change'))
+        RolePermission.objects.filter(role=role, permission=permission_for('designs', 'change')).delete()
+
+        normal_order = Order.objects.create(
+            customer=self.customer, craftswoman=craftswoman,
+            status=Order.Status.ACCEPTED, shipping_address='Riohacha',
+        )
+        OrderItem.objects.create(
+            order=normal_order, product=self.product, quantity=1, unit_price=self.product.price,
+        )
+        design = CustomDesign.objects.create(
+            customer=self.customer,
+            pattern='rombos',
+            base_color='#112233',
+            accent_color_one='#223344',
+            accent_color_two='#334455',
+            size='M',
+            quantity=1,
+            estimated_price=Decimal('120000'),
+            status=Order.Status.ACCEPTED,
+            craftswoman=craftswoman,
+        )
+        design_product = Product.objects.create(
+            sku='CUSTOM-ORDER-STATUS-001',
+            name='Manta personalizada privada',
+            category=self.category,
+            custom_design=design,
+            price=design.estimated_price,
+            stock=1,
+            made_to_order=True,
+            active=False,
+        )
+        custom_order = Order.objects.create(
+            customer=self.customer, craftswoman=craftswoman,
+            status=Order.Status.ACCEPTED, shipping_address='Maicao',
+        )
+        OrderItem.objects.create(
+            order=custom_order, product=design_product, quantity=1, unit_price=design_product.price,
+        )
+
+        self.client.force_login(craft_user)
+        normal_response = self.client.patch(
+            f'/api/v1/craftswoman/orders/{normal_order.id}/status/',
+            {'status': Order.Status.WEAVING},
+            content_type='application/json',
+        )
+        custom_response = self.client.patch(
+            f'/api/v1/craftswoman/orders/{custom_order.id}/status/',
+            {'status': Order.Status.WEAVING},
+            content_type='application/json',
+        )
+
+        self.assertEqual(normal_response.status_code, 200)
+        self.assertEqual(custom_response.status_code, 403)
+        custom_order.refresh_from_db()
+        design.refresh_from_db()
+        self.assertEqual(custom_order.status, Order.Status.ACCEPTED)
+        self.assertEqual(design.status, Order.Status.ACCEPTED)
+
     def test_craftswoman_can_accept_orders_and_update_design_status(self):
         craft_user = User.objects.create_user(
             username='tejedora-api',
@@ -633,6 +719,103 @@ class StoreAPITests(TestCase):
         self.assertFalse(updated.json()['active'])
         self.assertEqual(order_status.status_code, 200)
         self.assertEqual(order_status.json()['status'], Order.Status.PREPARING)
+
+    def test_admin_order_list_searches_filters_and_paginates_authorized_orders(self):
+        admin = self.create_role_user('admin-order-list', AccessRole.Code.SUPERADMIN)
+        other_user = self.create_role_user('order-list-other-customer', AccessRole.Code.CUSTOMER)
+        other_customer = Customer.objects.create(
+            user=other_user,
+            name='Compradora Wayuu',
+            email='compradora@example.com',
+        )
+        craft_user = self.create_role_user('order-list-craftswoman', AccessRole.Code.CRAFTSWOMAN)
+        craftswoman = Craftswoman.objects.create(user=craft_user, name='Tejedora Asignada', active=True)
+        pending_order = Order.objects.create(
+            customer=self.customer, status=Order.Status.PENDING, shipping_address='Riohacha',
+        )
+        assigned_order = Order.objects.create(
+            customer=other_customer,
+            craftswoman=craftswoman,
+            status=Order.Status.PREPARING,
+            shipping_address='Maicao',
+        )
+        for order in (pending_order, assigned_order):
+            OrderItem.objects.create(
+                order=order, product=self.product, quantity=1, unit_price=self.product.price,
+            )
+
+        self.client.force_login(admin)
+        all_orders = self.client.get('/api/v1/admin/orders/?page_size=1')
+        second_page = self.client.get('/api/v1/admin/orders/?page_size=1&page=2')
+        filtered = self.client.get(
+            '/api/v1/admin/orders/?status=preparing'
+            f'&craftswoman_id={craftswoman.id}&customer_id={other_customer.id}'
+            '&search=compradora%40example.com',
+        )
+        by_order_number = self.client.get(f'/api/v1/admin/orders/?search={assigned_order.id}')
+        unassigned = self.client.get('/api/v1/admin/orders/?craftswoman_id=unassigned')
+        assigned = self.client.get('/api/v1/admin/orders/?craftswoman_id=assigned')
+        invalid_status = self.client.get('/api/v1/admin/orders/?status=unknown')
+        invalid_craftswoman = self.client.get('/api/v1/admin/orders/?craftswoman_id=abc')
+        invalid_customer = self.client.get('/api/v1/admin/orders/?customer_id=abc')
+
+        self.assertEqual(all_orders.status_code, 200)
+        self.assertEqual(all_orders.json()['count'], 2)
+        self.assertIsNotNone(all_orders.json()['next'])
+        self.assertEqual(len(all_orders.json()['results']), 1)
+        self.assertEqual(second_page.status_code, 200)
+        self.assertEqual(second_page.json()['count'], 2)
+        self.assertEqual(len(second_page.json()['results']), 1)
+        self.assertNotEqual(all_orders.json()['results'][0]['id'], second_page.json()['results'][0]['id'])
+        self.assertEqual(filtered.status_code, 200)
+        self.assertEqual(filtered.json()['count'], 1)
+        result = filtered.json()['results'][0]
+        self.assertEqual(result['id'], assigned_order.id)
+        self.assertEqual(result['customer_id'], other_customer.id)
+        self.assertEqual(result['customer_name'], other_customer.name)
+        self.assertEqual(result['craftswoman']['name'], craftswoman.name)
+        self.assertEqual([item['id'] for item in by_order_number.json()['results']], [assigned_order.id])
+        self.assertEqual([item['id'] for item in unassigned.json()['results']], [pending_order.id])
+        self.assertEqual([item['id'] for item in assigned.json()['results']], [assigned_order.id])
+        self.assertEqual(invalid_status.status_code, 400)
+        self.assertEqual(invalid_craftswoman.status_code, 400)
+        self.assertEqual(invalid_customer.status_code, 400)
+
+    def test_non_admin_roles_cannot_use_administrative_order_list(self):
+        craft_user = self.create_role_user('admin-order-list-craft-denied', AccessRole.Code.CRAFTSWOMAN)
+        Craftswoman.objects.create(user=craft_user, name='Tejedora Sin Admin', active=True)
+
+        self.client.force_login(self.user)
+        customer_response = self.client.get('/api/v1/admin/orders/')
+        self.client.force_login(craft_user)
+        craftswoman_response = self.client.get('/api/v1/admin/orders/')
+
+        self.assertEqual(customer_response.status_code, 403)
+        self.assertEqual(craftswoman_response.status_code, 403)
+
+    def test_admin_rejects_invalid_order_status_transition(self):
+        admin = self.create_role_user('admin-order-invalid-transition', AccessRole.Code.ADMIN)
+        order = Order.objects.create(customer=self.customer, shipping_address='Maicao')
+        self.client.force_login(admin)
+
+        response = self.client.patch(
+            f'/api/v1/admin/orders/{order.id}/status/',
+            {'status': Order.Status.DELIVERED},
+            content_type='application/json',
+        )
+        assignment_bypass = self.client.patch(
+            f'/api/v1/admin/orders/{order.id}/status/',
+            {'status': Order.Status.ACCEPTED},
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(assignment_bypass.status_code, 400)
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.PENDING)
+        self.assertFalse(AuditEvent.objects.filter(
+            action='change_order_status', object_id=str(order.id),
+        ).exists())
 
     def test_admin_can_review_and_publish_product_submitted_by_craftswoman(self):
         craft_user = self.create_role_user('weaver-review-flow', AccessRole.Code.CRAFTSWOMAN)
@@ -760,6 +943,7 @@ class StoreAPITests(TestCase):
             ('get', '/api/v1/admin/categories/', {'admin', 'superadmin'}),
             ('post', '/api/v1/admin/categories/', {'admin', 'superadmin'}),
             ('patch', '/api/v1/admin/categories/999999/', {'admin', 'superadmin'}),
+            ('get', '/api/v1/admin/orders/', {'admin', 'superadmin'}),
             ('patch', '/api/v1/admin/orders/999999/status/', {'admin', 'superadmin'}),
         )
         accounts = {
