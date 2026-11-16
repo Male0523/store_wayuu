@@ -104,6 +104,8 @@ export interface OrderItem {
 
 export interface Order {
   id: number
+  customer_id: number
+  customer_name: string
   status: string
   status_label: string
   payment_method: string

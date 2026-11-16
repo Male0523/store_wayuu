@@ -299,14 +299,16 @@ def accept_order(request, order_id):
     if not has_role(request.user, AccessRole.Code.CRAFTSWOMAN):
         raise PermissionDenied('Esta operación solo está disponible para tejedoras.')
     _require_permission(request, 'orders', 'change')
-    _require_permission(request, 'designs', 'change')
     craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
     with transaction.atomic():
         order = get_object_or_404(Order.objects.select_for_update(), id=order_id, craftswoman__isnull=True, status=Order.Status.PENDING)
+        items = list(order.items.select_related('product__custom_design'))
+        if any(item.product.custom_design_id for item in items):
+            _require_permission(request, 'designs', 'change')
         order.craftswoman = craftswoman
         order.status = Order.Status.ACCEPTED
         order.save(update_fields=['craftswoman', 'status', 'updated_at'])
-        for item in order.items.select_related('product__custom_design'):
+        for item in items:
             if item.product.custom_design_id:
                 design = item.product.custom_design
                 design.craftswoman = craftswoman
@@ -317,7 +319,7 @@ def accept_order(request, order_id):
             'accept_order',
             'orders',
             affected_user=order.customer.user,
-            details={'status': order.status},
+            details={'status': order.status, 'craftswoman_id': craftswoman.id},
             instance=order,
         )
     messages.success(request, f'El pedido #{order.id} fue asignado a tu taller.')
@@ -330,9 +332,10 @@ def update_order_status(request, order_id):
     if not has_role(request.user, AccessRole.Code.CRAFTSWOMAN):
         raise PermissionDenied('Esta operación solo está disponible para tejedoras.')
     _require_permission(request, 'orders', 'change')
-    _require_permission(request, 'designs', 'change')
     craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
     order = get_object_or_404(Order, id=order_id, craftswoman=craftswoman)
+    if order.items.filter(product__custom_design__isnull=False).exists():
+        _require_permission(request, 'designs', 'change')
     transitions = {Order.Status.ACCEPTED: {Order.Status.WEAVING}, Order.Status.WEAVING: {Order.Status.ACCEPTED, Order.Status.COMPLETED}}
     status = request.POST.get('status')
     if status in transitions.get(order.status, set()):
