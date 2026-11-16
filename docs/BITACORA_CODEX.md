@@ -78,4 +78,5 @@ El hash del commit documental se informa en la entrega de Fase 0 y queda en el h
 
 ### Revisión
 
-- La rama `integration/consolidacion-wayuu` no estaba publicada en `origin` en el cotejo previo. Publicar el destino de integración y la rama de sprint será necesario para abrir el Pull Request; no se fusionará.
+- Se publicaron en `origin` `integration/consolidacion-wayuu` (`3727e0b375557c2aaf033bcac2111b87895dfe0f`) y `feature/pedidos-trazabilidad` para revisión.
+- Pull Request abierto: `https://github.com/Male0523/store_wayuu/pull/4`, base `integration/consolidacion-wayuu`. GitHub reporta que se puede integrar; permanece abierto y sin fusionar.
