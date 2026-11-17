@@ -182,5 +182,5 @@ El hash del commit documental se informa en la entrega de Fase 0 y queda en el h
 - `e2fc58529270c0a29c3844d648fd4e2f759423d1` — `feat: enforce dynamic RBAC in APIs and navigation`.
 - `b08d5c1ecd343f5c1200da28895d61cc19de971c` — `feat: add dynamic RBAC administration controls`.
 - `7e8207cfdc4a286e9931aafe83a0de914753292e` — `test: cover configurable RBAC and access boundaries`.
-- La documentación del flujo y esta bitácora se registran en un commit documental después de verificar los diffs.
+- `ce5e4216b71e2300f13e5a1bca767c8608f73c01` — `docs: record dynamic RBAC policy and sprint results`.
 - Rama local: `feature/rbac-configurable`. No se hizo push, merge, despliegue ni modificación de ramas remotas.
