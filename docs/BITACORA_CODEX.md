@@ -187,5 +187,5 @@ El hash del commit documental se informa en la entrega de Fase 0 y queda en el h
 - `9a11bd90a733a3387b6660bbc04a41d4014f8b58` — `feat: add configurable record scopes to RBAC`.
 - `2da355a6593cdfc3b76adf1e55253c14b08c9297` — `feat: manage RBAC record scopes in the admin panel`.
 - `e964f1c88cd399c4c757cfdc057782f4a6bf31bb` — `test: verify record scope and privilege boundaries`.
-- La documentación del alcance por registros y los resultados actualizados se registrarán en el commit documental siguiente.
+- `ae056318926a84037c6ab37afbeb648b2e1770d9` — `docs: record configurable record scope policy`.
 - Rama local: `feature/rbac-configurable`. No se hizo push, merge, despliegue ni modificación de ramas remotas.
