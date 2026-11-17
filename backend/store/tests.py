@@ -1,5 +1,7 @@
 import json
+import os
 import stat
+import subprocess
 from decimal import Decimal
 from datetime import timedelta
 from io import StringIO
@@ -1386,7 +1388,26 @@ class StoreAPITests(TestCase):
                         self.assertTrue(Customer.objects.filter(user=user, email=user.email).exists())
 
                 credential_file = Path(temporary_directory) / '.local' / 'rbac-test-users.json'
-                self.assertEqual(stat.S_IMODE(credential_file.stat().st_mode), 0o600)
+                if os.name == 'nt':
+                    acl_check = subprocess.run(
+                        ['icacls.exe', str(credential_file)],
+                        capture_output=True,
+                        check=False,
+                        text=True,
+                    )
+                    self.assertEqual(acl_check.returncode, 0, msg=acl_check.stderr)
+                    acl = acl_check.stdout.casefold()
+                    broad_principals = (
+                        's-1-1-0', 's-1-5-11', 's-1-5-32-545', 'everyone',
+                        'authenticated users', 'builtin\\users', 'todos',
+                        'usuarios autenticados',
+                    )
+                    self.assertFalse(
+                        any(principal in acl for principal in broad_principals),
+                        msg=f'El archivo de credenciales concede acceso a un grupo amplio: {acl}',
+                    )
+                else:
+                    self.assertEqual(stat.S_IMODE(credential_file.stat().st_mode), 0o600)
                 credentials_before = credential_file.read_bytes()
                 password_hashes = {user.username: user.password for user in created_users}
                 repeat_output = StringIO()
