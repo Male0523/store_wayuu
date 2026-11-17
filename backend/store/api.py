@@ -31,11 +31,15 @@ from .models import (
     NavigationItem,
     PermissionDelegation,
     Product,
+    RBACAction,
+    RBACCapability,
+    RBACGrant,
+    RBACResource,
     RolePermission,
     UserPermissionGrant,
     UserRole,
 )
-from .permissions import AdminOrSuperadmin, CraftswomanOnly, CustomerOnly, HasAssignedRole, OrderAccess, SuperadminOnly
+from .permissions import AdminOrSuperadmin, CraftswomanOnly, CustomerOnly, HasAssignedRole, OrderAccess, SuperadminOnly, category_visibility_action, order_admin_action, product_publish_action
 from .order_workflow import (
     ADMIN_ACTIVE_ORDER_STATUSES,
     allowed_order_transitions,
@@ -47,6 +51,8 @@ from .rbac import (
     PERMISSION_RESOURCES,
     assign_role,
     can_manage_permission,
+    capability_for,
+    canonical_action,
     effective_permission_keys,
     has_permission as has_rbac_permission,
     is_explicitly_denied,
@@ -390,14 +396,22 @@ class StatusInputSerializer(serializers.Serializer):
 
 
 class PermissionInputSerializer(serializers.Serializer):
-    resource = serializers.ChoiceField(choices=tuple((key, key) for key in PERMISSION_RESOURCES))
-    action = serializers.ChoiceField(choices=tuple((action, action) for action in PERMISSION_ACTIONS))
+    resource = serializers.SlugField(max_length=80)
+    action = serializers.SlugField(max_length=40)
 
 
 class RolePermissionChangeSerializer(serializers.Serializer):
-    resource = serializers.ChoiceField(choices=tuple((key, key) for key in PERMISSION_RESOURCES))
-    action = serializers.ChoiceField(choices=tuple((action, action) for action in PERMISSION_ACTIONS))
-    allowed = serializers.BooleanField()
+    resource = serializers.SlugField(max_length=80)
+    action = serializers.SlugField(max_length=40)
+    allowed = serializers.BooleanField(required=False)
+    effect = serializers.ChoiceField(choices=RBACGrant.Effect.choices, required=False, allow_null=True)
+
+    def validate(self, attrs):
+        if 'allowed' not in attrs and 'effect' not in attrs:
+            raise serializers.ValidationError('Indica allowed o effect para cada capacidad.')
+        if not capability_for(attrs['resource'], attrs['action']):
+            raise serializers.ValidationError({'resource': 'El recurso/acción no existe o está inactivo.'})
+        return attrs
 
 
 class UserPermissionChangeSerializer(PermissionInputSerializer):
@@ -413,7 +427,12 @@ class PermissionDelegationChangeSerializer(PermissionInputSerializer):
 
 
 class RoleAssignmentSerializer(serializers.Serializer):
-    role = serializers.ChoiceField(choices=AccessRole.Code.choices)
+    role = serializers.SlugField(max_length=30)
+
+    def validate_role(self, value):
+        if not AccessRole.objects.filter(code=value, active=True).exists():
+            raise serializers.ValidationError('Selecciona un rol activo existente.')
+        return value
 
 
 class SuperadminUserWriteSerializer(serializers.Serializer):
@@ -421,7 +440,7 @@ class SuperadminUserWriteSerializer(serializers.Serializer):
     email = serializers.EmailField()
     first_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
     last_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
-    role = serializers.ChoiceField(choices=AccessRole.Code.choices, required=False)
+    role = serializers.SlugField(max_length=30, required=False)
     is_active = serializers.BooleanField(required=False, default=True)
     password = serializers.CharField(write_only=True, required=False, min_length=8, max_length=128)
     phone = serializers.CharField(max_length=30, required=False, allow_blank=True)
@@ -439,7 +458,10 @@ class SuperadminUserWriteSerializer(serializers.Serializer):
         if not instance and not attrs.get('password'):
             raise serializers.ValidationError({'password': 'La contraseña es obligatoria al crear una cuenta.'})
         if not instance and not attrs.get('role'):
-            raise serializers.ValidationError({'role': 'Selecciona uno de los cuatro roles fijos.'})
+            raise serializers.ValidationError({'role': 'Selecciona un rol activo existente.'})
+        role_code = attrs.get('role')
+        if role_code and not AccessRole.objects.filter(code=role_code, active=True).exists():
+            raise serializers.ValidationError({'role': 'Selecciona un rol activo existente.'})
         if User.objects.filter(username__iexact=username).exclude(pk=user_id).exists():
             raise serializers.ValidationError({'username': 'Ese nombre de usuario ya está registrado.'})
         if User.objects.filter(email__iexact=email).exclude(pk=user_id).exists():
@@ -478,7 +500,7 @@ class NavigationItemWriteSerializer(serializers.Serializer):
     anchor = serializers.CharField(max_length=80, required=False, allow_blank=True)
     description = serializers.CharField(max_length=220, required=False, allow_blank=True)
     role_codes = serializers.ListField(
-        child=serializers.ChoiceField(choices=AccessRole.Code.choices),
+        child=serializers.SlugField(max_length=30),
         allow_empty=False,
     )
     permission_resource = serializers.ChoiceField(
@@ -499,21 +521,42 @@ class NavigationItemWriteSerializer(serializers.Serializer):
         action = attrs.get('permission_action')
         if bool(resource) != bool(action):
             raise serializers.ValidationError('Selecciona tanto el recurso como la acción requerida, o deja ambos vacíos.')
-        if resource and permission_for(resource, action) is None:
-            raise serializers.ValidationError('El permiso seleccionado no existe.')
         if 'role_codes' in attrs and len(attrs['role_codes']) != len(set(attrs['role_codes'])):
             raise serializers.ValidationError({'role_codes': 'No repitas roles.'})
-        route_name = attrs.get('route_name')
         role_codes = attrs.get('role_codes')
-        if route_name and role_codes is not None:
-            invalid_roles = set(role_codes) - NAVIGATION_ROUTE_RULES[route_name]['roles']
-            if invalid_roles:
-                raise serializers.ValidationError({'role_codes': 'La pantalla seleccionada no está disponible para uno o más roles elegidos.'})
+        if role_codes is not None and set(role_codes) - set(AccessRole.objects.filter(active=True).values_list('code', flat=True)):
+            raise serializers.ValidationError({'role_codes': 'Todas las asignaciones deben apuntar a roles activos existentes.'})
         return attrs
 
 
 class RoleStateInputSerializer(serializers.Serializer):
-    active = serializers.BooleanField()
+    name = serializers.CharField(max_length=80, required=False)
+    description = serializers.CharField(required=False, allow_blank=True)
+    priority = serializers.IntegerField(min_value=0, max_value=32767, required=False)
+    active = serializers.BooleanField(required=False)
+
+
+class RoleCreateSerializer(serializers.Serializer):
+    code = serializers.SlugField(max_length=30)
+    name = serializers.CharField(max_length=80)
+    description = serializers.CharField(required=False, allow_blank=True)
+    priority = serializers.IntegerField(min_value=0, max_value=32767, required=False, default=10)
+
+    def validate_code(self, value):
+        if AccessRole.objects.filter(code=value).exists():
+            raise serializers.ValidationError('Ya existe un rol con este código.')
+        return value
+
+
+class CatalogEntrySerializer(serializers.Serializer):
+    code = serializers.SlugField(max_length=80)
+    name = serializers.CharField(max_length=100)
+    description = serializers.CharField(required=False, allow_blank=True)
+
+
+class CapabilityInputSerializer(serializers.Serializer):
+    resource = serializers.SlugField(max_length=80)
+    action = serializers.SlugField(max_length=40)
 
 
 def _session_display_name(user, profile_name=None):
@@ -799,7 +842,7 @@ class SuperadminUserListView(PaginatedAPIView):
 
     def get(self, request):
         role_code = request.query_params.get('role', 'all').strip()
-        valid_roles = (*AccessRole.Code.values, 'unassigned', 'all')
+        valid_roles = (*AccessRole.objects.values_list('code', flat=True), 'unassigned', 'all')
         if role_code not in valid_roles:
             raise serializers.ValidationError({'role': 'Filtro de rol desconocido.'})
 
@@ -918,7 +961,7 @@ class SuperadminUserDetailView(APIView):
 
 
 class RBACCatalogView(APIView):
-    permission_classes = (AdminOrSuperadmin,)
+    permission_classes = (SuperadminOnly,)
 
     def get(self, request):
         if is_explicitly_denied(request.user, 'permissions', 'view'):
@@ -930,16 +973,151 @@ class RBACCatalogView(APIView):
             )
             raise PermissionDenied('No tienes permiso para consultar el catálogo RBAC.')
         entries = permission_catalog()
-        role = role_for_user(request.user)
-        if role.code == AccessRole.Code.ADMIN:
-            delegated = set(
-                PermissionDelegation.objects.filter(admin=request.user).values_list('permission_id', flat=True)
-            )
-            entries = [
-                item for item in entries
-                if permission_for(item['resource'], item['action']).pk in delegated
-            ]
-        return Response({'permissions': entries})
+        return Response({
+            'permissions': entries,
+            'resources': list(RBACResource.objects.values('id', 'code', 'name', 'description', 'active')),
+            'actions': list(RBACAction.objects.values('id', 'code', 'name', 'description', 'active')),
+        })
+
+
+class SuperadminRolesView(APIView):
+    permission_classes = (SuperadminOnly,)
+    rbac_resource = 'roles'
+
+    @staticmethod
+    def serialize(role):
+        return {
+            'code': role.code, 'name': role.name, 'description': role.description,
+            'priority': role.priority, 'active': role.active,
+            'system': role.code in AccessRole.Code.values,
+            'assigned_users': role.users.count(),
+        }
+
+    def get(self, request):
+        return Response([self.serialize(role) for role in AccessRole.objects.all()])
+
+    def post(self, request):
+        serializer = RoleCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        role = AccessRole.objects.create(**serializer.validated_data)
+        record_audit(request.user, 'create_role', 'roles', instance=role, details={'role': role.code})
+        return Response(self.serialize(role), status=status.HTTP_201_CREATED)
+
+
+class SuperadminRoleDetailView(APIView):
+    permission_classes = (SuperadminOnly,)
+    rbac_resource = 'roles'
+
+    def patch(self, request, role_code):
+        role = get_object_or_404(AccessRole, code=role_code)
+        serializer = RoleStateInputSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        changes = serializer.validated_data
+        for field in ('name', 'description', 'priority', 'active'):
+            if field in changes:
+                setattr(role, field, changes[field])
+        try:
+            role.save(update_fields=tuple(changes.keys()))
+        except DjangoValidationError as error:
+            raise serializers.ValidationError(error.messages) from error
+        record_audit(request.user, 'update_role', 'roles', instance=role, details=changes)
+        return Response(SuperadminRolesView.serialize(role))
+
+
+class SuperadminResourceCatalogView(APIView):
+    permission_classes = (SuperadminOnly,)
+    rbac_resource = 'permissions'
+
+    def get(self, request):
+        return Response(list(RBACResource.objects.values('id', 'code', 'name', 'description', 'active')))
+
+    def post(self, request):
+        serializer = CatalogEntrySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        if RBACResource.objects.filter(code=values['code']).exists():
+            raise serializers.ValidationError({'code': 'Ya existe ese recurso.'})
+        with transaction.atomic():
+            resource = RBACResource.objects.create(**values)
+            for action in RBACAction.objects.filter(active=True, code__in=('view', 'create', 'edit', 'delete')):
+                RBACCapability.objects.get_or_create(resource=resource, action=action)
+        record_audit(request.user, 'create_rbac_resource', 'permissions', instance=resource)
+        return Response({'id': resource.id, 'code': resource.code, 'name': resource.name, 'description': resource.description, 'active': resource.active}, status=status.HTTP_201_CREATED)
+
+
+class SuperadminResourceDetailView(APIView):
+    permission_classes = (SuperadminOnly,)
+    rbac_resource = 'permissions'
+
+    def patch(self, request, resource_code):
+        resource = get_object_or_404(RBACResource, code=resource_code)
+        serializer = RoleStateInputSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        values = {key: value for key, value in serializer.validated_data.items() if key in ('name', 'description', 'active')}
+        for key, value in values.items():
+            setattr(resource, key, value)
+        resource.save(update_fields=tuple(values.keys()))
+        record_audit(request.user, 'update_rbac_resource', 'permissions', instance=resource, details=values)
+        return Response({'id': resource.id, 'code': resource.code, 'name': resource.name, 'description': resource.description, 'active': resource.active})
+
+
+class SuperadminActionCatalogView(APIView):
+    permission_classes = (SuperadminOnly,)
+    rbac_resource = 'permissions'
+
+    def get(self, request):
+        return Response(list(RBACAction.objects.values('id', 'code', 'name', 'description', 'active')))
+
+    def post(self, request):
+        serializer = CatalogEntrySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        if len(values['code']) > 40:
+            raise serializers.ValidationError({'code': 'El código de acción admite hasta 40 caracteres.'})
+        if len(values['name']) > 80:
+            raise serializers.ValidationError({'name': 'El nombre de acción admite hasta 80 caracteres.'})
+        if RBACAction.objects.filter(code=values['code']).exists():
+            raise serializers.ValidationError({'code': 'Ya existe esa acción.'})
+        with transaction.atomic():
+            action = RBACAction.objects.create(**values)
+        record_audit(request.user, 'create_rbac_action', 'permissions', details={'action': action.code})
+        return Response({'id': action.id, 'code': action.code, 'name': action.name, 'description': action.description, 'active': action.active}, status=status.HTTP_201_CREATED)
+
+
+class SuperadminActionDetailView(APIView):
+    permission_classes = (SuperadminOnly,)
+    rbac_resource = 'permissions'
+
+    def patch(self, request, action_code):
+        action = get_object_or_404(RBACAction, code=action_code)
+        serializer = RoleStateInputSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        values = {key: value for key, value in serializer.validated_data.items() if key in ('name', 'description', 'active')}
+        for key, value in values.items():
+            setattr(action, key, value)
+        action.save(update_fields=tuple(values.keys()))
+        record_audit(request.user, 'update_rbac_action', 'permissions', details={'action': action.code, **values})
+        return Response({'id': action.id, 'code': action.code, 'name': action.name, 'description': action.description, 'active': action.active})
+
+
+class SuperadminCapabilitiesView(APIView):
+    permission_classes = (SuperadminOnly,)
+    rbac_resource = 'permissions'
+
+    def post(self, request):
+        serializer = CapabilityInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        resource = get_object_or_404(RBACResource, code=values['resource'], active=True)
+        action = get_object_or_404(RBACAction, code=values['action'], active=True)
+        capability, created = RBACCapability.objects.get_or_create(resource=resource, action=action)
+        record_audit(request.user, 'create_rbac_capability', 'permissions', instance=capability)
+        return Response({
+            'resource': resource.code, 'resource_name': resource.name,
+            'action': action.code, 'action_name': action.name,
+            'codename': f'{resource.code}_{action.code}',
+            'name': f'{action.name} · {resource.name}',
+        }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
 class SuperadminRolePermissionsView(APIView):
@@ -948,13 +1126,19 @@ class SuperadminRolePermissionsView(APIView):
 
     def get(self, request, role_code):
         role = get_object_or_404(AccessRole, code=role_code)
-        grants = set(role.permission_grants.values_list('permission_id', flat=True))
+        grants = {grant.capability_id: grant.effect for grant in RBACGrant.objects.filter(role=role)}
         entries = []
         for item in permission_catalog():
-            permission = permission_for(item['resource'], item['action'])
+            capability = capability_for(item['resource'], item['action'])
+            effect = grants.get(capability.id) if capability else None
+            if effect is None:
+                legacy = permission_for(item['resource'], item['action'])
+                if legacy and RolePermission.objects.filter(role=role, permission=legacy).exists():
+                    effect = RBACGrant.Effect.ALLOW
             entries.append({
                 **item,
-                'allowed': role.code == AccessRole.Code.SUPERADMIN or permission.pk in grants,
+                'allowed': role.code == AccessRole.Code.SUPERADMIN or effect == RBACGrant.Effect.ALLOW,
+                'effect': RBACGrant.Effect.ALLOW if role.code == AccessRole.Code.SUPERADMIN else effect,
             })
         return Response({'role': role.code, 'active': role.active, 'permissions': entries})
 
@@ -970,8 +1154,6 @@ class SuperadminRolePermissionsView(APIView):
             raise serializers.ValidationError({'permissions': 'No repitas un permiso en la misma operación.'})
         if not role.active:
             raise serializers.ValidationError({'role': 'No se pueden cambiar permisos de un rol inactivo.'})
-        if any(permission_for(item['resource'], item['action']) is None for item in permissions):
-            raise serializers.ValidationError({'permissions': 'Uno o más permisos no existen.'})
         with transaction.atomic():
             for item in permissions:
                 set_role_permission(
@@ -979,34 +1161,39 @@ class SuperadminRolePermissionsView(APIView):
                     role.code,
                     item['resource'],
                     item['action'],
-                    item['allowed'],
+                    item.get('allowed'),
+                    effect=item.get('effect'),
                 )
         return self.get(request, role_code)
 
     def patch(self, request, role_code):
         role = get_object_or_404(AccessRole, code=role_code)
-        serializer = RoleStateInputSerializer(data=request.data)
+        serializer = RoleStateInputSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        role.active = serializer.validated_data['active']
+        changes = serializer.validated_data
+        if not changes:
+            raise serializers.ValidationError('Indica al menos un campo para actualizar.')
+        for field, value in changes.items():
+            setattr(role, field, value)
         try:
-            role.save(update_fields=('active',))
+            role.save(update_fields=tuple(changes.keys()))
         except DjangoValidationError as error:
             record_audit(
                 request.user,
                 'deactivate_role',
                 'roles',
                 result=AuditEvent.Result.DENIED,
-                details={'role': role.code},
+                details={'role': role.code, **changes},
             )
             raise serializers.ValidationError(error.messages) from error
         record_audit(
             request.user,
-            'change_role_state',
+            'update_role',
             'roles',
-            details={'role': role.code, 'active': role.active},
+            details={'role': role.code, **changes},
             instance=role,
         )
-        return Response({'role': role.code, 'active': role.active})
+        return Response(SuperadminRolesView.serialize(role))
 
 
 class PermissionDelegationsView(APIView):
@@ -1056,23 +1243,27 @@ class AdminUserPermissionsView(APIView):
         target = get_object_or_404(User, pk=user_id)
         actor_role = role_for_user(request.user)
         target_role = role_for_user(target)
+        if target_role and target_role.code == AccessRole.Code.SUPERADMIN:
+            raise PermissionDenied('La matriz global del superadministrador no admite grants individuales.')
         if actor_role.code == AccessRole.Code.ADMIN and (
             not target_role or target_role.code not in (AccessRole.Code.CUSTOMER, AccessRole.Code.CRAFTSWOMAN)
         ):
             raise PermissionDenied('Admin solo puede gestionar permisos de clientes y artesanas.')
-        grants = {
-            grant.permission_id: grant.effect
-            for grant in UserPermissionGrant.objects.filter(user=target)
-        }
+        grants = {grant.capability_id: grant.effect for grant in RBACGrant.objects.filter(user=target)}
+        legacy_grants = {grant.permission_id: grant.effect for grant in UserPermissionGrant.objects.filter(user=target)}
         delegations = set(
             PermissionDelegation.objects.filter(admin=request.user).values_list('permission_id', flat=True)
         ) if actor_role.code == AccessRole.Code.ADMIN else None
         entries = []
         for item in permission_catalog():
             permission = permission_for(item['resource'], item['action'])
-            if delegations is not None and permission.pk not in delegations:
+            capability = capability_for(item['resource'], item['action'])
+            if delegations is not None and (not permission or permission.pk not in delegations):
                 continue
-            entries.append({**item, 'effect': grants.get(permission.pk)})
+            effect = grants.get(capability.pk) if capability else None
+            if effect is None and permission:
+                effect = legacy_grants.get(permission.pk)
+            entries.append({**item, 'effect': effect})
         return Response({'user_id': target.id, 'username': target.username, 'permissions': entries})
 
     def put(self, request, user_id):
@@ -1080,6 +1271,9 @@ class AdminUserPermissionsView(APIView):
             record_audit(request.user, 'denied_change', 'permissions', result=AuditEvent.Result.DENIED)
             raise PermissionDenied('No tienes permiso para cambiar grants individuales.')
         target = get_object_or_404(User, pk=user_id)
+        target_role = role_for_user(target)
+        if target_role and target_role.code == AccessRole.Code.SUPERADMIN:
+            raise PermissionDenied('La matriz global del superadministrador no admite grants individuales.')
         serializer = UserPermissionChangeSerializer(data=request.data.get('permissions'), many=True)
         serializer.is_valid(raise_exception=True)
         permissions = serializer.validated_data
@@ -1087,10 +1281,14 @@ class AdminUserPermissionsView(APIView):
         if len(keys) != len(permissions):
             raise serializers.ValidationError({'permissions': 'No repitas un permiso en la misma operación.'})
         for item in permissions:
+            if not capability_for(item['resource'], item['action']):
+                raise serializers.ValidationError({'permissions': 'Uno o más permisos no existen o están inactivos.'})
             permission = permission_for(item['resource'], item['action'])
-            if permission is None:
-                raise serializers.ValidationError({'permissions': 'Uno o más permisos no existen.'})
-            if not can_manage_permission(request.user, target, permission):
+            actor_role = role_for_user(request.user)
+            can_manage = bool(actor_role and actor_role.code == AccessRole.Code.SUPERADMIN)
+            if not can_manage and permission:
+                can_manage = can_manage_permission(request.user, target, permission)
+            if not can_manage:
                 record_audit(
                     request.user,
                     'set_user_permission',
@@ -1200,14 +1398,6 @@ class SuperadminNavigationDetailView(APIView):
         serializer.is_valid(raise_exception=True)
         values = serializer.validated_data
         role_codes = values.pop('role_codes', None)
-        next_route = values.get('route_name', item.route_name)
-        next_roles = set(role_codes) if role_codes is not None else set(item.roles.values_list('code', flat=True))
-        route_rule = NAVIGATION_ROUTE_RULES.get(next_route)
-        if route_rule is None:
-            raise serializers.ValidationError({'route_name': 'Esta opción usa una ruta antigua no permitida. Elimínala y créala de nuevo con una pantalla disponible.'})
-        allowed_roles = route_rule['roles']
-        if next_roles - allowed_roles:
-            raise serializers.ValidationError({'role_codes': 'La pantalla seleccionada no está disponible para uno o más roles elegidos.'})
         resource = values.pop('permission_resource', serializers.empty)
         action = values.pop('permission_action', serializers.empty)
         if resource is not serializers.empty or action is not serializers.empty:
@@ -1243,15 +1433,6 @@ class RoleNavigationMenuView(APIView):
         visible = []
         items = NavigationItem.objects.filter(active=True, roles=role).select_related('permission__content_type').order_by('order', 'label')
         for item in items:
-            rule = NAVIGATION_ROUTE_RULES.get(item.route_name)
-            if not rule or role.code not in rule['roles']:
-                continue
-            if not all(has_rbac_permission(request.user, resource, action) for resource, action in rule['permissions']):
-                continue
-            if item.permission_id:
-                key = permission_key(item.permission)
-                if not key or not has_rbac_permission(request.user, *key):
-                    continue
             visible.append(SuperadminNavigationView.serialize_item(item))
         return Response(visible)
 
@@ -1274,6 +1455,7 @@ class AdminCategoryListView(APIView):
 class AdminCategoryDetailView(APIView):
     permission_classes = (AdminOrSuperadmin,)
     rbac_resource = 'categories'
+    rbac_actions = {'PATCH': category_visibility_action}
 
     def patch(self, request, category_id):
         category = get_object_or_404(Category, id=category_id)
@@ -1287,6 +1469,7 @@ class AdminCategoryDetailView(APIView):
 class AdminProductDetailView(APIView):
     permission_classes = (AdminOrSuperadmin,)
     rbac_resource = 'products'
+    rbac_actions = {'PATCH': product_publish_action}
 
     def patch(self, request, product_id):
         product = get_object_or_404(Product, id=product_id)
@@ -1300,6 +1483,7 @@ class AdminProductDetailView(APIView):
 class AdminOrderStatusView(APIView):
     permission_classes = (AdminOrSuperadmin,)
     rbac_resource = 'orders'
+    rbac_actions = {'PATCH': order_admin_action}
 
     def patch(self, request, order_id):
         serializer = StatusInputSerializer(data=request.data)
@@ -1808,10 +1992,10 @@ class CraftswomanDashboardView(APIView):
 class AcceptOrderView(APIView):
     permission_classes = (CraftswomanOnly,)
     rbac_resource = 'orders'
-    rbac_actions = {'POST': 'change'}
+    rbac_actions = {'POST': 'assign'}
 
     def post(self, request, order_id):
-        if not has_rbac_permission(request.user, 'orders', 'change'):
+        if not has_rbac_permission(request.user, 'orders', 'assign'):
             raise PermissionDenied('No tienes permiso para aceptar pedidos.')
         craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
         with transaction.atomic():
