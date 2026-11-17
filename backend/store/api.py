@@ -4,6 +4,7 @@ from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models, transaction
+from django.db.models import Count
 from django.http import JsonResponse
 from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
@@ -13,8 +14,8 @@ from rest_framework import serializers, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import AllowAny, IsAuthenticated
-from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import (
@@ -35,6 +36,12 @@ from .models import (
     UserRole,
 )
 from .permissions import AdminOrSuperadmin, CraftswomanOnly, CustomerOnly, HasAssignedRole, OrderAccess, SuperadminOnly
+from .order_workflow import (
+    ADMIN_ACTIVE_ORDER_STATUSES,
+    allowed_order_transitions,
+    can_transition_order,
+    has_custom_design_items,
+)
 from .rbac import (
     PERMISSION_ACTIONS,
     PERMISSION_RESOURCES,
@@ -208,18 +215,34 @@ class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     total = serializers.DecimalField(max_digits=14, decimal_places=0, read_only=True)
     status_label = serializers.CharField(source='get_status_display', read_only=True)
+    allowed_statuses = serializers.SerializerMethodField()
     craftswoman = CraftswomanSummarySerializer(read_only=True)
+    customer_id = serializers.IntegerField(read_only=True)
+    customer_name = serializers.CharField(source='customer.name', read_only=True)
 
     class Meta:
         model = Order
         fields = (
             'id', 'status', 'status_label', 'payment_method', 'shipping_address',
             'notes', 'created_at', 'updated_at', 'items', 'total', 'craftswoman',
+            'customer_id', 'customer_name', 'allowed_statuses',
         )
+
+    def get_allowed_statuses(self, order):
+        actor = self.context.get('status_actor')
+        request = self.context.get('request')
+        if (
+            actor == 'craftswoman'
+            and has_custom_design_items(order)
+            and (request is None or not has_rbac_permission(request.user, 'designs', 'change'))
+        ):
+            return []
+        return allowed_order_transitions(order.status, actor) if actor else []
 
 
 class CustomDesignSerializer(serializers.ModelSerializer):
     status_label = serializers.CharField(source='get_status_display', read_only=True)
+    allowed_statuses = serializers.SerializerMethodField()
     craftswoman_name = serializers.CharField(source='craftswoman.name', read_only=True, allow_null=True, default=None)
 
     class Meta:
@@ -227,8 +250,15 @@ class CustomDesignSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'pattern', 'base_color', 'accent_color_one', 'accent_color_two',
             'size', 'quantity', 'notes', 'estimated_price', 'status', 'status_label',
-            'created_at', 'craftswoman_name',
+            'created_at', 'craftswoman_name', 'allowed_statuses',
         )
+
+    def get_allowed_statuses(self, design):
+        actor = self.context.get('status_actor')
+        request = self.context.get('request')
+        if actor == 'craftswoman' and (request is None or not has_rbac_permission(request.user, 'designs', 'change')):
+            return []
+        return allowed_order_transitions(design.status, actor) if actor else []
 
 
 class CustomerRegistrationSerializer(serializers.Serializer):
@@ -1272,21 +1302,31 @@ class AdminOrderStatusView(APIView):
     rbac_resource = 'orders'
 
     def patch(self, request, order_id):
-        order = get_object_or_404(Order, id=order_id)
         serializer = StatusInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        previous_status = order.status
-        order.status = serializer.validated_data['status']
-        order.save(update_fields=('status', 'updated_at'))
-        record_audit(
-            request.user,
-            'change_order_status',
-            'orders',
-            affected_user=order.customer.user,
-            details={'from': previous_status, 'to': order.status},
-            instance=order,
-        )
-        return Response(OrderSerializer(order).data)
+        with transaction.atomic():
+            order = get_object_or_404(
+                Order.objects.select_for_update().select_related('customer__user'),
+                id=order_id,
+            )
+            previous_status = order.status
+            next_status = serializer.validated_data['status']
+            if not can_transition_order(previous_status, next_status, 'admin'):
+                return Response(
+                    {'detail': 'Transición de estado no permitida.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            order.status = next_status
+            order.save(update_fields=('status', 'updated_at'))
+            record_audit(
+                request.user,
+                'change_order_status',
+                'orders',
+                affected_user=order.customer.user,
+                details={'from': previous_status, 'to': order.status},
+                instance=order,
+            )
+        return Response(OrderSerializer(order, context={'status_actor': 'admin'}).data)
 
 
 class CustomerRegistrationView(APIView):
@@ -1514,6 +1554,108 @@ class OrderListView(PaginatedAPIView):
         return self.get_paginated_response(OrderSerializer(self.paginate_queryset(orders), many=True).data)
 
 
+class AdminOrderListView(PaginatedAPIView):
+    permission_classes = (AdminOrSuperadmin,)
+    rbac_resource = 'orders'
+
+    def get(self, request):
+        orders = Order.objects.select_related(
+            'customer__user', 'craftswoman',
+        ).prefetch_related('items__product').order_by('-created_at', '-id')
+
+        selected_status = request.query_params.get('status', '').strip()
+        if selected_status:
+            valid_statuses = {value for value, _label in Order.Status.choices}
+            if selected_status not in valid_statuses:
+                raise serializers.ValidationError({'status': 'Selecciona un estado de pedido válido.'})
+            orders = orders.filter(status=selected_status)
+
+        assignment = request.query_params.get('assignment', '').strip().lower()
+        craftswoman_id = request.query_params.get('craftswoman_id', '').strip()
+        # Accept the original Sprint 1 query values during migration to the
+        # separate assignment and craftswoman filters.
+        if craftswoman_id in {'assigned', 'unassigned'}:
+            if assignment and assignment != craftswoman_id:
+                raise serializers.ValidationError({'assignment': 'Los filtros de asignación son incompatibles.'})
+            assignment = craftswoman_id
+            craftswoman_id = ''
+        if assignment not in {'', 'all', 'assigned', 'unassigned'}:
+            raise serializers.ValidationError({'assignment': 'Selecciona una opción de asignación válida.'})
+        if assignment == 'unassigned' and craftswoman_id:
+            raise serializers.ValidationError({'craftswoman_id': 'No combines una tejedora con pedidos sin asignar.'})
+        if assignment == 'assigned':
+            orders = orders.filter(craftswoman__isnull=False)
+        elif assignment == 'unassigned':
+            orders = orders.filter(craftswoman__isnull=True)
+        if craftswoman_id:
+            if not craftswoman_id.isdecimal() or int(craftswoman_id) < 1:
+                raise serializers.ValidationError({'craftswoman_id': 'Selecciona una tejedora válida.'})
+            orders = orders.filter(craftswoman_id=int(craftswoman_id))
+
+        customer_id = request.query_params.get('customer_id', '').strip()
+        if customer_id:
+            if not customer_id.isdecimal() or int(customer_id) < 1:
+                raise serializers.ValidationError({'customer_id': 'Selecciona un cliente válido.'})
+            orders = orders.filter(customer_id=int(customer_id))
+
+        search = request.query_params.get('search', '').strip()
+        if search:
+            search_filter = (
+                models.Q(customer__name__icontains=search)
+                | models.Q(customer__email__icontains=search)
+                | models.Q(customer__user__username__icontains=search)
+                | models.Q(customer__user__first_name__icontains=search)
+                | models.Q(customer__user__last_name__icontains=search)
+                | models.Q(craftswoman__name__icontains=search)
+                | models.Q(items__product__name__icontains=search)
+            )
+            if search.isdecimal():
+                search_filter |= models.Q(pk=int(search))
+            orders = orders.filter(search_filter).distinct()
+
+        return self.get_paginated_response(
+            OrderSerializer(
+                self.paginate_queryset(orders), many=True,
+                context={'request': request, 'status_actor': 'admin'},
+            ).data,
+        )
+
+
+class AdminOrderFiltersView(APIView):
+    permission_classes = (AdminOrSuperadmin,)
+    rbac_resource = 'orders'
+
+    def get(self, request):
+        craftswomen = Craftswoman.objects.order_by('name', 'id').values('id', 'name')
+        return Response({'craftswomen': list(craftswomen)})
+
+
+class AdminOrderSummaryView(APIView):
+    permission_classes = (AdminOrSuperadmin,)
+    rbac_resource = 'orders'
+
+    def get(self, request):
+        queryset = Order.objects.all()
+        count_by_status = {
+            row['status']: row['count']
+            for row in queryset.values('status').annotate(count=Count('id'))
+        }
+        for order_status, _label in Order.Status.choices:
+            count_by_status.setdefault(order_status, 0)
+        recent = queryset.select_related('customer', 'craftswoman').prefetch_related(
+            'items__product',
+        ).order_by('-created_at', '-id')[:3]
+        return Response({
+            'total_count': sum(count_by_status.values()),
+            'by_status': count_by_status,
+            'pending_count': count_by_status[Order.Status.PENDING],
+            # Preserve the dashboard's prior active-status definition. Whether
+            # completed and paid should count as active remains a business decision.
+            'active_count': sum(count_by_status[value] for value in ADMIN_ACTIVE_ORDER_STATUSES),
+            'recent_orders': OrderSerializer(recent, many=True).data,
+        })
+
+
 class OrderDetailView(APIView):
     permission_classes = (OrderAccess,)
     rbac_resource = 'orders'
@@ -1654,8 +1796,12 @@ class CraftswomanDashboardView(APIView):
         return Response({
             'active': craftswoman.active,
             'available_orders': OrderSerializer(available, many=True).data,
-            'orders': OrderSerializer(assigned, many=True).data,
-            'designs': CustomDesignSerializer(designs, many=True).data,
+            'orders': OrderSerializer(
+                assigned, many=True, context={'request': request, 'status_actor': 'craftswoman'},
+            ).data,
+            'designs': CustomDesignSerializer(
+                designs, many=True, context={'request': request, 'status_actor': 'craftswoman'},
+            ).data,
         })
 
 
@@ -1675,11 +1821,10 @@ class AcceptOrderView(APIView):
                 craftswoman__isnull=True,
                 status=Order.Status.PENDING,
             )
+            if not can_transition_order(order.status, Order.Status.ACCEPTED, 'assignment'):
+                return Response({'detail': 'Transición de asignación no permitida.'}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Los pedidos con diseños personalizados requieren permiso para modificarlos.
-            has_custom_design = order.items.filter(
-                product__custom_design__isnull=False,
-            ).exists()
+            has_custom_design = has_custom_design_items(order)
             if has_custom_design and not has_rbac_permission(
                 request.user, 'designs', 'change',
             ):
@@ -1701,31 +1846,31 @@ class AcceptOrderView(APIView):
                 'accept_order',
                 'orders',
                 affected_user=order.customer.user,
-                details={'status': order.status},
+                details={'status': order.status, 'craftswoman_id': craftswoman.id},
                 instance=order,
             )
-        return Response(OrderSerializer(order).data)
+        return Response(OrderSerializer(order, context={'request': request, 'status_actor': 'craftswoman'}).data)
 
 
 class CraftswomanOrderStatusView(APIView):
     permission_classes = (CraftswomanOnly,)
     rbac_resource = 'orders'
-    transitions = {
-        Order.Status.ACCEPTED: {Order.Status.WEAVING},
-        Order.Status.WEAVING: {Order.Status.ACCEPTED, Order.Status.COMPLETED},
-    }
 
     def patch(self, request, order_id):
-        if not has_rbac_permission(request.user, 'designs', 'change'):
-            raise PermissionDenied('No tienes permiso para actualizar los diseños asociados al pedido.')
         craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
-        order = get_object_or_404(Order, id=order_id, craftswoman=craftswoman)
         serializer = StatusInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        new_status = serializer.validated_data['status']
-        if new_status not in self.transitions.get(order.status, set()):
-            return Response({'detail': 'Transición de estado no permitida.'}, status=status.HTTP_400_BAD_REQUEST)
         with transaction.atomic():
+            order = get_object_or_404(
+                Order.objects.select_for_update().filter(craftswoman=craftswoman),
+                id=order_id,
+            )
+            has_custom_design = has_custom_design_items(order)
+            if has_custom_design and not has_rbac_permission(request.user, 'designs', 'change'):
+                raise PermissionDenied('Este pedido incluye un diseño personalizado y necesitas permiso para gestionarlo.')
+            new_status = serializer.validated_data['status']
+            if not can_transition_order(order.status, new_status, 'craftswoman'):
+                return Response({'detail': 'Transición de estado no permitida.'}, status=status.HTTP_400_BAD_REQUEST)
             previous_status = order.status
             order.status = new_status
             order.save(update_fields=('status', 'updated_at'))
@@ -1742,13 +1887,12 @@ class CraftswomanOrderStatusView(APIView):
                 details={'from': previous_status, 'to': new_status},
                 instance=order,
             )
-        return Response(OrderSerializer(order).data)
+        return Response(OrderSerializer(order, context={'request': request, 'status_actor': 'craftswoman'}).data)
 
 
 class CraftswomanDesignStatusView(APIView):
     permission_classes = (CraftswomanOnly,)
     rbac_resource = 'designs'
-    transitions = CraftswomanOrderStatusView.transitions
 
     def patch(self, request, design_id):
         craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
@@ -1756,7 +1900,7 @@ class CraftswomanDesignStatusView(APIView):
         serializer = StatusInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         new_status = serializer.validated_data['status']
-        if new_status not in self.transitions.get(design.status, set()):
+        if not can_transition_order(design.status, new_status, 'craftswoman'):
             return Response({'detail': 'Transición de estado no permitida.'}, status=status.HTTP_400_BAD_REQUEST)
         previous_status = design.status
         with transaction.atomic():

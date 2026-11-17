@@ -16,6 +16,7 @@ from django.views.decorators.http import require_POST
 from django.conf import settings
 
 from .models import AccessRole, AuditEvent, Category, Craftswoman, CustomDesign, Customer, Order, OrderItem, Product
+from .order_workflow import allowed_order_transitions, can_transition_order, has_custom_design_items
 from .rbac import assign_role, has_permission as has_rbac_permission, has_role, record_audit, role_for_user
 
 
@@ -281,7 +282,6 @@ def craftswoman_dashboard(request):
     if not has_role(request.user, AccessRole.Code.CRAFTSWOMAN):
         raise PermissionDenied('Esta cuenta no tiene rol de tejedora.')
     _require_permission(request, 'orders', 'view')
-    _require_permission(request, 'designs', 'view')
     try:
         craftswoman = request.user.craftswoman_profile
     except Craftswoman.DoesNotExist:
@@ -289,8 +289,40 @@ def craftswoman_dashboard(request):
         return redirect('store:customer_dashboard')
     if not craftswoman.active:
         raise PermissionDenied('La cuenta de tejedora todavía no está activada.')
-    available_orders = Order.objects.filter(craftswoman__isnull=True, status=Order.Status.PENDING).select_related('customer') if craftswoman.active else Order.objects.none()
-    return render(request, 'store/craftswoman_dashboard_pro.html', {'craftswoman': craftswoman, 'orders': craftswoman.orders.select_related('customer'), 'designs': craftswoman.custom_designs.select_related('customer'), 'available_orders': available_orders})
+    available_orders = Order.objects.filter(
+        craftswoman__isnull=True, status=Order.Status.PENDING,
+    ).select_related('customer')
+    orders = craftswoman.orders.select_related('customer').prefetch_related(
+        'items__product__custom_design',
+    )
+    may_change_orders = has_rbac_permission(request.user, 'orders', 'change')
+    may_change_designs = has_rbac_permission(request.user, 'designs', 'change')
+    for order in orders:
+        has_designs = has_custom_design_items(order)
+        order.allowed_statuses = (
+            allowed_order_transitions(order.status, 'craftswoman')
+            if may_change_orders and (may_change_designs or not has_designs)
+            else []
+        )
+        order.allowed_status_options = [
+            (value, Order.Status(value).label) for value in order.allowed_statuses
+        ]
+    may_view_designs = has_rbac_permission(request.user, 'designs', 'view')
+    designs = craftswoman.custom_designs.select_related('customer') if may_view_designs else CustomDesign.objects.none()
+    for design in designs:
+        design.allowed_statuses = (
+            allowed_order_transitions(design.status, 'craftswoman')
+            if may_change_designs else []
+        )
+        design.allowed_status_options = [
+            (value, Order.Status(value).label) for value in design.allowed_statuses
+        ]
+    return render(request, 'store/craftswoman_dashboard_pro.html', {
+        'craftswoman': craftswoman,
+        'orders': orders,
+        'designs': designs,
+        'available_orders': available_orders,
+    })
 
 
 @login_required
@@ -299,14 +331,18 @@ def accept_order(request, order_id):
     if not has_role(request.user, AccessRole.Code.CRAFTSWOMAN):
         raise PermissionDenied('Esta operación solo está disponible para tejedoras.')
     _require_permission(request, 'orders', 'change')
-    _require_permission(request, 'designs', 'change')
     craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
     with transaction.atomic():
         order = get_object_or_404(Order.objects.select_for_update(), id=order_id, craftswoman__isnull=True, status=Order.Status.PENDING)
+        items = list(order.items.select_related('product__custom_design'))
+        if not can_transition_order(order.status, Order.Status.ACCEPTED, 'assignment'):
+            return redirect('store:craftswoman_dashboard')
+        if any(item.product.custom_design_id for item in items):
+            _require_permission(request, 'designs', 'change')
         order.craftswoman = craftswoman
         order.status = Order.Status.ACCEPTED
         order.save(update_fields=['craftswoman', 'status', 'updated_at'])
-        for item in order.items.select_related('product__custom_design'):
+        for item in items:
             if item.product.custom_design_id:
                 design = item.product.custom_design
                 design.craftswoman = craftswoman
@@ -317,7 +353,7 @@ def accept_order(request, order_id):
             'accept_order',
             'orders',
             affected_user=order.customer.user,
-            details={'status': order.status},
+            details={'status': order.status, 'craftswoman_id': craftswoman.id},
             instance=order,
         )
     messages.success(request, f'El pedido #{order.id} fue asignado a tu taller.')
@@ -330,31 +366,36 @@ def update_order_status(request, order_id):
     if not has_role(request.user, AccessRole.Code.CRAFTSWOMAN):
         raise PermissionDenied('Esta operación solo está disponible para tejedoras.')
     _require_permission(request, 'orders', 'change')
-    _require_permission(request, 'designs', 'change')
     craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
-    order = get_object_or_404(Order, id=order_id, craftswoman=craftswoman)
-    transitions = {Order.Status.ACCEPTED: {Order.Status.WEAVING}, Order.Status.WEAVING: {Order.Status.ACCEPTED, Order.Status.COMPLETED}}
-    status = request.POST.get('status')
-    if status in transitions.get(order.status, set()):
-        previous_status = order.status
-        with transaction.atomic():
-            order.status = status
+    with transaction.atomic():
+        order = get_object_or_404(
+            Order.objects.select_for_update().select_related('customer__user').filter(craftswoman=craftswoman),
+            id=order_id,
+        )
+        if has_custom_design_items(order):
+            _require_permission(request, 'designs', 'change')
+        next_status = request.POST.get('status')
+        if can_transition_order(order.status, next_status, 'craftswoman'):
+            previous_status = order.status
+            order.status = next_status
             order.save(update_fields=['status', 'updated_at'])
             for item in order.items.select_related('product__custom_design'):
                 if item.product.custom_design_id:
                     design = item.product.custom_design
                     if design.craftswoman_id == craftswoman.id:
-                        design.status = status
+                        design.status = next_status
                         design.save(update_fields=['status'])
             record_audit(
                 request.user,
                 'craftswoman_change_order_status',
                 'orders',
                 affected_user=order.customer.user,
-                details={'from': previous_status, 'to': status},
+                details={'from': previous_status, 'to': next_status},
                 instance=order,
             )
-        messages.success(request, f'Pedido #{order.id} actualizado a “{order.get_status_display()}”.')
+            messages.success(request, f'Pedido #{order.id} actualizado a “{order.get_status_display()}”.')
+        else:
+            messages.error(request, 'La transición de estado solicitada no está permitida.')
     return redirect('store:craftswoman_dashboard')
 
 
@@ -365,23 +406,27 @@ def update_design_status(request, design_id):
         raise PermissionDenied('Esta operación solo está disponible para tejedoras.')
     _require_permission(request, 'designs', 'change')
     craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
-    design = get_object_or_404(CustomDesign, id=design_id, craftswoman=craftswoman)
-    transitions = {Order.Status.ACCEPTED: {Order.Status.WEAVING}, Order.Status.WEAVING: {Order.Status.ACCEPTED, Order.Status.COMPLETED}}
-    status = request.POST.get('status')
-    if status in transitions.get(design.status, set()):
-        previous_status = design.status
-        with transaction.atomic():
-            design.status = status
+    with transaction.atomic():
+        design = get_object_or_404(
+            CustomDesign.objects.select_for_update().filter(craftswoman=craftswoman),
+            id=design_id,
+        )
+        next_status = request.POST.get('status')
+        if can_transition_order(design.status, next_status, 'craftswoman'):
+            previous_status = design.status
+            design.status = next_status
             design.save(update_fields=['status'])
             record_audit(
                 request.user,
                 'craftswoman_change_design_status',
                 'designs',
                 affected_user=design.customer.user,
-                details={'from': previous_status, 'to': status},
+                details={'from': previous_status, 'to': next_status},
                 instance=design,
             )
-        messages.success(request, f'Diseño #{design.id} actualizado a “{design.get_status_display()}”.')
+            messages.success(request, f'Diseño #{design.id} actualizado a “{design.get_status_display()}”.')
+        else:
+            messages.error(request, 'La transición de estado solicitada no está permitida.')
     return redirect('store:craftswoman_dashboard')
 
 

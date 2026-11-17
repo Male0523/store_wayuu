@@ -80,6 +80,7 @@ export interface CustomDesign {
   estimated_price: string
   status: string
   status_label?: string
+  allowed_statuses?: string[]
   created_at: string
   craftswoman_name?: string | null
 }
@@ -104,6 +105,8 @@ export interface OrderItem {
 
 export interface Order {
   id: number
+  customer_id: number
+  customer_name: string
   status: string
   status_label: string
   payment_method: string
@@ -114,6 +117,15 @@ export interface Order {
   items: OrderItem[]
   total: string
   craftswoman: CraftswomanSummary | null
+  allowed_statuses?: string[]
+}
+
+export interface AdminOrderSummary {
+  total_count: number
+  by_status: Record<string, number>
+  pending_count: number
+  active_count: number
+  recent_orders: Order[]
 }
 
 export interface Page<T> {

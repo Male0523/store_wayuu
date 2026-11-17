@@ -6,6 +6,7 @@ import type {
   CustomDesign,
   CraftswomanDashboard,
   AuditEvent,
+  AdminOrderSummary,
   Order,
   Page,
   Product,
@@ -108,6 +109,9 @@ export const api = {
   checkout: (values: { address: string; city: string; payment_method: string; notes: string }) =>
     request<Order>('/checkout/', { method: 'POST', body: json(values) }),
   orders: () => request<Page<Order>>('/orders/?page_size=100'),
+  adminOrders: (params: URLSearchParams) => request<Page<Order>>(`/admin/orders/?${params}`),
+  adminOrderFilters: () => request<{ craftswomen: { id: number; name: string }[] }>('/admin/orders/filters/'),
+  adminOrderSummary: () => request<AdminOrderSummary>('/admin/orders/summary/'),
   designs: () => request<CustomDesign[]>('/designs/'),
   createDesign: (values: Record<string, string | number>) =>
     request('/designs/', { method: 'POST', body: json(values) }),

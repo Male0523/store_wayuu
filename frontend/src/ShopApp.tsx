@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import {
   ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, Check, ChevronDown, Eye,
   Camera, CircleUserRound, Heart, LoaderCircle, LockKeyhole, Minus,
@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from './lib/api'
 import { useUserSession } from './context/user-context'
-import type { AdminCategory, AdminProduct, AuditEvent, Cart, Category, CustomDesign, CraftswomanDashboard, Order, Product, RBACNavigationItem, RBACPermission, RBACRolePermissions, RBACUserPermissions, SessionUser, SuperadminUser, SuperadminUserInput, UserProfile } from './types'
+import type { AdminCategory, AdminOrderSummary, AdminProduct, AuditEvent, Cart, Category, CustomDesign, CraftswomanDashboard, Order, Page, Product, RBACNavigationItem, RBACPermission, RBACRolePermissions, RBACUserPermissions, SessionUser, SuperadminUser, SuperadminUserInput, UserProfile } from './types'
 import './ShopApp.css'
 
 type Screen = 'shop' | 'orders' | 'craftswoman' | 'design' | 'admin'
@@ -36,7 +36,6 @@ const orderStatusLabels: Record<string, string> = {
   pending: 'Pendiente', accepted: 'Aceptado', weaving: 'En tejido', completed: 'Tejido terminado',
   paid: 'Pagado', preparing: 'En preparación', shipped: 'Enviado', delivered: 'Entregado', cancelled: 'Cancelado',
 }
-
 const statusLabel = (status: string) => orderStatusLabels[status] ?? status
 
 function errorMessage(error: unknown) {
@@ -79,6 +78,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
   const [categories, setCategories] = useState<Category[]>([])
   const [cart, setCart] = useState<Cart | null>(null)
   const [orders, setOrders] = useState<Order[]>([])
+  const [adminOrderSummary, setAdminOrderSummary] = useState<AdminOrderSummary | null>(null)
   const [adminProducts, setAdminProducts] = useState<AdminProduct[]>([])
   const [adminCategories, setAdminCategories] = useState<AdminCategory[]>([])
   const [designs, setDesigns] = useState<CustomDesign[]>([])
@@ -131,26 +131,26 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
   const loadAdminData = useCallback(async () => {
     if (!user || (user.role !== 'admin' && user.role !== 'superadmin')) return
 
-    const emptyOrderPage: { count: number; next: string | null; previous: string | null; results: Order[] } = {
-      count: 0,
-      next: null,
-      previous: null,
-      results: [],
+    const emptyOrderSummary: AdminOrderSummary = {
+      total_count: 0,
+      by_status: {},
+      pending_count: 0,
+      active_count: 0,
+      recent_orders: [],
     }
     const requests: [
-      Promise<{ count: number; next: string | null; previous: string | null; results: Order[] }>,
+      Promise<AdminOrderSummary>,
       Promise<AdminProduct[]>,
       Promise<AdminCategory[]>,
     ] = [
-      hasEffectivePermission(user, 'orders.view') ? api.orders() : Promise.resolve(emptyOrderPage),
+      hasEffectivePermission(user, 'orders.view') ? api.adminOrderSummary() : Promise.resolve(emptyOrderSummary),
       hasEffectivePermission(user, 'products.view') ? api.adminProducts() : Promise.resolve([]),
       hasEffectivePermission(user, 'categories.view') ? api.adminCategories() : Promise.resolve([]),
     ]
 
     try {
-      const [orderPage, productsPage, categoryList] = await Promise.all(requests)
-      const nextOrders = Array.isArray(orderPage?.results) ? orderPage.results : []
-      setOrders(nextOrders)
+      const [orderSummary, productsPage, categoryList] = await Promise.all(requests)
+      setAdminOrderSummary(orderSummary)
       setAdminProducts(Array.isArray(productsPage) ? productsPage : [])
       setAdminCategories(Array.isArray(categoryList) ? categoryList : [])
     } catch (error) {
@@ -524,6 +524,9 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
     try {
       const updated = await api.updateAdminOrderStatus(orderId, status)
       setOrders((current) => current.map((order) => order.id === orderId ? updated : order))
+      if (user && hasEffectivePermission(user, 'orders.view')) {
+        try { setAdminOrderSummary(await api.adminOrderSummary()) } catch (error) { setNotice(errorMessage(error)) }
+      }
       setNotice(`Pedido #${orderId} actualizado.`)
     } catch (error) { setNotice(errorMessage(error)) } finally { setBusy(false) }
   }
@@ -568,7 +571,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
 
     {screen === 'craftswoman' && user?.role === 'craftswoman' && <CraftswomanAccountView user={user} navigationItems={roleNavigation} dashboard={dashboard} products={craftswomanProducts} categories={categories} busy={busy} onCreateProduct={createCraftswomanProduct} onSignOut={signOut} onAcceptOrder={acceptOrder} onOrderStatus={updateOrder} onDesignStatus={updateDesignStatus} />}
 
-    {screen === 'admin' && user && (user.role === 'admin' || user.role === 'superadmin') && <AdminAccountView user={user} isSuperadmin={user.role === 'superadmin'} navigationItems={roleNavigation} orders={orders} products={adminProducts} categories={adminCategories} busy={busy} onSignOut={signOut} onSaveProduct={saveAdminProduct} onCreateProduct={createAdminProduct} onCreateCategory={createAdminCategory} onCategoryActive={updateAdminCategory} onOrderStatus={saveAdminOrderStatus} />}
+    {screen === 'admin' && user && (user.role === 'admin' || user.role === 'superadmin') && <AdminAccountView user={user} isSuperadmin={user.role === 'superadmin'} navigationItems={roleNavigation} orderSummary={adminOrderSummary} products={adminProducts} categories={adminCategories} busy={busy} onSignOut={signOut} onSaveProduct={saveAdminProduct} onCreateProduct={createAdminProduct} onCreateCategory={createAdminCategory} onCategoryActive={updateAdminCategory} onOrderStatus={saveAdminOrderStatus} onNotice={setNotice} />}
 
     {screen !== 'shop' && screen !== 'admin' && <Footer onInstagram={() => setNotice('Pronto encontrarás nuestras novedades en Instagram.')} />}
     {selectedProduct && <ProductDialog product={selectedProduct} busy={busy} onClose={() => setSelectedProduct(null)} onAdd={() => addToCart(selectedProduct.id)} />}
@@ -650,7 +653,6 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, products, ca
   const [acceptingOrderId, setAcceptingOrderId] = useState<number | null>(null)
   const canChangeOrders = Boolean(user && hasEffectivePermission(user, 'orders.change'))
   const canAddProducts = Boolean(user && hasEffectivePermission(user, 'products.add'))
-  const canChangeDesigns = Boolean(user && hasEffectivePermission(user, 'designs.change'))
   const accountName = resolveUserDisplayName(user)
   const published = products.filter((product) => product.active).length
   const pending = products.length - published
@@ -723,19 +725,19 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, products, ca
           </section>}
           {canOpenSection('inventory') && activeSection === 'inventory' && <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>CONTROL DE EXISTENCIAS</small><h1>Mi inventario</h1><p>Consulta las piezas y las unidades registradas en tu taller.</p></div><span className="craftswoman-total-stock">{stock} unidades</span></div><div className="craftswoman-product-list">{products.map((product) => <article key={product.id}><div><strong>{product.name}</strong><small>{product.sku} · {product.category.name}</small></div><span>{money(product.price)}</span><span>Disponibles: {product.stock}</span><em className={product.stock > 0 ? 'published' : ''}>{product.stock > 0 ? 'Con existencias' : 'Agotado'}</em></article>)}{!products.length && <p className="muted-copy">Tu inventario aparecerá aquí cuando registres productos.</p>}</div></section>}
           {canOpenSection('orders') && activeSection === 'orders' && <div className="craftswoman-orders"><section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>OPORTUNIDADES DE TRABAJO</small><h1>Pedidos por aceptar</h1></div><span>{(dashboard?.available_orders ?? []).length}</span></div>{(dashboard?.available_orders ?? []).length ? (dashboard?.available_orders ?? []).map((order) => <div className="artisan-order" key={order.id}><OrderCard order={order} />{canChangeOrders && <button className="button button-dark" disabled={acceptingOrderId !== null} onClick={() => void handleAcceptOrder(order.id)}>{acceptingOrderId === order.id ? <><LoaderCircle className="spin" size={15} /> Aceptando pedido…</> : <>Aceptar pedido <ArrowRight size={15} /></>}</button>}</div>) : <p className="muted-copy">No hay pedidos disponibles.</p>}</section>
-            <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>PRODUCCIÓN</small><h1>Pedidos de mi taller</h1></div><span>{(dashboard?.orders ?? []).length}</span></div>{(dashboard?.orders ?? []).length ? (dashboard?.orders ?? []).map((order) => <div className="artisan-order" key={order.id}><OrderCard order={order} />{canChangeOrders && canChangeDesigns && order.status === 'accepted' && <button className="button button-outline" onClick={() => onOrderStatus(order.id, 'weaving')}>Iniciar tejido <ArrowRight size={15} /></button>}{canChangeOrders && canChangeDesigns && order.status === 'weaving' && <button className="button button-outline" onClick={() => onOrderStatus(order.id, 'completed')}>Marcar como terminado <Check size={15} /></button>}</div>) : <p className="muted-copy">Tus pedidos aceptados aparecerán aquí.</p>}</section></div>}
-          {activeSection !== 'orders' && activeSection !== 'dashboard' && (dashboard?.designs.length ?? 0) > 0 && <section className="craftswoman-panel craftswoman-designs"><div className="craftswoman-panel-heading"><div><small>DISEÑOS PERSONALIZADOS</small><h2>Diseños de mi taller</h2></div><span>{dashboard?.designs.length ?? 0}</span></div><div className="design-list">{(dashboard?.designs ?? []).map((design) => <article className="artisan-design" key={design.id}><DesignSummary design={design} /><div className="design-actions">{canChangeDesigns && design.status === 'accepted' && <button className="button button-outline" onClick={() => onDesignStatus(design.id, 'weaving')}>Iniciar tejido <ArrowRight size={15} /></button>}{canChangeDesigns && design.status === 'weaving' && <button className="button button-outline" onClick={() => onDesignStatus(design.id, 'completed')}>Marcar terminado <Check size={15} /></button>}</div></article>)}</div></section>}
+            <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>PRODUCCIÓN</small><h1>Pedidos de mi taller</h1></div><span>{(dashboard?.orders ?? []).length}</span></div>{(dashboard?.orders ?? []).length ? (dashboard?.orders ?? []).map((order) => <div className="artisan-order" key={order.id}><OrderCard order={order} />{canChangeOrders && (order.allowed_statuses ?? []).map((nextStatus) => <button key={nextStatus} className="button button-outline" onClick={() => onOrderStatus(order.id, nextStatus)}>{statusLabel(nextStatus)}</button>)}</div>) : <p className="muted-copy">Tus pedidos aceptados aparecerán aquí.</p>}</section></div>}
+          {activeSection !== 'orders' && activeSection !== 'dashboard' && (dashboard?.designs.length ?? 0) > 0 && <section className="craftswoman-panel craftswoman-designs"><div className="craftswoman-panel-heading"><div><small>DISEÑOS PERSONALIZADOS</small><h2>Diseños de mi taller</h2></div><span>{dashboard?.designs.length ?? 0}</span></div><div className="design-list">{(dashboard?.designs ?? []).map((design) => <article className="artisan-design" key={design.id}><DesignSummary design={design} /><div className="design-actions">{(design.allowed_statuses ?? []).map((nextStatus) => <button key={nextStatus} className="button button-outline" onClick={() => onDesignStatus(design.id, nextStatus)}>{statusLabel(nextStatus)}</button>)}</div></article>)}</div></section>}
         </>}
       </main>
     </section>
   </div>
 }
 
-function AdminAccountView({ user, isSuperadmin, navigationItems, orders, products, categories, busy, onSignOut, onSaveProduct, onCreateProduct, onCreateCategory, onCategoryActive, onOrderStatus }: {
+function AdminAccountView({ user, isSuperadmin, navigationItems, orderSummary, products, categories, busy, onSignOut, onSaveProduct, onCreateProduct, onCreateCategory, onCategoryActive, onOrderStatus, onNotice }: {
   user: SessionUser
   navigationItems: RBACNavigationItem[]
   isSuperadmin: boolean
-  orders: Order[]
+  orderSummary: AdminOrderSummary | null
   products: AdminProduct[]
   categories: AdminCategory[]
   busy: boolean
@@ -745,10 +747,21 @@ function AdminAccountView({ user, isSuperadmin, navigationItems, orders, product
   onCreateCategory: (values: Pick<AdminCategory, 'name' | 'description' | 'active'>) => void
   onCategoryActive: (categoryId: number, active: boolean) => void
   onOrderStatus: (orderId: number, status: string) => void
+  onNotice: (message: string) => void
 }) {
   const [activeSection, setActiveSection] = useState<'dashboard' | 'products' | 'orders' | 'categories' | 'access'>('dashboard')
   const [showCreateForm, setShowCreateForm] = useState(false)
-  const [selectedCraftswomanId, setSelectedCraftswomanId] = useState('all')
+  const [orderSearch, setOrderSearch] = useState('')
+  const deferredOrderSearch = useDeferredValue(orderSearch)
+  const [orderStatusFilter, setOrderStatusFilter] = useState('')
+  const [orderAssignmentFilter, setOrderAssignmentFilter] = useState('all')
+  const [orderCraftswomanId, setOrderCraftswomanId] = useState('')
+  const [craftswomen, setCraftswomen] = useState<{ id: number; name: string }[]>([])
+  const [craftswomenLoading, setCraftswomenLoading] = useState(true)
+  const [orderCustomerFilter, setOrderCustomerFilter] = useState('')
+  const [orderPageNumber, setOrderPageNumber] = useState(1)
+  const [adminOrderPage, setAdminOrderPage] = useState<Page<Order>>({ count: 0, next: null, previous: null, results: [] })
+  const [completedOrderQuery, setCompletedOrderQuery] = useState('')
   function submitNewCategory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const values = Object.fromEntries(new FormData(event.currentTarget).entries()) as Record<string, string>
@@ -769,19 +782,8 @@ function AdminAccountView({ user, isSuperadmin, navigationItems, orders, product
   }
   const pendingProducts = products.filter((product) => !product.active)
   const publishedProducts = products.filter((product) => product.active)
-  const pendingOrders = orders.filter((order) => order.status === 'pending').length
-  const activeOrders = orders.filter((order) => ['accepted', 'weaving', 'preparing', 'shipped'].includes(order.status)).length
-  const craftswomanOptions = orders.reduce<{ id: number; name: string }[]>((list, order) => {
-    if (order.craftswoman && !list.some((item) => item.id === order.craftswoman?.id)) {
-      list.push({ id: order.craftswoman.id, name: order.craftswoman.name })
-    }
-    return list
-  }, [])
-  const filteredOrders = orders.filter((order) => {
-    if (selectedCraftswomanId === 'all') return true
-    if (selectedCraftswomanId === 'unassigned') return !order.craftswoman
-    return String(order.craftswoman?.id ?? '') === selectedCraftswomanId
-  })
+  const pendingOrders = orderSummary?.pending_count ?? 0
+  const activeOrders = orderSummary?.active_count ?? 0
   const canViewOrders = hasEffectivePermission(user, 'orders.view')
   const canChangeOrders = hasEffectivePermission(user, 'orders.change')
   const canViewProducts = hasEffectivePermission(user, 'products.view')
@@ -791,6 +793,49 @@ function AdminAccountView({ user, isSuperadmin, navigationItems, orders, product
   const canAddCategories = hasEffectivePermission(user, 'categories.add')
   const canChangeCategories = hasEffectivePermission(user, 'categories.change')
   const accountName = resolveUserDisplayName(user)
+  const adminOrderQuery = useMemo(() => {
+    const params = new URLSearchParams({ page: String(orderPageNumber), page_size: '20' })
+    if (deferredOrderSearch.trim()) params.set('search', deferredOrderSearch.trim())
+    if (orderStatusFilter) params.set('status', orderStatusFilter)
+    if (orderAssignmentFilter !== 'all') params.set('assignment', orderAssignmentFilter)
+    if (orderCraftswomanId) params.set('craftswoman_id', orderCraftswomanId)
+    if (orderCustomerFilter) params.set('customer_id', orderCustomerFilter)
+    return params.toString()
+  }, [deferredOrderSearch, orderStatusFilter, orderAssignmentFilter, orderCraftswomanId, orderCustomerFilter, orderPageNumber])
+  const ordersLoading = activeSection === 'orders' && canViewOrders && completedOrderQuery !== adminOrderQuery
+  useEffect(() => {
+    if (!canViewOrders) return
+    let active = true
+    api.adminOrderFilters()
+      .then((options) => { if (active) setCraftswomen(options.craftswomen) })
+      .catch((error: unknown) => { if (active) onNotice(errorMessage(error)) })
+      .finally(() => { if (active) setCraftswomenLoading(false) })
+    return () => { active = false }
+  }, [canViewOrders, user.id, onNotice])
+
+  useEffect(() => {
+    if (activeSection !== 'orders' || !canViewOrders) return
+
+    let active = true
+    api.adminOrders(new URLSearchParams(adminOrderQuery))
+      .then((page) => { if (active) setAdminOrderPage(page) })
+      .catch((error: unknown) => { if (active) onNotice(errorMessage(error)) })
+      .finally(() => { if (active) setCompletedOrderQuery(adminOrderQuery) })
+
+    return () => { active = false }
+  }, [activeSection, canViewOrders, adminOrderQuery, user.id, onNotice])
+
+  async function changeAdminOrderStatus(orderId: number, nextStatus: string) {
+    await onOrderStatus(orderId, nextStatus)
+    const params = new URLSearchParams({ page: String(orderPageNumber), page_size: '20' })
+    if (deferredOrderSearch.trim()) params.set('search', deferredOrderSearch.trim())
+    if (orderStatusFilter) params.set('status', orderStatusFilter)
+    if (orderAssignmentFilter !== 'all') params.set('assignment', orderAssignmentFilter)
+    if (orderCraftswomanId) params.set('craftswoman_id', orderCraftswomanId)
+    if (orderCustomerFilter) params.set('customer_id', orderCustomerFilter)
+    try { setAdminOrderPage(await api.adminOrders(params)) } catch (error) { onNotice(errorMessage(error)) }
+  }
+
   const navItems = [
     ...navigationItems.filter((item) => item.route_name.startsWith('admin.') && item.route_name !== 'admin.access').map((item) => {
       const id = item.route_name.split('.')[1] as 'dashboard' | 'products' | 'orders' | 'categories'
@@ -824,11 +869,11 @@ function AdminAccountView({ user, isSuperadmin, navigationItems, orders, product
             <article><span>Por revisar</span><strong>{pendingProducts.length}</strong><small>Esperando aprobación</small></article>
             <article><span>Publicados</span><strong>{publishedProducts.length}</strong><small>Visibles para clientes</small></article>
             <article><span>Pedidos pendientes</span><strong>{pendingOrders}</strong><small>Requieren seguimiento</small></article>
-            <article><span>Pedidos activos</span><strong>{activeOrders}</strong><small>En preparación o envío</small></article>
+            <article><span>Pedidos activos</span><strong>{activeOrders}</strong><small>Aceptados, en tejido, preparación o envío</small></article>
           </section>
           <div className="craftswoman-columns">
             <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>REVISIÓN DE CATÁLOGO</small><h2>Tejidos por aprobar</h2></div><span>{pendingProducts.length}</span></div>{pendingProducts.slice(0,4).map((product) => <div className="admin-review-mini" key={product.id}><div><strong>{product.name}</strong><small>{product.sku} · Taller #{product.craftswoman ?? 'sin asignar'}</small></div><button disabled={busy || !canChangeProducts} onClick={() => onSaveProduct(product.id, { active: true })}>Aprobar</button></div>)}{!pendingProducts.length && <p className="muted-copy">No hay tejidos pendientes de revisión.</p>}{canOpenSection('products') && <button className="admin-text-link" onClick={() => setActiveSection('products')}>Ir a productos <ArrowRight size={14} /></button>}</section>
-            <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>OPERACIÓN</small><h2>Pedidos recientes</h2></div><span>{orders.length}</span></div>{orders.slice(0,3).map((order) => <div className="admin-review-mini" key={order.id}><div><strong>Pedido #{order.id}</strong><small>{dateLabel(order.created_at)} · {money(order.total)}</small></div><em>{statusLabel(order.status)}</em></div>)}{!orders.length && <p className="muted-copy">Los pedidos aparecerán aquí cuando los clientes compren.</p>}{canOpenSection('orders') && <button className="admin-text-link" onClick={() => setActiveSection('orders')}>Consultar pedidos <ArrowRight size={14} /></button>}</section>
+            <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>OPERACIÓN</small><h2>Pedidos recientes</h2></div><span>{orderSummary?.total_count ?? 0}</span></div>{(orderSummary?.recent_orders ?? []).map((order) => <div className="admin-review-mini" key={order.id}><div><strong>Pedido #{order.id}</strong><small>{dateLabel(order.created_at)} · {money(order.total)}</small></div><em>{statusLabel(order.status)}</em></div>)}{!orderSummary?.total_count && <p className="muted-copy">Los pedidos aparecerán aquí cuando los clientes compren.</p>}{canOpenSection('orders') && <button className="admin-text-link" onClick={() => setActiveSection('orders')}>Consultar pedidos <ArrowRight size={14} /></button>}</section>
           </div>
           
         </div>}
@@ -838,7 +883,17 @@ function AdminAccountView({ user, isSuperadmin, navigationItems, orders, product
           {canViewProducts && <><div className="admin-section-subheading"><h2>Pendientes de aprobación</h2><span>{pendingProducts.length}</span></div>{pendingProducts.length ? <div className="admin-review-list">{pendingProducts.map((product) => <article className="admin-review-card" key={product.id}><div className="admin-review-card-main">{product.image_url ? <img src={product.image_url} alt={product.name} /> : <span className="admin-review-placeholder"><ShoppingBag size={22} /></span>}<div><strong>{product.name}</strong><small>{product.sku} · {categories.find((category) => category.id === product.category)?.name ?? 'Categoría'}</small><small>Taller vinculado: {product.craftswoman_name || (product.craftswoman ? `Taller #${product.craftswoman}` : 'No asignado')} · Stock: {product.stock}</small><p>{product.description || 'Sin descripción registrada.'}</p></div></div><div className="admin-review-actions"><span className="admin-review-pending">Pendiente de revisión</span>{canChangeProducts && <button className="craftswoman-submit-review" disabled={busy} onClick={() => onSaveProduct(product.id, { active: true })}><Check size={15} /> Aprobar y publicar</button>}</div></article>)}</div> : <p className="muted-copy">No hay tejidos pendientes. Cuando una tejedora envíe una pieza, aparecerá en esta sección.</p>}</>}
           {canViewProducts && <><div className="admin-section-subheading"><h2>Productos publicados y catálogo</h2><span>{publishedProducts.length}</span></div><div className="admin-product-list">{publishedProducts.map((product) => <AdminProductRow key={product.id} product={product} busy={busy} canChange={canChangeProducts} onSave={onSaveProduct} />)}</div></>}
         </section>}
-        {canOpenSection('orders') && activeSection === 'orders' && <section className="craftswoman-panel"><div className="craftswoman-panel-heading admin-orders-heading"><div><small>SEGUIMIENTO COMERCIAL</small><h1>Pedidos de clientes</h1><p>Consulta las compras registradas, identifica la tejedora asignada y actualiza su estado.</p></div><div className="admin-orders-heading-actions"><label className="admin-orders-filter">Filtrar por tejedora<select aria-label="Filtrar pedidos por tejedora" value={selectedCraftswomanId} onChange={(event) => setSelectedCraftswomanId(event.target.value)}><option value="all">Todas las tejedoras</option><option value="unassigned">Sin tejedora asignada</option>{craftswomanOptions.map((craftswoman) => <option key={craftswoman.id} value={String(craftswoman.id)}>{craftswoman.name}</option>)}</select></label><span>{filteredOrders.length} de {orders.length} pedidos</span></div></div>{canViewOrders ? orders.length ? filteredOrders.length ? <div className="orders-list">{filteredOrders.map((order) => <AdminOrderRow key={order.id} order={order} busy={busy} canChange={canChangeOrders} onStatus={onOrderStatus} />)}</div> : <p className="muted-copy">No hay pedidos para la tejedora seleccionada.</p> : <p className="muted-copy">Todavía no hay pedidos registrados.</p> : <p className="muted-copy">Tu rol no tiene permiso para consultar pedidos.</p>}</section>}
+        {canOpenSection('orders') && activeSection === 'orders' && <section className="craftswoman-panel"><div className="craftswoman-panel-heading admin-orders-heading"><div><small>SEGUIMIENTO COMERCIAL</small><h1>Pedidos de clientes</h1><p>Busca por pedido, cliente, producto o tejedora; limita los resultados por estado y asignación.</p></div><span>{adminOrderPage.count} pedidos</span></div>{canViewOrders ? <>
+          <div className="admin-order-filters">
+            <label className="admin-orders-filter">Buscar<input aria-label="Buscar pedidos" value={orderSearch} onChange={(event) => { setOrderSearch(event.target.value); setOrderPageNumber(1) }} placeholder="Número, cliente, producto o tejedora" /></label>
+            <label className="admin-orders-filter">Estado<select aria-label="Filtrar pedidos por estado" value={orderStatusFilter} onChange={(event) => { setOrderStatusFilter(event.target.value); setOrderPageNumber(1) }}><option value="">Todos los estados</option>{Object.entries(orderStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+            <label className="admin-orders-filter">Asignación<select aria-label="Filtrar pedidos por asignación" value={orderAssignmentFilter} onChange={(event) => { const value = event.target.value; setOrderAssignmentFilter(value); if (value === 'all' || value === 'unassigned') setOrderCraftswomanId(''); setOrderPageNumber(1) }}><option value="all">Todas</option><option value="assigned">Asignados</option><option value="unassigned">Sin tejedora</option></select></label>
+            <label className="admin-orders-filter">Tejedora<select aria-label="Filtrar por tejedora" value={orderCraftswomanId} disabled={craftswomenLoading || orderAssignmentFilter === 'unassigned'} onChange={(event) => { const value = event.target.value; setOrderCraftswomanId(value); if (value) setOrderAssignmentFilter('assigned'); else if (orderAssignmentFilter === 'assigned') setOrderAssignmentFilter('all'); setOrderPageNumber(1) }}><option value="">Todas las tejedoras</option>{craftswomen.map((craftswoman) => <option key={craftswoman.id} value={craftswoman.id}>{craftswoman.name}</option>)}</select></label>
+            <label className="admin-orders-filter">ID de cliente<input aria-label="Filtrar por ID de cliente" type="number" min="1" value={orderCustomerFilter} onChange={(event) => { setOrderCustomerFilter(event.target.value); setOrderPageNumber(1) }} placeholder="Todos" /></label>
+          </div>
+          {ordersLoading ? <p className="muted-copy" role="status">Cargando pedidos…</p> : adminOrderPage.results.length ? <div className="orders-list">{adminOrderPage.results.map((order) => <AdminOrderRow key={order.id} order={order} busy={busy} canChange={canChangeOrders} onStatus={changeAdminOrderStatus} />)}</div> : <p className="muted-copy">No hay pedidos que coincidan con estos filtros.</p>}
+          <nav className="admin-order-pagination" aria-label="Paginación de pedidos"><button type="button" className="button button-outline" disabled={!adminOrderPage.previous || ordersLoading} onClick={() => setOrderPageNumber((page) => Math.max(1, page - 1))}>Anterior</button><span>Página {orderPageNumber} de {Math.max(1, Math.ceil(adminOrderPage.count / 20))}</span><button type="button" className="button button-outline" disabled={!adminOrderPage.next || ordersLoading} onClick={() => setOrderPageNumber((page) => page + 1)}>Siguiente</button></nav>
+        </> : <p className="muted-copy">Tu rol no tiene permiso para consultar pedidos.</p>}</section>}
         {canOpenSection('categories') && activeSection === 'categories' && <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>ORGANIZACIÓN DEL CATÁLOGO</small><h1>Categorías</h1><p>Mantén las categorías disponibles para ordenar las piezas de la tienda.</p></div></div>{canAddCategories && <form className="admin-category-form" onSubmit={submitNewCategory}><label className="form-label">Nombre de categoría *<input name="name" required maxLength={100} placeholder="Ej. Mantas Wayúu" /></label><label className="form-label">Descripción<input name="description" maxLength={500} placeholder="Descripción breve" /></label><button className="button button-dark" disabled={busy}>{busy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} Crear categoría</button></form>}{canViewCategories && <div className="admin-category-list">{categories.map((category) => <div className="admin-category-row" key={category.id}><div><strong>{category.name}</strong><small>{category.description || 'Sin descripción'}</small></div><span className={category.active ? 'category-state active' : 'category-state'}>{category.active ? 'Activa' : 'Inactiva'}</span>{canChangeCategories && <button className="text-button" disabled={busy} onClick={() => onCategoryActive(category.id, !category.active)}>{category.active ? 'Desactivar' : 'Activar'}</button>}</div>)}</div>}</section>}
         {canOpenSection('access') && activeSection === 'access' && isSuperadmin && <SuperadminRBACPanel currentUser={user} />}
       </main>
@@ -1247,7 +1302,8 @@ function AdminProductRow({ product, busy, canChange, onSave }: { product: AdminP
 }
 
 function AdminOrderRow({ order, busy, canChange, onStatus }: { order: Order; busy: boolean; canChange: boolean; onStatus: (id: number, status: string) => void }) {
-  return <div className="admin-order-row"><OrderCard order={order} />{canChange && <label className="admin-inline-field">Estado<select aria-label={`Estado del pedido ${order.id}`} disabled={busy} value={order.status} onChange={(event) => onStatus(order.id, event.target.value)}>{Object.entries(orderStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}</div>
+  const transitions = order.allowed_statuses ?? []
+  return <div className="admin-order-row"><div><p className="admin-order-customer">Cliente: {order.customer_name} · #{order.customer_id}</p><OrderCard order={order} /></div>{canChange && transitions.length > 0 && <label className="admin-inline-field">Estado<select aria-label={`Estado del pedido ${order.id}`} disabled={busy} value={order.status} onChange={(event) => onStatus(order.id, event.target.value)}><option value={order.status} disabled>{statusLabel(order.status)}</option>{transitions.map((value) => <option key={value} value={value}>{statusLabel(value)}</option>)}</select></label>}</div>
 }
 
 function DesignSummary({ design }: { design: CustomDesign }) {
