@@ -224,3 +224,32 @@ El hash del commit documental se informa en la entrega de Fase 0 y queda en el h
 - `97fa0ca0e9af384919307db95ba1839f6c6a94d9` — `feat: persist customer carts and favorites`.
 - `c96a6307ee452e95515883940a74937d89798a25` — `feat: sync account favorites and cart availability`.
 - No se integraron ramas ni se realizó push, PR o despliegue. La rama de trabajo es `feature/carrito-favoritos-checkout`.
+
+## 2026-11-17 — Sprint 4: catálogo, productos y categorías
+
+### Preparación y cambios
+
+- Se verificó que `feature/carrito-favoritos-checkout` estaba limpia en `d6f402c05ba5c61ce6b6472cc765c99c2abf5649`, con `origin https://github.com/Male0523/store_wayuu.git`; se creó `feature/catalogo-productos` desde ese commit. Se conservaron los commits previos.
+- Se añadió `Category.is_internal` mediante migración aditiva `store.0018_category_internal`. Los registros existentes reciben `False`; la categoría generada por el diseñador con nombre exacto `Diseños personalizados` se clasifica como interna. No se elimina ni renombra ninguna categoría o producto.
+- El endpoint público de categorías devuelve todas las categorías comerciales activas, aunque no tengan productos, y omite las inactivas e internas. Listado, búsqueda, filtros, paginación y detalle del catálogo público excluyen productos personalizados/internos y productos de categorías inactivas. Las vistas HTML tradicionales aplican el mismo aislamiento.
+- Las categorías internas son de solo lectura en la administración y no aparecen en selectores comerciales. Los serializers de productos de administración y tejedora rechazan categorías internas/inactivas al elegir categoría. Los endpoints administrativos continúan protegidos por RBAC; se añadió `/api/v1/admin/products/options/` para cargar categorías comerciales y perfiles reales de tejedoras bajo permiso de consulta de productos.
+- El panel permite editar datos de categoría y crear/editar productos con opciones de categorías comerciales y perfiles existentes. El detalle de producto muestra nombre, comunidad, región y biografía de la tejedora solo cuando existe una relación real. El manejador de imagen del catálogo muestra un fallback visual si la referencia de una imagen falla, sin sustituirla por otra fotografía.
+- Inspección de solo lectura de la base SQLite local: 8 productos públicos, 0 referencias vacías, 8 referencias `data:image`, 0 referencias repetidas y 0 productos vinculados a tejedora. No se asignaron perfiles ficticios.
+- `Product.image_url` conserva referencias HTTP(S) o datos de imagen embebidos, que el API transmite sin reescribir. No se encontró `MEDIA_ROOT`, `MEDIA_URL` ni endpoint de carga de archivos para este flujo; las ocho imágenes locales usan datos embebidos. La implementación no incorpora almacenamiento de archivos nuevo.
+- Se conservó el diseñador: la categoría técnica creada por sus dos flujos se marca interna para que no aparezca en el catálogo comercial; el flujo y los productos/diseños no se eliminaron ni reconstruyeron.
+
+### Verificaciones ejecutadas
+
+- Pruebas dirigidas — **OK**, 7 pruebas en la última ejecución: categorías comerciales vacías/internas, búsqueda/filtros/paginación, perfiles e imagen en listado/detalle, CRUD y permisos RBAC de categorías, CRUD de productos y opciones reales de tejedoras, visibilidad HTML/API y continuidad del diseñador.
+- Desde `backend`: `$env:DJANGO_SECRET_KEY='sprint4-test-only-local'; $env:DB_ENGINE='sqlite'; .\\.venv\\Scripts\\python.exe manage.py test` — **OK**, 111 pruebas, 0 fallos, 0 errores; `System check identified no issues`. Django emitió el warning preexistente por falta del directorio `backend/staticfiles/` y la salida informativa de la prueba de auditoría de roles.
+- Desde `backend`: `manage.py makemigrations --check --dry-run` con clave temporal — **OK**, `No changes detected`. No se aplicó la migración a la base de datos local/de producción; la suite usó su base de prueba efímera.
+- Desde `frontend`: `npm run build` — **OK**, TypeScript y Vite; 1946 módulos transformados.
+- Desde `frontend`: `npm run lint` — **falló**, 6 errores y 5 warnings, igual que el cierre Sprint 3 (referencia previa a Sprint 3: 7 errores y 5 warnings). Siguen siendo diagnósticos de hooks React en `CustomerPanel.tsx` y `ShopApp.tsx`; el Sprint 4 no añadió ni aumentó errores de lint.
+- Desde `frontend`: `npm run` confirma que no existe script de pruebas frontend.
+- `git diff --check` — **OK**, sin errores de whitespace.
+
+### Commits y estado
+
+- `814cd46a2fffd8dc0b05b44272c8dd5631cbdb79` — `feat: separate commercial and internal catalog categories`.
+- `36b4bd1f65821211a29411d5f31e4871a8faff26` — `feat: manage catalog profiles and category edits`.
+- No hubo push, merge, despliegue ni cambios en `main`. Rama local: `feature/catalogo-productos`.
