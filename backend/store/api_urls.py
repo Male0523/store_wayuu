@@ -13,6 +13,7 @@ urlpatterns = [
     path('admin/categories/', api.AdminCategoryListView.as_view(), name='admin-categories'),
     path('admin/categories/<int:category_id>/', api.AdminCategoryDetailView.as_view(), name='admin-category-detail'),
     path('admin/products/', api.AdminProductListView.as_view(), name='admin-products'),
+    path('admin/products/options/', api.AdminProductOptionsView.as_view(), name='admin-product-options'),
     path('admin/products/<int:product_id>/', api.AdminProductDetailView.as_view(), name='admin-product-detail'),
     path('admin/orders/', api.AdminOrderListView.as_view(), name='admin-orders'),
     path('admin/orders/filters/', api.AdminOrderFiltersView.as_view(), name='admin-order-filters'),

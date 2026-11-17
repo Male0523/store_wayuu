@@ -82,8 +82,8 @@ class CategorySerializer(serializers.ModelSerializer):
 class AdminCategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
-        fields = ('id', 'name', 'description', 'active')
-        read_only_fields = ('id',)
+        fields = ('id', 'name', 'description', 'active', 'is_internal')
+        read_only_fields = ('id', 'is_internal')
 
 
 class CraftswomanSummarySerializer(serializers.ModelSerializer):
@@ -111,7 +111,7 @@ class ProductSerializer(serializers.ModelSerializer):
 
 
 class AdminProductSerializer(serializers.ModelSerializer):
-    category = serializers.PrimaryKeyRelatedField(queryset=Category.objects.all())
+    category = serializers.PrimaryKeyRelatedField(queryset=Category.objects.filter(active=True, is_internal=False))
     craftswoman_name = serializers.CharField(source='craftswoman.name', read_only=True, allow_null=True, default=None)
     craftswoman = serializers.PrimaryKeyRelatedField(
         queryset=Craftswoman.objects.all(), required=False, allow_null=True,
@@ -121,6 +121,16 @@ class AdminProductSerializer(serializers.ModelSerializer):
         if value and self.instance and self.instance.custom_design_id:
             raise serializers.ValidationError('Los diseños personalizados son privados y no se pueden publicar en el catálogo.')
         return value
+
+    def validate(self, attrs):
+        category = attrs.get('category', self.instance.category if self.instance else None)
+        active = attrs.get('active', self.instance.active if self.instance else True)
+        category_selection_or_activation = (
+            self.instance is None or 'category' in attrs or ('active' in attrs and active)
+        )
+        if category_selection_or_activation and active and category and (not category.active or category.is_internal):
+            raise serializers.ValidationError({'category': 'Los productos públicos requieren una categoría comercial activa.'})
+        return attrs
 
     class Meta:
         model = Product
@@ -353,7 +363,7 @@ class ProfileSerializer(serializers.ModelSerializer):
 
 
 class CraftswomanProductWriteSerializer(serializers.ModelSerializer):
-    category = serializers.PrimaryKeyRelatedField(queryset=Category.objects.filter(active=True))
+    category = serializers.PrimaryKeyRelatedField(queryset=Category.objects.filter(active=True, is_internal=False))
     description = serializers.CharField(required=True, allow_blank=False, min_length=10, max_length=2000)
     region = serializers.CharField(required=True, allow_blank=False, max_length=100)
     color = serializers.CharField(required=True, allow_blank=False, max_length=150)
@@ -774,7 +784,7 @@ class CategoryListView(APIView):
     permission_classes = (AllowAny,)
 
     def get(self, request):
-        categories = Category.objects.filter(active=True, products__active=True).distinct()
+        categories = Category.objects.filter(active=True, is_internal=False).order_by('name', 'id')
         return Response(CategorySerializer(categories, many=True).data)
 
 
@@ -782,7 +792,9 @@ class ProductListView(PaginatedAPIView):
     permission_classes = (AllowAny,)
 
     def get(self, request):
-        products = Product.objects.filter(active=True, custom_design__isnull=True).select_related('category', 'craftswoman')
+        products = Product.objects.filter(
+            active=True, custom_design__isnull=True, category__active=True, category__is_internal=False,
+        ).select_related('category', 'craftswoman')
         search = request.query_params.get('search', '').strip()
         if search:
             products = products.filter(
@@ -817,7 +829,9 @@ class ProductDetailView(APIView):
 
     def get(self, request, product_id):
         product = get_object_or_404(
-            Product.objects.select_related('category', 'craftswoman'), id=product_id, active=True, custom_design__isnull=True,
+            Product.objects.select_related('category', 'craftswoman'),
+            id=product_id, active=True, custom_design__isnull=True,
+            category__active=True, category__is_internal=False,
         )
         return Response(ProductSerializer(product).data)
 
@@ -836,6 +850,21 @@ class AdminProductListView(APIView):
         product = serializer.save()
         record_audit(request.user, 'create_product', 'products', instance=product)
         return Response(AdminProductSerializer(product).data, status=status.HTTP_201_CREATED)
+
+
+class AdminProductOptionsView(APIView):
+    permission_classes = (AdminOrSuperadmin,)
+    rbac_resource = 'products'
+
+    def get(self, request):
+        categories = Category.objects.filter(active=True, is_internal=False).order_by('name', 'id')
+        craftswomen = Craftswoman.objects.order_by('name', 'id').values(
+            'id', 'name', 'community', 'region', 'active',
+        )
+        return Response({
+            'categories': AdminCategorySerializer(categories, many=True).data,
+            'craftswomen': list(craftswomen),
+        })
 
 
 class SuperadminUserListView(PaginatedAPIView):
@@ -2068,7 +2097,7 @@ class CustomDesignListView(APIView):
             )
             category, _ = Category.objects.get_or_create(
                 name='Diseños personalizados',
-                defaults={'description': 'Mantas configuradas por clientes.', 'active': True},
+                defaults={'description': 'Mantas configuradas por clientes.', 'active': True, 'is_internal': True},
             )
             product = Product.objects.create(
                 sku=f'DISENO-{design.pk:05d}',

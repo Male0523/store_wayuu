@@ -111,7 +111,10 @@ def _hero_image_from_beta():
 
 
 def catalog(request):
-    products = Product.objects.filter(active=True).select_related('category', 'craftswoman')
+    products = Product.objects.filter(
+        active=True, custom_design__isnull=True,
+        category__active=True, category__is_internal=False,
+    ).select_related('category', 'craftswoman')
     role = role_for_user(request.user)
     is_craftswoman = role is not None and role.code == AccessRole.Code.CRAFTSWOMAN
     if is_craftswoman:
@@ -436,7 +439,10 @@ def update_design_status(request, design_id):
 
 
 def product_detail(request, product_id):
-    product = get_object_or_404(Product.objects.select_related('category', 'craftswoman'), id=product_id, active=True)
+    product = get_object_or_404(
+        Product.objects.select_related('category', 'craftswoman'), id=product_id, active=True,
+        custom_design__isnull=True, category__active=True, category__is_internal=False,
+    )
     role = role_for_user(request.user)
     is_craftswoman = role is not None and role.code == AccessRole.Code.CRAFTSWOMAN
     if is_craftswoman:
@@ -474,7 +480,10 @@ def custom_designer(request):
                 quantity = max(1, int(request.POST.get('quantity', 1)))
                 with transaction.atomic():
                     design = CustomDesign.objects.create(customer=customer, pattern=request.POST.get('pattern', 'rombos'), base_color=request.POST.get('base_color', '#F5F0EB'), accent_color_one=request.POST.get('accent_color_one', '#C67B5C'), accent_color_two=request.POST.get('accent_color_two', '#45634E'), size=size if size in prices else 'M', quantity=quantity, notes=request.POST.get('notes', '').strip(), estimated_price=prices.get(size, prices['M']) * quantity)
-                    category, _ = Category.objects.get_or_create(name='Diseños personalizados', defaults={'description': 'Mantas configuradas por clientes.', 'active': True})
+                    category, _ = Category.objects.get_or_create(
+                        name='Diseños personalizados',
+                        defaults={'description': 'Mantas configuradas por clientes.', 'active': True, 'is_internal': True},
+                    )
                     product = Product.objects.create(
                         sku=f'DISENO-{design.pk:05d}',
                         name=f'Manta personalizada · {design.pattern.title()}',

@@ -347,6 +347,7 @@ class Category(models.Model):
     name = models.CharField('nombre', max_length=100, unique=True)
     description = models.TextField('descripción', blank=True)
     active = models.BooleanField('activa', default=True)
+    is_internal = models.BooleanField('categoría interna', default=False, help_text='Las categorías internas organizan datos técnicos y no aparecen en el catálogo comercial.')
 
     class Meta:
         verbose_name = 'categoría'

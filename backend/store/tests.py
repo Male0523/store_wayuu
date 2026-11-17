@@ -167,6 +167,132 @@ class StoreAPITests(TestCase):
         self.assertEqual(products.json()['results'][0]['id'], self.product.id)
         self.assertEqual(products.json()['results'][0]['price'], '25000')
 
+    def test_public_catalog_includes_active_empty_commercial_categories_only(self):
+        empty = Category.objects.create(name='Mochilas', active=True)
+        inactive = Category.objects.create(name='Categoría inactiva', active=False)
+        internal = Category.objects.create(name='Diseños personalizados', active=True, is_internal=True)
+        Product.objects.create(
+            sku='API-CATALOG-INTERNAL', name='Diseño interno', category=internal,
+            custom_design=CustomDesign.objects.create(
+                customer=self.customer, pattern='rombos', base_color='#111111',
+                accent_color_one='#222222', accent_color_two='#333333', size='M',
+                estimated_price=Decimal('100000'),
+            ),
+            price=Decimal('100000'), stock=1, active=True,
+        )
+
+        categories = self.client.get('/api/v1/categories/')
+        catalog = self.client.get('/api/v1/products/')
+
+        self.assertEqual(categories.status_code, 200)
+        self.assertIn(empty.id, [item['id'] for item in categories.json()])
+        self.assertNotIn(inactive.id, [item['id'] for item in categories.json()])
+        self.assertNotIn(internal.id, [item['id'] for item in categories.json()])
+        self.assertEqual(catalog.json()['count'], 1)
+        self.assertEqual(catalog.json()['results'][0]['id'], self.product.id)
+        self.assertEqual(self.client.get(f'/api/v1/products/{self.product.id}/').status_code, 200)
+
+    def test_public_product_preserves_real_craftswoman_profile_and_image_reference(self):
+        craft_user = self.create_role_user('profile-on-public-product', AccessRole.Code.CRAFTSWOMAN)
+        craftswoman = Craftswoman.objects.create(
+            user=craft_user, name='Tejedora de prueba', community='Comunidad real',
+            region='La Guajira', biography='Perfil de prueba', active=True,
+        )
+        image_data = 'data:image/png;base64,aGVsbG8='
+        product = Product.objects.create(
+            sku='API-PROFILE-IMAGE', name='Manta con perfil', category=self.category,
+            craftswoman=craftswoman, price=Decimal('45000'), stock=2,
+            image_url=image_data, active=True,
+        )
+
+        listed = self.client.get('/api/v1/products/').json()['results']
+        detail = self.client.get(f'/api/v1/products/{product.id}/').json()
+        listed_product = next(item for item in listed if item['id'] == product.id)
+
+        for value in (listed_product, detail):
+            self.assertEqual(value['image_url'], image_data)
+            self.assertEqual(value['craftswoman']['id'], craftswoman.id)
+            self.assertEqual(value['craftswoman']['name'], 'Tejedora de prueba')
+            self.assertEqual(value['craftswoman']['community'], 'Comunidad real')
+            self.assertEqual(value['craftswoman']['region'], 'La Guajira')
+
+    def test_admin_category_crud_and_rbac_visibility(self):
+        admin = self.create_role_user('admin-catalog-categories', AccessRole.Code.ADMIN)
+        self.client.force_login(admin)
+
+        created = self.client.post('/api/v1/admin/categories/', {
+            'name': 'Accesorios', 'description': 'Categoría comercial', 'active': True, 'is_internal': True,
+        }, content_type='application/json')
+        category_id = created.json()['id']
+        updated = self.client.patch(f'/api/v1/admin/categories/{category_id}/', {
+            'name': 'Accesorios Wayúu', 'description': 'Editada',
+        }, content_type='application/json')
+        deactivated = self.client.patch(f'/api/v1/admin/categories/{category_id}/', {
+            'active': False,
+        }, content_type='application/json')
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()['name'], 'Accesorios Wayúu')
+        self.assertFalse(created.json()['is_internal'])
+        self.assertFalse(deactivated.json()['active'])
+
+        internal = Category.objects.create(name='Uso del sistema', active=True, is_internal=True)
+        rejected_internal_product = self.client.post('/api/v1/admin/products/', {
+            'sku': 'API-ADMIN-INTERNAL-CATEGORY', 'name': 'No comercial', 'category': internal.id,
+            'price': '25000', 'stock': 1,
+        }, content_type='application/json')
+        self.assertEqual(rejected_internal_product.status_code, 400)
+
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.get('/api/v1/admin/categories/').status_code, 403)
+        self.assertEqual(self.client.get('/api/v1/admin/products/options/').status_code, 403)
+        self.assertEqual(self.client.post('/api/v1/admin/categories/', {
+            'name': 'No autorizada', 'description': '', 'active': True,
+        }, content_type='application/json').status_code, 403)
+
+    def test_public_catalog_search_filters_and_paginates(self):
+        Product.objects.create(
+            sku='API-PAGE-001', name='Manta Azul de Prueba', category=self.category,
+            color='Azul', price=Decimal('30000'), stock=2, active=True,
+        )
+        Product.objects.create(
+            sku='API-PAGE-002', name='Manta Azul de Uribia', category=self.category,
+            color='Azul', price=Decimal('35000'), stock=1, active=True,
+        )
+
+        response = self.client.get(f'/api/v1/products/?search=Azul&category={self.category.id}&page_size=1')
+        payload = response.json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload['count'], 3)
+        self.assertEqual(len(payload['results']), 1)
+        self.assertIsNotNone(payload['next'])
+        self.assertEqual(payload['results'][0]['category']['id'], self.category.id)
+
+    def test_internal_and_inactive_products_are_not_public_or_detail_accessible(self):
+        internal = Category.objects.create(name='Diseños personalizados', active=True, is_internal=True)
+        inactive = Category.objects.create(name='Colección archivada', active=False)
+        internal_product = Product.objects.create(
+            sku='API-PRIVATE-CATEGORY', name='Producto interno', category=internal,
+            price=Decimal('20000'), stock=1, active=True,
+        )
+        inactive_category_product = Product.objects.create(
+            sku='API-INACTIVE-CATEGORY', name='Producto de categoría archivada', category=inactive,
+            price=Decimal('20000'), stock=1, active=True,
+        )
+
+        ids = [item['id'] for item in self.client.get('/api/v1/products/').json()['results']]
+        self.assertNotIn(internal_product.id, ids)
+        self.assertNotIn(inactive_category_product.id, ids)
+        self.assertEqual(self.client.get(f'/api/v1/products/{internal_product.id}/').status_code, 404)
+        self.assertEqual(self.client.get(f'/api/v1/products/{inactive_category_product.id}/').status_code, 404)
+        html_catalog = self.client.get('/')
+        html_ids = [product.id for product in html_catalog.context['products']]
+        self.assertIn(self.product.id, html_ids)
+        self.assertNotIn(internal_product.id, html_ids)
+        self.assertNotIn(inactive_category_product.id, html_ids)
+        self.assertEqual(self.client.get(f'/producto/{internal_product.id}/').status_code, 404)
+
     def test_registration_creates_customer_and_starts_session(self):
         client = Client(enforce_csrf_checks=True)
         csrf_response = client.get('/api/v1/csrf/')
@@ -644,6 +770,11 @@ class StoreAPITests(TestCase):
         self.assertEqual(len(designs.json()), 1)
         self.assertEqual(designs.json()[0]['accent_color_two'], '#87978c')
         self.assertEqual(designs.json()[0]['status_label'], 'Pendiente')
+        self.assertTrue(Category.objects.get(name='Diseños personalizados').is_internal)
+        self.assertNotIn(
+            'Diseños personalizados',
+            [item['name'] for item in self.client.get('/api/v1/categories/').json()],
+        )
 
     def test_craftswoman_can_accept_order_without_design_change_permission(self):
         craft_user = self.create_role_user(
@@ -859,19 +990,28 @@ class StoreAPITests(TestCase):
 
     def test_admin_can_manage_products_and_order_status(self):
         admin = self.create_role_user('admin-api', AccessRole.Code.ADMIN)
+        craftswoman = Craftswoman.objects.create(name='Tejedora asignada por administración', region='Alta Guajira', active=True)
+        second_category = Category.objects.create(name='Accesorios para prueba', active=True)
         order = Order.objects.create(customer=self.customer, shipping_address='Maicao, La Guajira')
         self.client.force_login(admin)
+
+        options = self.client.get('/api/v1/admin/products/options/').json()
+        self.assertIn(craftswoman.name, [item['name'] for item in options['craftswomen']])
+        self.assertIn(self.category.id, [item['id'] for item in options['categories']])
+        self.assertTrue(all(not item['is_internal'] for item in options['categories']))
 
         created = self.client.post('/api/v1/admin/products/', {
             'sku': 'API-ADMIN-001',
             'name': 'Manta administrada',
             'category': self.category.id,
+            'craftswoman': craftswoman.id,
+            'image_url': 'data:image/png;base64,aGVsbG8=',
             'price': '40000',
             'stock': 3,
         }, content_type='application/json')
         updated = self.client.patch(
-            f'/api/v1/admin/products/{self.product.id}/',
-            {'price': '31000', 'stock': 8, 'active': False},
+            f"/api/v1/admin/products/{created.json().get('id', self.product.id)}/",
+            {'name': 'Manta administrada editada', 'category': second_category.id, 'price': '41000', 'stock': 8, 'active': False},
             content_type='application/json',
         )
         order_status = self.client.patch(
@@ -882,8 +1022,12 @@ class StoreAPITests(TestCase):
 
         self.assertEqual(created.status_code, 201)
         self.assertEqual(created.json()['sku'], 'API-ADMIN-001')
+        self.assertEqual(created.json()['image_url'], 'data:image/png;base64,aGVsbG8=')
+        self.assertEqual(created.json()['craftswoman_name'], craftswoman.name)
         self.assertEqual(updated.status_code, 200)
         self.assertEqual(updated.json()['stock'], 8)
+        self.assertEqual(updated.json()['name'], 'Manta administrada editada')
+        self.assertEqual(updated.json()['category'], second_category.id)
         self.assertFalse(updated.json()['active'])
         self.assertEqual(order_status.status_code, 200)
         self.assertEqual(order_status.json()['status'], Order.Status.PREPARING)
