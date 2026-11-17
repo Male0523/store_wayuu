@@ -308,5 +308,5 @@ El hash del commit documental se informa en la entrega de Fase 0 y queda en el h
 - Pendiente definir si las tejedoras pueden editar campos de su propio perfil y cuáles; la capacidad no está implementada actualmente y no se inventó una política.
 - No hay reporte de inventario existente. Cualquier indicador (unidades disponibles, piezas por encargo, valorización u otro) requiere definición y queda fuera de este sprint sin aprobación.
 - `cde22ca0199b50a5746c11b07ae7df934bb5d2a3` — `test: cover inventory profile isolation and reporting`.
-- Commit documental de cierre: pendiente de creación.
+- `65c0c8367f87d03ea29ca21fc24757c2ff27da75` — `docs: record inventory profiles and reports review`.
 - No hubo push, merge, despliegue ni cambios en `main`.
