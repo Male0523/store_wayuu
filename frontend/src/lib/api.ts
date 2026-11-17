@@ -11,11 +11,13 @@ import type {
   Page,
   Product,
   RBACAction,
+  RBACCatalogEntry,
   RBACDelegation,
   RBACPermission,
   RBACNavigationItem,
   RBACNavigationInput,
   RBACRolePermissions,
+  RBACRole,
   RBACUserPermissions,
   SessionUser,
   SuperadminUser,
@@ -136,14 +138,19 @@ export const api = {
   superadminUser: (userId: number) => request<SuperadminUser>(`/admin/users/${userId}/`),
   updateSuperadminUser: (userId: number, values: Partial<SuperadminUserInput>) =>
     request<SuperadminUser>(`/admin/users/${userId}/`, { method: 'PATCH', body: json(values) }),
-  rbacCatalog: () => request<{ permissions: RBACPermission[] }>('/admin/rbac/catalog/'),
-  rolePermissions: (role: SessionUser['role']) =>
+  rbacCatalog: () => request<{ permissions: RBACPermission[]; resources: RBACCatalogEntry[]; actions: RBACCatalogEntry[] }>('/admin/rbac/catalog/'),
+  roles: () => request<RBACRole[]>('/admin/rbac/roles/'),
+  createRole: (values: Pick<RBACRole, 'code' | 'name' | 'description' | 'priority'>) =>
+    request<RBACRole>('/admin/rbac/roles/', { method: 'POST', body: json(values) }),
+  updateRole: (role: string, values: Partial<Pick<RBACRole, 'name' | 'description' | 'priority' | 'active'>>) =>
+    request<RBACRole>(`/admin/rbac/roles/${role}/`, { method: 'PATCH', body: json(values) }),
+  rolePermissions: (role: string) =>
     request<RBACRolePermissions>(`/admin/rbac/roles/${role}/permissions/`),
-  updateRolePermissions: (role: SessionUser['role'], permissions: Pick<RBACPermission, 'resource' | 'action' | 'allowed'>[]) =>
+  updateRolePermissions: (role: string, permissions: (Pick<RBACPermission, 'resource' | 'action' | 'allowed'> & { effect?: 'allow' | 'deny' | null })[]) =>
     request<RBACRolePermissions>(`/admin/rbac/roles/${role}/permissions/`, {
       method: 'PUT', body: json({ permissions }),
     }),
-  setRoleActive: (role: SessionUser['role'], active: boolean) =>
+  setRoleActive: (role: string, active: boolean) =>
     request<{ role: string; active: boolean }>(`/admin/rbac/roles/${role}/permissions/`, {
       method: 'PATCH', body: json({ active }),
     }),
@@ -162,6 +169,16 @@ export const api = {
     }),
   auditEvents: () => request<AuditEvent[]>('/admin/rbac/audit/'),
   roleNavigation: () => request<RBACNavigationItem[]>('/navigation/menu/'),
+  createResource: (values: Pick<RBACCatalogEntry, 'code' | 'name' | 'description'>) =>
+    request<RBACCatalogEntry>('/admin/rbac/resources/', { method: 'POST', body: json(values) }),
+  updateResource: (code: string, values: Partial<Pick<RBACCatalogEntry, 'name' | 'description' | 'active'>>) =>
+    request<RBACCatalogEntry>(`/admin/rbac/resources/${code}/`, { method: 'PATCH', body: json(values) }),
+  createAction: (values: Pick<RBACCatalogEntry, 'code' | 'name' | 'description'>) =>
+    request<RBACCatalogEntry>('/admin/rbac/actions/', { method: 'POST', body: json(values) }),
+  createCapability: (values: { resource: string; action: string }) =>
+    request<RBACPermission>('/admin/rbac/capabilities/', { method: 'POST', body: json(values) }),
+  updateAction: (code: string, values: Partial<Pick<RBACCatalogEntry, 'name' | 'description' | 'active'>>) =>
+    request<RBACCatalogEntry>(`/admin/rbac/actions/${code}/`, { method: 'PATCH', body: json(values) }),
   navigationItems: () => request<RBACNavigationItem[]>('/admin/rbac/navigation/'),
   createNavigationItem: (values: RBACNavigationInput) =>
     request<RBACNavigationItem>('/admin/rbac/navigation/', { method: 'POST', body: json(values) }),

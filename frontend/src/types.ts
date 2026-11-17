@@ -90,7 +90,7 @@ export interface SessionUser {
   username: string
   name: string
   email: string
-  role: 'customer' | 'craftswoman' | 'admin' | 'superadmin'
+  role: string
   permissions?: string[]
   profile: UserProfile | null
 }
@@ -149,7 +149,7 @@ export interface SuperadminUser {
   first_name: string
   last_name: string
   full_name: string
-  role: 'customer' | 'craftswoman' | 'admin' | 'superadmin' | 'unassigned'
+  role: string | 'unassigned'
   role_name: string
   is_active: boolean
   active: boolean
@@ -186,11 +186,31 @@ export interface SuperadminUserInput {
   craftswoman_active?: boolean
 }
 
-export type RBACAction = 'view' | 'add' | 'change' | 'delete'
+export type RBACAction = string
+
+export interface RBACRole {
+  code: string
+  name: string
+  description: string
+  priority: number
+  active: boolean
+  system: boolean
+  assigned_users: number
+}
+
+export interface RBACCatalogEntry {
+  id: number
+  code: string
+  name: string
+  description: string
+  active: boolean
+}
 
 export interface RBACPermission {
   resource: string
+  resource_name?: string
   action: RBACAction
+  action_name?: string
   codename: string
   name: string
   allowed?: boolean
@@ -198,7 +218,7 @@ export interface RBACPermission {
 }
 
 export interface RBACRolePermissions {
-  role: SessionUser['role']
+  role: string
   active: boolean
   permissions: RBACPermission[]
 }
