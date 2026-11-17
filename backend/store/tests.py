@@ -771,10 +771,37 @@ class StoreAPITests(TestCase):
         self.assertEqual(designs.json()[0]['accent_color_two'], '#87978c')
         self.assertEqual(designs.json()[0]['status_label'], 'Pendiente')
         self.assertTrue(Category.objects.get(name='Diseños personalizados').is_internal)
+        created_design = CustomDesign.objects.get(customer=self.customer)
+        self.assertTrue(CustomerCartItem.objects.filter(
+            customer=self.customer,
+            product__custom_design=created_design,
+            quantity=1,
+        ).exists())
         self.assertNotIn(
             'Diseños personalizados',
             [item['name'] for item in self.client.get('/api/v1/categories/').json()],
         )
+
+    def test_html_designer_validates_options_and_persists_design_with_cart_atomically(self):
+        self.client.force_login(self.user)
+        invalid = self.client.post('/disena-tu-manta/', {
+            'pattern': 'inventado', 'base_color': 'rojo', 'accent_color_one': '#112233',
+            'accent_color_two': '#223344', 'size': 'M', 'quantity': 1,
+        })
+        self.assertEqual(invalid.status_code, 200)
+        self.assertEqual(CustomDesign.objects.count(), 0)
+
+        created = self.client.post('/disena-tu-manta/', {
+            'pattern': 'rombos', 'base_color': '#112233', 'accent_color_one': '#223344',
+            'accent_color_two': '#334455', 'size': 'L', 'quantity': 2,
+            'notes': 'Borde oscuro',
+        })
+        self.assertEqual(created.status_code, 302)
+        design = CustomDesign.objects.get(customer=self.customer)
+        self.assertEqual(design.estimated_price, Decimal('290000'))
+        self.assertTrue(CustomerCartItem.objects.filter(
+            customer=self.customer, product__custom_design=design, quantity=1,
+        ).exists())
 
     def test_craftswoman_can_accept_order_without_design_change_permission(self):
         craft_user = self.create_role_user(
@@ -1164,6 +1191,46 @@ class StoreAPITests(TestCase):
         self.assertFalse(AuditEvent.objects.filter(
             action='change_order_status', object_id=str(order.id),
         ).exists())
+
+    def test_admin_order_status_updates_linked_design_and_requires_design_permission(self):
+        admin = self.create_role_user('admin-custom-order-status', AccessRole.Code.ADMIN)
+        design = CustomDesign.objects.create(
+            customer=self.customer, pattern='rombos', base_color='#111111',
+            accent_color_one='#222222', accent_color_two='#333333', size='M',
+            estimated_price=Decimal('120000'), status=Order.Status.PENDING,
+        )
+        product = Product.objects.create(
+            sku='ADMIN-CUSTOM-DESIGN-STATUS', name='Diseño ligado', category=self.category,
+            custom_design=design, price=design.estimated_price, stock=1, active=False,
+        )
+        order = Order.objects.create(customer=self.customer, shipping_address='Maicao')
+        OrderItem.objects.create(order=order, product=product, quantity=1, unit_price=product.price)
+        role = AccessRole.objects.get(code=AccessRole.Code.ADMIN)
+        RolePermission.objects.filter(role=role, permission=permission_for('designs', 'change')).delete()
+        self.client.force_login(admin)
+
+        denied = self.client.patch(
+            f'/api/v1/admin/orders/{order.id}/status/',
+            {'status': Order.Status.PREPARING}, content_type='application/json',
+        )
+        order.refresh_from_db()
+        design.refresh_from_db()
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(order.status, Order.Status.PENDING)
+        self.assertEqual(design.status, Order.Status.PENDING)
+
+        RolePermission.objects.get_or_create(
+            role=role, permission=permission_for('designs', 'change'),
+        )
+        updated = self.client.patch(
+            f'/api/v1/admin/orders/{order.id}/status/',
+            {'status': Order.Status.PREPARING}, content_type='application/json',
+        )
+        order.refresh_from_db()
+        design.refresh_from_db()
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(order.status, Order.Status.PREPARING)
+        self.assertEqual(design.status, Order.Status.PREPARING)
 
     def test_admin_status_endpoint_enforces_each_transition_from_the_shared_matrix(self):
         admin = self.create_role_user('admin-order-transition-matrix', AccessRole.Code.ADMIN)

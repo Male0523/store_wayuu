@@ -1629,8 +1629,15 @@ class AdminOrderStatusView(APIView):
                     {'detail': 'Transición de estado no permitida.'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+            items = list(order.items.select_related('product__custom_design'))
+            designs = [item.product.custom_design for item in items if item.product.custom_design_id]
+            if designs and not has_rbac_permission(request.user, 'designs', 'change'):
+                raise PermissionDenied('Este pedido incluye un diseño personalizado y necesitas permiso para gestionarlo.')
             order.status = next_status
             order.save(update_fields=('status', 'updated_at'))
+            for design in designs:
+                design.status = next_status
+                design.save(update_fields=('status',))
             record_audit(
                 request.user,
                 'change_order_status',
@@ -2120,11 +2127,11 @@ class CustomDesignListView(APIView):
                 affected_user=request.user,
                 instance=design,
             )
-        CustomerCartItem.objects.update_or_create(
-            customer=customer,
-            product=product,
-            defaults={'quantity': 1},
-        )
+            CustomerCartItem.objects.update_or_create(
+                customer=customer,
+                product=product,
+                defaults={'quantity': 1},
+            )
         return Response(
             {**CustomDesignSerializer(design).data, 'product_id': product.id},
             status=status.HTTP_201_CREATED,

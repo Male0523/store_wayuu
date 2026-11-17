@@ -474,44 +474,60 @@ def custom_designer(request):
                 messages.error(request, 'Escribe un correo electrónico válido.')
             else:
                 customer = customer_profile
-                if customer.name != name:
-                    customer.name = name
-                    customer.save(update_fields=['name'])
-                quantity = max(1, int(request.POST.get('quantity', 1)))
-                with transaction.atomic():
-                    design = CustomDesign.objects.create(customer=customer, pattern=request.POST.get('pattern', 'rombos'), base_color=request.POST.get('base_color', '#F5F0EB'), accent_color_one=request.POST.get('accent_color_one', '#C67B5C'), accent_color_two=request.POST.get('accent_color_two', '#45634E'), size=size if size in prices else 'M', quantity=quantity, notes=request.POST.get('notes', '').strip(), estimated_price=prices.get(size, prices['M']) * quantity)
-                    category, _ = Category.objects.get_or_create(
-                        name='Diseños personalizados',
-                        defaults={'description': 'Mantas configuradas por clientes.', 'active': True, 'is_internal': True},
-                    )
-                    product = Product.objects.create(
-                        sku=f'DISENO-{design.pk:05d}',
-                        name=f'Manta personalizada · {design.pattern.title()}',
-                        category=category,
-                        custom_design=design,
-                        description=f'Diseño personalizado: patrón {design.pattern}, talla {design.size}. {design.notes}',
-                        color=f'Base {design.base_color}; acentos {design.accent_color_one} y {design.accent_color_two}',
-                        size=design.size,
-                        production_time={'S': '12-15 días', 'M': '18-22 días', 'L': '22-28 días', 'XL': '25-30 días'}[design.size],
-                        price=design.estimated_price,
-                        stock=1,
-                        made_to_order=True,
-                        active=False,
-                    )
-                    record_audit(
-                        request.user,
-                        'create_custom_design',
-                        'designs',
-                        affected_user=request.user,
-                        instance=design,
-                    )
-                CustomerCartItem.objects.update_or_create(
-                    customer=customer,
-                    product=product,
-                    defaults={'quantity': 1},
-                )
-                messages.success(request, 'Tu manta personalizada fue agregada al carrito.')
-                return redirect('store:cart')
+                pattern = request.POST.get('pattern', 'rombos')
+                colors = [request.POST.get(key, default) for key, default in (
+                    ('base_color', '#F5F0EB'),
+                    ('accent_color_one', '#C67B5C'),
+                    ('accent_color_two', '#45634E'),
+                )]
+                notes = request.POST.get('notes', '').strip()
+                try:
+                    quantity = int(request.POST.get('quantity', 1))
+                except (TypeError, ValueError):
+                    quantity = 0
+                valid_patterns = {value for value, _label in patterns}
+                if pattern not in valid_patterns or any(not re.fullmatch(r'#[0-9a-fA-F]{6}', color) for color in colors):
+                    messages.error(request, 'Revisa el patrón y los colores seleccionados.')
+                elif size not in prices or not 1 <= quantity <= 20 or len(notes) > 2000:
+                    messages.error(request, 'Revisa la talla, cantidad e indicaciones del diseño.')
+                else:
+                    if customer.name != name:
+                        customer.name = name
+                        customer.save(update_fields=['name'])
+                    with transaction.atomic():
+                        design = CustomDesign.objects.create(customer=customer, pattern=pattern, base_color=colors[0], accent_color_one=colors[1], accent_color_two=colors[2], size=size, quantity=quantity, notes=notes, estimated_price=prices[size] * quantity)
+                        category, _ = Category.objects.get_or_create(
+                            name='Diseños personalizados',
+                            defaults={'description': 'Mantas configuradas por clientes.', 'active': True, 'is_internal': True},
+                        )
+                        product = Product.objects.create(
+                            sku=f'DISENO-{design.pk:05d}',
+                            name=f'Manta personalizada · {design.pattern.title()}',
+                            category=category,
+                            custom_design=design,
+                            description=f'Diseño personalizado: patrón {design.pattern}, talla {design.size}. {design.notes}',
+                            color=f'Base {design.base_color}; acentos {design.accent_color_one} y {design.accent_color_two}',
+                            size=design.size,
+                            production_time={'S': '12-15 días', 'M': '18-22 días', 'L': '22-28 días', 'XL': '25-30 días'}[design.size],
+                            price=design.estimated_price,
+                            stock=1,
+                            made_to_order=True,
+                            active=False,
+                        )
+                        record_audit(
+                            request.user,
+                            'create_custom_design',
+                            'designs',
+                            affected_user=request.user,
+                            instance=design,
+                        )
+                        CustomerCartItem.objects.update_or_create(
+                            customer=customer,
+                            product=product,
+                            defaults={'quantity': 1},
+                        )
+                    messages.success(request, 'Tu manta personalizada fue agregada al carrito.')
+                    return redirect('store:cart')
     return render(request, 'store/custom_designer_real.html', {'prices': prices, 'patterns': patterns})
 
 
