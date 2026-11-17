@@ -45,6 +45,8 @@ from .models import (
     PermissionDelegation,
     Product,
     RolePermission,
+    RBACCapability,
+    RBACGrant,
     UserPermissionGrant,
     UserRole,
 )
@@ -57,6 +59,7 @@ from .rbac import (
     has_permission,
     permission_catalog,
     permission_for,
+    role_for_user,
     set_permission_delegation,
     set_role_permission,
     set_user_permission,
@@ -1658,13 +1661,9 @@ class StoreAPITests(TestCase):
             content_type='application/json',
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertTrue(AccessRole.objects.get(code=AccessRole.Code.CUSTOMER).active)
-        self.assertTrue(AuditEvent.objects.filter(
-            actor=superadmin,
-            action='deactivate_role',
-            result=AuditEvent.Result.DENIED,
-        ).exists())
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(AccessRole.objects.get(code=AccessRole.Code.CUSTOMER).active)
+        self.assertTrue(UserRole.objects.filter(user=self.user, role__code=AccessRole.Code.CUSTOMER).exists())
 
     def test_superadmin_user_list_returns_real_fields_filters_and_restricts_access(self):
         admin = self.create_role_user('users-admin', AccessRole.Code.ADMIN)
@@ -1892,33 +1891,34 @@ class StoreAPITests(TestCase):
         craftswoman = self.create_role_user('rbac-matrix-craft', AccessRole.Code.CRAFTSWOMAN)
         superadmin = self.create_role_user('rbac-matrix-superadmin', AccessRole.Code.SUPERADMIN)
         catalog = permission_catalog()
-        expected_pairs = {
-            (resource, action)
-            for resource in PERMISSION_RESOURCES
-            for action in PERMISSION_ACTIONS
-        }
+        expected_pairs = {(resource, action) for resource in PERMISSION_RESOURCES for action in ('view', 'create', 'edit', 'delete')}
+        expected_pairs.update({('orders', action) for action in ('approve', 'assign', 'cancel')})
+        expected_pairs.update({(resource, action) for resource in ('products', 'categories') for action in ('publish', 'unpublish')})
+        expected_pairs.update({('role_assignments', 'assign'), ('roles', 'manage'), ('permissions', 'manage')})
+        expected_superadmin = set(expected_pairs)
+        expected_superadmin.update({(resource, 'add') for resource, action in expected_pairs if action == 'create'})
+        expected_superadmin.update({(resource, 'change') for resource, action in expected_pairs if action == 'edit'})
         catalog_pairs = {(item['resource'], item['action']) for item in catalog}
 
         self.assertEqual(catalog_pairs, expected_pairs)
-        self.assertTrue(all(permission_for(resource, action) for resource, action in expected_pairs))
 
         expected_by_role = {
-            AccessRole.Code.SUPERADMIN: expected_pairs,
+            AccessRole.Code.SUPERADMIN: expected_superadmin,
             AccessRole.Code.ADMIN: {
-                ('products', 'view'), ('products', 'add'), ('products', 'change'),
-                ('categories', 'view'), ('categories', 'add'), ('categories', 'change'),
-                ('orders', 'view'), ('orders', 'change'),
+                ('products', 'view'), ('products', 'create'), ('products', 'add'), ('products', 'edit'), ('products', 'change'), ('products', 'publish'), ('products', 'unpublish'),
+                ('categories', 'view'), ('categories', 'create'), ('categories', 'add'), ('categories', 'edit'), ('categories', 'change'), ('categories', 'publish'), ('categories', 'unpublish'),
+                ('orders', 'view'), ('orders', 'edit'), ('orders', 'change'), ('orders', 'approve'), ('orders', 'assign'), ('orders', 'cancel'),
             },
             AccessRole.Code.CUSTOMER: {
-                ('customers', 'view'), ('customers', 'change'),
-                ('orders', 'view'), ('orders', 'add'),
-                ('designs', 'view'), ('designs', 'add'),
-                ('cart', 'view'), ('cart', 'add'), ('cart', 'change'), ('cart', 'delete'),
+                ('customers', 'view'), ('customers', 'edit'), ('customers', 'change'),
+                ('orders', 'view'), ('orders', 'create'), ('orders', 'add'),
+                ('designs', 'view'), ('designs', 'create'), ('designs', 'add'),
+                ('cart', 'view'), ('cart', 'create'), ('cart', 'add'), ('cart', 'edit'), ('cart', 'change'), ('cart', 'delete'),
             },
             AccessRole.Code.CRAFTSWOMAN: {
-                ('products', 'view'), ('products', 'add'), ('products', 'change'),
-                ('orders', 'view'), ('orders', 'change'),
-                ('designs', 'view'), ('designs', 'change'),
+                ('products', 'view'), ('products', 'create'), ('products', 'add'), ('products', 'edit'), ('products', 'change'), ('products', 'publish'), ('products', 'unpublish'),
+                ('orders', 'view'), ('orders', 'edit'), ('orders', 'change'), ('orders', 'approve'), ('orders', 'assign'), ('orders', 'cancel'),
+                ('designs', 'view'), ('designs', 'edit'), ('designs', 'change'),
             },
         }
         users = {
@@ -1969,38 +1969,29 @@ class StoreAPITests(TestCase):
         }, content_type='application/json')
         self.assertEqual(rejected.status_code, 400)
 
-    def test_individual_deny_restricts_superadmin_api_and_django_admin(self):
+    def test_superadmin_root_is_not_limited_by_individual_denies(self):
         superadmin = self.create_role_user('rbac-denied-superadmin', AccessRole.Code.SUPERADMIN)
-        set_user_permission(superadmin, superadmin, 'users', 'view', UserPermissionGrant.Effect.DENY)
-        set_user_permission(superadmin, superadmin, 'roles', 'view', UserPermissionGrant.Effect.DENY)
-        set_user_permission(superadmin, superadmin, 'roles', 'change', UserPermissionGrant.Effect.DENY)
+        with self.assertRaises(DjangoPermissionDenied):
+            set_user_permission(superadmin, superadmin, 'users', 'view', UserPermissionGrant.Effect.DENY)
+        with self.assertRaises(DjangoPermissionDenied):
+            set_user_permission(superadmin, superadmin, 'roles', 'view', UserPermissionGrant.Effect.DENY)
         self.client.force_login(superadmin)
 
         users_response = self.client.get('/api/v1/admin/users/')
         roles_response = self.client.get('/api/v1/admin/rbac/roles/admin/permissions/')
         django_admin_response = self.client.get('/admin/store/accessrole/')
 
-        self.assertEqual(users_response.status_code, 403)
-        self.assertEqual(roles_response.status_code, 403)
-        self.assertEqual(django_admin_response.status_code, 403)
-        self.assertTrue(AuditEvent.objects.filter(
-            actor=superadmin,
-            result=AuditEvent.Result.DENIED,
-            action='denied_get',
-        ).exists())
+        self.assertEqual(users_response.status_code, 200)
+        self.assertEqual(roles_response.status_code, 200)
+        self.assertEqual(django_admin_response.status_code, 200)
 
     def test_denied_permission_management_blocks_catalog_and_grant_api(self):
         superadmin = self.create_role_user('rbac-denied-permissions-superadmin', AccessRole.Code.SUPERADMIN)
-        set_user_permission(
-            superadmin,
-            superadmin,
-            'permissions',
-            'view',
-            UserPermissionGrant.Effect.DENY,
-        )
+        with self.assertRaises(DjangoPermissionDenied):
+            set_user_permission(superadmin, superadmin, 'permissions', 'view', UserPermissionGrant.Effect.DENY)
         self.client.force_login(superadmin)
         catalog = self.client.get('/api/v1/admin/rbac/catalog/')
-        self.assertEqual(catalog.status_code, 403)
+        self.assertEqual(catalog.status_code, 200)
 
         delegated_admin = self.create_role_user('rbac-permissions-denied-admin', AccessRole.Code.ADMIN)
         set_permission_delegation(superadmin, delegated_admin, 'products', 'view', True)
@@ -2026,41 +2017,26 @@ class StoreAPITests(TestCase):
     def test_explicit_denies_are_enforced_by_rbac_mutation_services(self):
         superadmin = self.create_role_user('rbac-deny-services-superadmin', AccessRole.Code.SUPERADMIN)
         target = self.create_role_user('rbac-deny-services-target', AccessRole.Code.CUSTOMER)
-        set_user_permission(
-            superadmin,
-            superadmin,
-            'roles',
-            'change',
-            UserPermissionGrant.Effect.DENY,
-        )
+        delegated_admin = self.create_role_user('rbac-deny-services-admin', AccessRole.Code.ADMIN)
         with self.assertRaises(DjangoPermissionDenied):
-            set_role_permission(superadmin, AccessRole.Code.ADMIN, 'products', 'delete', True)
-        self.assertFalse(RolePermission.objects.filter(
+            set_user_permission(superadmin, superadmin, 'roles', 'change', UserPermissionGrant.Effect.DENY)
+        set_role_permission(superadmin, AccessRole.Code.ADMIN, 'products', 'delete', True)
+        self.assertTrue(RolePermission.objects.filter(
             role__code=AccessRole.Code.ADMIN,
             permission=permission_for('products', 'delete'),
         ).exists())
 
-        set_user_permission(
-            superadmin,
-            superadmin,
-            'role_assignments',
-            'change',
-            UserPermissionGrant.Effect.DENY,
-        )
         with self.assertRaises(DjangoPermissionDenied):
-            assign_role(target, AccessRole.Code.SUPERADMIN, actor=superadmin)
+            set_user_permission(superadmin, superadmin, 'role_assignments', 'change', UserPermissionGrant.Effect.DENY)
+        self.assertTrue(has_permission(superadmin, 'role_assignments', 'change'))
+        with self.assertRaises(DjangoPermissionDenied):
+            assign_role(target, AccessRole.Code.SUPERADMIN, actor=target)
         self.assertEqual(target.access_profile.role.code, AccessRole.Code.CUSTOMER)
 
-        set_user_permission(
-            superadmin,
-            superadmin,
-            'delegations',
-            'add',
-            UserPermissionGrant.Effect.DENY,
-        )
         with self.assertRaises(DjangoPermissionDenied):
-            set_permission_delegation(superadmin, target, 'products', 'view', True)
-        self.assertFalse(PermissionDelegation.objects.filter(permission=permission_for('products', 'view')).exists())
+            set_user_permission(superadmin, superadmin, 'delegations', 'add', UserPermissionGrant.Effect.DENY)
+        set_permission_delegation(superadmin, delegated_admin, 'products', 'view', True)
+        self.assertTrue(PermissionDelegation.objects.filter(permission=permission_for('products', 'view')).exists())
 
     def test_admin_role_demotion_revokes_delegations_and_individual_grants(self):
         superadmin = self.create_role_user('rbac-demotion-superadmin', AccessRole.Code.SUPERADMIN)
@@ -2316,9 +2292,9 @@ class StoreAPITests(TestCase):
             permission=permission,
             effect=UserPermissionGrant.Effect.DENY,
         )
-        self.assertNotIn('products.view', effective_permission_keys(superadmin))
-        hidden = navigation_menu(request)['navigation_items']
-        self.assertNotIn('Gestión de productos', [entry['label'] for entry in hidden])
+        self.assertIn('products.view', effective_permission_keys(superadmin))
+        visible_after_deny = navigation_menu(request)['navigation_items']
+        self.assertIn('Gestión de productos', [entry['label'] for entry in visible_after_deny])
 
     def test_denied_individual_permissions_block_direct_html_requests(self):
         UserPermissionGrant.objects.create(
@@ -2629,7 +2605,7 @@ class StoreAPITests(TestCase):
         self.assertEqual(delete.status_code, 204)
         self.assertFalse(NavigationItem.objects.filter(pk=item_id).exists())
 
-    def test_role_navigation_endpoint_filters_by_role_and_effective_permissions(self):
+    def test_role_navigation_is_independent_from_action_permissions(self):
         NavigationItem.objects.all().delete()
         craftswoman = self.create_role_user('role-menu-craftswoman', AccessRole.Code.CRAFTSWOMAN)
         role = AccessRole.objects.get(code=AccessRole.Code.CRAFTSWOMAN)
@@ -2656,7 +2632,7 @@ class StoreAPITests(TestCase):
         self.client.force_login(craftswoman)
         response = self.client.get('/api/v1/navigation/menu/')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual([item['route_name'] for item in response.json()], ['craftswoman.products'])
+        self.assertEqual([item['route_name'] for item in response.json()], ['craftswoman.products', 'customer.orders'])
 
         UserPermissionGrant.objects.create(
             user=craftswoman,
@@ -2665,9 +2641,10 @@ class StoreAPITests(TestCase):
         )
         denied = self.client.get('/api/v1/navigation/menu/')
         self.assertEqual(denied.status_code, 200)
-        self.assertEqual(denied.json(), [])
+        self.assertEqual([item['route_name'] for item in denied.json()], ['craftswoman.products', 'customer.orders'])
+        self.assertEqual(self.client.get('/api/v1/craftswoman/products/').status_code, 403)
 
-    def test_navigation_route_allowlist_rejects_arbitrary_routes_and_wrong_roles(self):
+    def test_navigation_route_allowlist_accepts_dynamic_role_assignments(self):
         superadmin = self.create_role_user('role-menu-superadmin', AccessRole.Code.SUPERADMIN)
         self.client.force_login(superadmin)
         invalid_route = self.client.post('/api/v1/admin/rbac/navigation/', {
@@ -2677,18 +2654,113 @@ class StoreAPITests(TestCase):
         }, content_type='application/json')
         self.assertEqual(invalid_route.status_code, 400)
 
-        invalid_role = self.client.post('/api/v1/admin/rbac/navigation/', {
+        cross_role_view = self.client.post('/api/v1/admin/rbac/navigation/', {
             'label': 'Pantalla de cliente',
             'route_name': 'customer.orders',
             'role_codes': ['admin'],
         }, content_type='application/json')
-        self.assertEqual(invalid_role.status_code, 400)
+        self.assertEqual(cross_role_view.status_code, 201)
+        self.assertEqual(cross_role_view.json()['role_codes'], ['admin'])
 
     def test_non_superadmin_cannot_manage_navigation(self):
         admin_user = self.create_role_user('rbac-navigation-admin', AccessRole.Code.ADMIN)
         self.client.force_login(admin_user)
         response = self.client.get('/api/v1/admin/rbac/navigation/')
         self.assertEqual(response.status_code, 403)
+
+    def test_dynamic_roles_can_be_created_edited_assigned_and_deactivated(self):
+        superadmin = self.create_role_user('dynamic-role-root', AccessRole.Code.SUPERADMIN)
+        target = self.create_role_user('dynamic-role-target', AccessRole.Code.CUSTOMER)
+        self.client.force_login(superadmin)
+
+        created = self.client.post('/api/v1/admin/rbac/roles/', {
+            'code': 'order_auditor', 'name': 'Auditor de pedidos', 'description': 'Consulta operativa.', 'priority': 12,
+        }, content_type='application/json')
+        self.assertEqual(created.status_code, 201, created.content)
+        self.assertEqual(created.json()['code'], 'order_auditor')
+        self.assertFalse(created.json()['system'])
+
+        assigned = assign_role(target, 'order_auditor', actor=superadmin)
+        self.assertEqual(assigned.code, 'order_auditor')
+        changed = self.client.patch('/api/v1/admin/rbac/roles/order_auditor/', {
+            'name': 'Auditor', 'description': 'Rol revisado.',
+        }, content_type='application/json')
+        self.assertEqual(changed.status_code, 200, changed.content)
+        self.assertEqual(AccessRole.objects.get(code='order_auditor').name, 'Auditor')
+
+        disabled = self.client.patch('/api/v1/admin/rbac/roles/order_auditor/', {'active': False}, content_type='application/json')
+        self.assertEqual(disabled.status_code, 200, disabled.content)
+        self.assertIsNone(role_for_user(target))
+        self.assertTrue(UserRole.objects.filter(user=target, role__code='order_auditor').exists())
+        reenabled = self.client.patch('/api/v1/admin/rbac/roles/order_auditor/', {'active': True}, content_type='application/json')
+        self.assertEqual(reenabled.status_code, 200, reenabled.content)
+        self.assertEqual(role_for_user(target).code, 'order_auditor')
+        self.assertTrue(RolePermission.objects.filter(role__code='admin').exists())
+        root_role = AccessRole.objects.get(code=AccessRole.Code.SUPERADMIN)
+        root_role.active = False
+        with self.assertRaises(ValidationError):
+            root_role.save(update_fields=('active',))
+
+    def test_dynamic_catalog_capabilities_and_user_deny_precedence(self):
+        superadmin = self.create_role_user('dynamic-grants-root', AccessRole.Code.SUPERADMIN)
+        target = self.create_role_user('dynamic-grants-target', AccessRole.Code.CUSTOMER)
+        role = AccessRole.objects.create(code='workflow_reviewer', name='Revisor de flujo')
+        assign_role(target, role.code, actor=superadmin)
+        self.client.force_login(superadmin)
+
+        resource = self.client.post('/api/v1/admin/rbac/resources/', {
+            'code': 'shipping_docs', 'name': 'Documentos de envío', 'description': 'Recursos de expedición.',
+        }, content_type='application/json')
+        action = self.client.post('/api/v1/admin/rbac/actions/', {
+            'code': 'dispatch', 'name': 'Despachar', 'description': 'Confirmar expedición autorizada.',
+        }, content_type='application/json')
+        self.assertEqual(resource.status_code, 201, resource.content)
+        self.assertEqual(action.status_code, 201, action.content)
+        capability = self.client.post('/api/v1/admin/rbac/capabilities/', {
+            'resource': 'shipping_docs', 'action': 'dispatch',
+        }, content_type='application/json')
+        self.assertEqual(capability.status_code, 201, capability.content)
+        set_role_permission(superadmin, role.code, 'orders', 'view', effect=RBACGrant.Effect.DENY)
+        self.assertFalse(has_permission(target, 'orders', 'view'))
+        set_user_permission(superadmin, target, 'orders', 'view', UserPermissionGrant.Effect.ALLOW)
+        self.assertFalse(has_permission(target, 'orders', 'view'))
+        self.assertNotIn('orders.view', effective_permission_keys(target))
+        set_role_permission(superadmin, role.code, 'orders', 'view', effect=None)
+        self.assertTrue(has_permission(target, 'orders', 'view'))
+        self.assertIn('orders.view', effective_permission_keys(target))
+        set_user_permission(superadmin, target, 'orders', 'view', UserPermissionGrant.Effect.DENY)
+        self.assertFalse(has_permission(target, 'orders', 'view'))
+
+        set_role_permission(superadmin, role.code, 'shipping_docs', 'dispatch', allowed=True)
+        self.assertTrue(has_permission(target, 'shipping_docs', 'dispatch'))
+        self.assertTrue(RBACCapability.objects.filter(resource__code='shipping_docs', action__code='dispatch').exists())
+
+    def test_view_grant_does_not_grant_data_access_and_custom_role_keeps_row_isolation(self):
+        superadmin = self.create_role_user('dynamic-view-root', AccessRole.Code.SUPERADMIN)
+        target = self.create_role_user('dynamic-view-target', AccessRole.Code.CUSTOMER)
+        role = AccessRole.objects.create(code='order_auditor', name='Auditor')
+        assign_role(target, role.code, actor=superadmin)
+        item = NavigationItem.objects.create(label='Pedidos', route_name='admin.orders')
+        item.roles.add(role)
+        customer = Customer.objects.get(user=self.user)
+        order = Order.objects.create(customer=customer, shipping_address='Dirección privada')
+
+        self.client.force_login(target)
+        menu = self.client.get('/api/v1/navigation/menu/')
+        self.assertEqual(menu.status_code, 200)
+        self.assertEqual([row['label'] for row in menu.json()], ['Pedidos'])
+        self.assertEqual(self.client.get('/api/v1/admin/orders/').status_code, 403)
+
+        set_role_permission(superadmin, role.code, 'orders', 'view', allowed=True)
+        listing = self.client.get('/api/v1/orders/')
+        detail = self.client.get(f'/api/v1/orders/{order.id}/')
+        administrative_listing = self.client.get('/api/v1/admin/orders/')
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(listing.json()['results'], [])
+        self.assertEqual(detail.status_code, 404)
+        self.assertEqual(administrative_listing.status_code, 403)
+        self.assertEqual(self.client.get('/mi-cuenta/').status_code, 403)
+
 
 class RBACProtectionTransactionTests(TransactionTestCase):
     def create_superadmin(self, username):
