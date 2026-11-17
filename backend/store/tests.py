@@ -738,6 +738,7 @@ class StoreAPITests(TestCase):
         self.client.force_login(self.user)
         updated = self.client.patch('/api/v1/profile/', {
             'name': 'Cliente Actualizado',
+            'email': 'otro-cliente@example.com',
             'phone': '3009876543',
             'address': 'Calle 12 # 4-10',
             'city': 'Maicao',
@@ -745,6 +746,7 @@ class StoreAPITests(TestCase):
 
         self.assertEqual(updated.status_code, 200)
         self.assertEqual(updated.json()['name'], 'Cliente Actualizado')
+        self.assertEqual(updated.json()['email'], self.customer.email)
         self.assertEqual(updated.json()['city'], 'Maicao')
         self.customer.refresh_from_db()
         self.user.refresh_from_db()
@@ -1013,6 +1015,46 @@ class StoreAPITests(TestCase):
             self.client.get('/api/v1/craftswoman/products/').json()[0]['id'],
             product.id,
         )
+
+    def test_craftswoman_products_and_edits_are_limited_to_her_real_profile(self):
+        own_user = self.create_role_user('craft-inventory-owner', AccessRole.Code.CRAFTSWOMAN)
+        own_profile = Craftswoman.objects.create(user=own_user, name='Tejedora propia', active=True)
+        foreign_user = self.create_role_user('craft-inventory-foreign', AccessRole.Code.CRAFTSWOMAN)
+        foreign_profile = Craftswoman.objects.create(user=foreign_user, name='Tejedora ajena', active=True)
+        own_product = Product.objects.create(
+            sku='CRAFT-INV-OWN', name='Pieza propia', category=self.category,
+            craftswoman=own_profile, price=Decimal('30000'), stock=3,
+        )
+        foreign_product = Product.objects.create(
+            sku='CRAFT-INV-FOREIGN', name='Pieza ajena', category=self.category,
+            craftswoman=foreign_profile, price=Decimal('40000'), stock=4,
+        )
+        self.client.force_login(own_user)
+
+        response = self.client.get('/api/v1/craftswoman/products/')
+        foreign_edit = self.client.patch(
+            f'/api/v1/craftswoman/products/{foreign_product.id}/',
+            {'stock': 0}, content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item['id'] for item in response.json()], [own_product.id])
+        self.assertEqual(foreign_edit.status_code, 404)
+        foreign_product.refresh_from_db()
+        self.assertEqual(foreign_product.stock, 4)
+
+    def test_administrator_cannot_set_negative_product_stock(self):
+        admin = self.create_role_user('admin-negative-inventory', AccessRole.Code.ADMIN)
+        self.client.force_login(admin)
+
+        response = self.client.patch(
+            f'/api/v1/admin/products/{self.product.id}/',
+            {'stock': -1}, content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 4)
 
 
     def test_admin_can_manage_products_and_order_status(self):
