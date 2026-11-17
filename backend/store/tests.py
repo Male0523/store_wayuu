@@ -2761,6 +2761,28 @@ class StoreAPITests(TestCase):
         self.assertEqual(administrative_listing.status_code, 403)
         self.assertEqual(self.client.get('/mi-cuenta/').status_code, 403)
 
+        self.client.force_login(superadmin)
+        self.assertEqual(self.client.get('/api/v1/admin/rbac/roles/superadmin/scopes/').status_code, 200)
+        root_scope_write = self.client.put('/api/v1/admin/rbac/roles/superadmin/scopes/', {
+            'scopes': [{'resource': 'orders', 'scope': 'none'}],
+        }, content_type='application/json')
+        self.assertEqual(root_scope_write.status_code, 400)
+        role_scope = self.client.put('/api/v1/admin/rbac/roles/order_auditor/scopes/', {
+            'scopes': [{'resource': 'orders', 'scope': 'all'}],
+        }, content_type='application/json')
+        self.assertEqual(role_scope.status_code, 200, role_scope.content)
+        self.client.force_login(target)
+        self.assertEqual(self.client.get('/api/v1/admin/orders/').status_code, 200)
+
+        self.client.force_login(superadmin)
+        self.assertEqual(self.client.get(f'/api/v1/admin/rbac/users/{superadmin.id}/scopes/').status_code, 403)
+        user_scope = self.client.put(f'/api/v1/admin/rbac/users/{target.id}/scopes/', {
+            'scopes': [{'resource': 'orders', 'scope': 'none'}],
+        }, content_type='application/json')
+        self.assertEqual(user_scope.status_code, 200, user_scope.content)
+        self.client.force_login(target)
+        self.assertEqual(self.client.get('/api/v1/admin/orders/').status_code, 403)
+
 
 class RBACProtectionTransactionTests(TransactionTestCase):
     def create_superadmin(self, username):
