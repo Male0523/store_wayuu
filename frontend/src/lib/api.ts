@@ -110,6 +110,11 @@ export const api = {
     request(`/cart/items/${productId}/`, { method: 'PATCH', body: json({ quantity }) }),
   removeFromCart: (productId: number) =>
     request<void>(`/cart/items/${productId}/`, { method: 'DELETE' }),
+  favorites: () => request<{ product_ids: number[] }>('/favorites/'),
+  addFavorite: (productId: number) =>
+    request<{ product_id: number; saved: boolean }>('/favorites/', { method: 'POST', body: json({ product_id: productId }) }),
+  removeFavorite: (productId: number) =>
+    request<void>(`/favorites/${productId}/`, { method: 'DELETE' }),
   checkout: (values: { address: string; city: string; payment_method: string; notes: string }) =>
     request<Order>('/checkout/', { method: 'POST', body: json(values) }),
   orders: () => request<Page<Order>>('/orders/?page_size=100'),

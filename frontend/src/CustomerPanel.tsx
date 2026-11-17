@@ -23,7 +23,8 @@ export default function CustomerPanel() {
   const [accountSection, setAccountSection] = useState<AccountSection>('orders')
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [selected, setSelected] = useState<Product | null>(null)
-  const [favorites, setFavorites] = useState<number[]>([])
+  const [favoriteState, setFavoriteState] = useState<{ userId: number | undefined; productIds: number[] }>({ userId: undefined, productIds: [] })
+  const favorites = favoriteState.userId === user?.id ? favoriteState.productIds : []
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('Todas')
   const [sort, setSort] = useState('default')
@@ -38,22 +39,28 @@ export default function CustomerPanel() {
   const [profileEditing, setProfileEditing] = useState(false)
 
   useEffect(() => {
-    if (!user?.id) {
-      setFavorites([])
-      return
-    }
-    try {
-      const saved = window.localStorage.getItem(`wayuu:favorites:${user.id}`)
-      const parsed: unknown = saved ? JSON.parse(saved) : []
-      setFavorites(Array.isArray(parsed) ? parsed.filter((id): id is number => Number.isInteger(id)) : [])
-    } catch {
-      setFavorites([])
-    }
-  }, [user?.id])
-
-  useEffect(() => {
     let active = true
     if (user?.role === 'customer') {
+      api.favorites().then(async ({ product_ids }) => {
+        let ids = product_ids
+        const storageKey = `wayuu:favorites:${user.id}`
+        const saved = window.localStorage.getItem(storageKey)
+        if (saved) {
+          try {
+            const legacy: unknown = JSON.parse(saved)
+            if (Array.isArray(legacy)) {
+              for (const id of legacy.filter((value): value is number => Number.isInteger(value) && value > 0)) {
+                try { await api.addFavorite(id) } catch (error) {
+                  if (!(error instanceof ApiError) || error.status !== 404) throw error
+                }
+              }
+              window.localStorage.removeItem(storageKey)
+              ids = (await api.favorites()).product_ids
+            }
+          } catch (error) { if (active) setNotice(messageOf(error)) }
+        }
+        if (active) setFavoriteState({ userId: user.id, productIds: ids })
+      }).catch((error) => { if (active) setNotice(messageOf(error)) })
       api.roleNavigation().then((items) => { if (active) setNavigationItems(items) }).catch((error) => {
         if (active) setNotice(messageOf(error))
       })
@@ -108,18 +115,18 @@ export default function CustomerPanel() {
     setCart(value)
   }
 
-  function toggleFavorite(productId: number) {
-    const next = favorites.includes(productId)
-      ? favorites.filter((id) => id !== productId)
-      : [...favorites, productId]
-    setFavorites(next)
-    if (user?.id) {
-      try {
-        window.localStorage.setItem(`wayuu:favorites:${user.id}`, JSON.stringify(next))
-      } catch {
-        setNotice('No se pudieron guardar los favoritos en este navegador.')
-      }
-    }
+  async function toggleFavorite(productId: number) {
+    setBusy(true)
+    try {
+      if (favorites.includes(productId)) await api.removeFavorite(productId)
+      else await api.addFavorite(productId)
+      setFavoriteState({
+        userId: user?.id,
+        productIds: favorites.includes(productId)
+          ? favorites.filter((id) => id !== productId)
+          : [...favorites, productId],
+      })
+    } catch (error) { setNotice(messageOf(error)) } finally { setBusy(false) }
   }
 
   async function addItem(product: Product, quantity = 1) {
@@ -234,19 +241,19 @@ export default function CustomerPanel() {
         <section className="customer-products-section">
           <div className="customer-section-heading"><div><span className="customer-kicker">{view === 'favorites' ? 'TU SELECCIÓN' : 'COLECCIÓN DISPONIBLE'}</span><h2>{view === 'favorites' ? 'Piezas que guardaste' : 'Encuentra tu próxima pieza'}</h2></div><span>{(view === 'favorites' ? favoriteProducts : filtered).length} productos</span></div>
           {view === 'catalog' && <div className="customer-filters"><div className="customer-category-tabs"><button className={category === 'Todas' ? 'active' : ''} onClick={() => setCategory('Todas')}>Todas</button>{categories.map((item) => <button key={item.id} className={category === item.name ? 'active' : ''} onClick={() => setCategory(item.name)}>{item.name}</button>)}</div><select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Ordenar productos"><option value="default">Orden alfabético</option><option value="low">Menor precio</option><option value="high">Mayor precio</option></select></div>}
-          {view === 'favorites' && <p className="customer-muted">Tus favoritos se guardan en este navegador y se mantienen al cerrar y volver a iniciar sesión con esta cuenta.</p>}
+          {view === 'favorites' && <p className="customer-muted">Tus favoritos están asociados a tu cuenta y estarán disponibles al iniciar sesión desde otro dispositivo.</p>}
           {view === 'catalog' && !products.length && <p className="customer-empty">No hay productos disponibles en el catálogo todavía.</p>}
           {view === 'favorites' && !favoriteProducts.length && <p className="customer-empty">Aún no has guardado favoritos en esta sesión.</p>}
           <div className="customer-product-grid">{(view === 'favorites' ? favoriteProducts : filtered).map((item) => <article className="customer-product-card" key={item.id}>
             <button className="customer-product-image" onClick={() => { setSelected(item); setPreviousView(view); setView('detail') }}><img src={item.image_url || ''} alt={item.name} onError={(event) => { event.currentTarget.style.display = 'none' }}/><span>{item.category?.name || 'Artesanía'}</span></button>
-            <div className="customer-product-copy"><small>{item.region || 'La Guajira'}</small><h3>{item.name}</h3><p>{money(item.price)}</p><div><button onClick={() => { setSelected(item); setPreviousView(view); setView('detail') }}>Ver detalle</button><button aria-label="Agregar al carrito" title="Agregar al carrito" onClick={() => void addItem(item)} disabled={busy || item.stock < 1}><ShoppingBag size={17}/></button><button aria-label="Agregar a favoritos" className={favorites.includes(item.id) ? 'saved' : ''} onClick={() => toggleFavorite(item.id)}><Heart size={17} fill={favorites.includes(item.id) ? 'currentColor' : 'none'}/></button></div></div>
+            <div className="customer-product-copy"><small>{item.region || 'La Guajira'}</small><h3>{item.name}</h3><p>{money(item.price)}</p><div><button onClick={() => { setSelected(item); setPreviousView(view); setView('detail') }}>Ver detalle</button><button aria-label="Agregar al carrito" title="Agregar al carrito" onClick={() => void addItem(item)} disabled={busy || item.stock < 1}><ShoppingBag size={17}/></button><button aria-label="Agregar o retirar favorito" className={favorites.includes(item.id) ? 'saved' : ''} onClick={() => void toggleFavorite(item.id)} disabled={busy}><Heart size={17} fill={favorites.includes(item.id) ? 'currentColor' : 'none'}/></button></div></div>
           </article>)}</div>
         </section>
       </>}
 
-      {view === 'detail' && selected && <section className="customer-detail"><button className="customer-back" onClick={() => setView(previousView)}><ArrowLeft size={16}/>Volver</button><div className="customer-detail-card"><div className="customer-detail-image"><img src={selected.image_url || ''} alt={selected.name}/></div><div className="customer-detail-copy"><span className="customer-kicker">{selected.category?.name || 'Artesanía Wayúu'}</span><h2>{selected.name}</h2><strong>{money(selected.price)}</strong><p>{selected.description || 'Pieza artesanal elaborada en La Guajira.'}</p><dl><div><dt>Origen</dt><dd>{selected.region || 'La Guajira'}</dd></div><div><dt>Color</dt><dd>{selected.color || 'Consultar disponibilidad'}</dd></div><div><dt>Talla</dt><dd>{selected.size || 'Consultar'}</dd></div><div><dt>Disponibles</dt><dd>{selected.stock}</dd></div></dl><button className="customer-primary" disabled={busy || selected.stock < 1} onClick={() => addItem(selected)}><ShoppingBag size={17}/>Agregar al carrito</button></div></div></section>}
+      {view === 'detail' && selected && <section className="customer-detail"><button className="customer-back" onClick={() => setView(previousView)}><ArrowLeft size={16}/>Volver</button><div className="customer-detail-card"><div className="customer-detail-image"><img src={selected.image_url || ''} alt={selected.name}/></div><div className="customer-detail-copy"><span className="customer-kicker">{selected.category?.name || 'Artesanía Wayúu'}</span><h2>{selected.name}</h2><strong>{money(selected.price)}</strong><p>{selected.description || 'Pieza artesanal elaborada en La Guajira.'}</p><dl><div><dt>Origen</dt><dd>{selected.region || 'La Guajira'}</dd></div><div><dt>Color</dt><dd>{selected.color || 'Consultar disponibilidad'}</dd></div><div><dt>Talla</dt><dd>{selected.size || 'Consultar'}</dd></div><div><dt>Disponibles</dt><dd>{selected.stock}</dd></div></dl><button className="customer-primary" disabled={busy || selected.stock < 1} onClick={() => void addItem(selected)}><ShoppingBag size={17}/>Agregar al carrito</button><button className="customer-text-button" disabled={busy} onClick={() => void toggleFavorite(selected.id)}><Heart size={17} fill={favorites.includes(selected.id) ? 'currentColor' : 'none'}/>{favorites.includes(selected.id) ? 'Quitar de favoritos' : 'Guardar en favoritos'}</button></div></div></section>}
 
-      {view === 'cart' && <section className="customer-account-section"><div className="customer-section-heading"><div><span className="customer-kicker">RESUMEN DE COMPRA</span><h2>Tu carrito</h2></div><span>{cart.count} unidades</span></div>{!cart.items.length ? <p className="customer-empty">Tu carrito está vacío. Explora el catálogo para encontrar una pieza.</p> : <><div className="customer-cart-list">{cart.items.map((item) => <article className="customer-cart-row" key={item.product.id}><img src={item.product.image_url || ''} alt={item.product.name}/><div><h3>{item.product.name}</h3><p>{money(item.product.price)}</p>{item.product.is_custom_design ? <small>Cantidad incluida en el diseño</small> : <div className="customer-quantity"><button onClick={() => changeQuantity(item.product.id, item.quantity - 1)} disabled={busy}><Minus size={14}/></button><span>{item.quantity}</span><button onClick={() => changeQuantity(item.product.id, item.quantity + 1)} disabled={busy}><Plus size={14}/></button></div>}</div><strong>{money(item.subtotal)}</strong><button className="customer-remove" onClick={() => changeQuantity(item.product.id, 0)} aria-label="Retirar producto" disabled={busy}><X size={17}/></button></article>)}</div><div className="customer-cart-total"><span>Total de productos</span><strong>{money(cart.total)}</strong></div><button className="customer-primary" disabled={busy} onClick={() => setCheckoutOpen(true)}>Continuar con la compra</button></>}</section>}
+      {view === 'cart' && <section className="customer-account-section"><div className="customer-section-heading"><div><span className="customer-kicker">RESUMEN DE COMPRA</span><h2>Tu carrito</h2></div><span>{cart.count} unidades</span></div>{!cart.items.length ? <p className="customer-empty">Tu carrito está vacío. Explora el catálogo para encontrar una pieza.</p> : <><div className="customer-cart-list">{cart.items.map((item) => <article className="customer-cart-row" key={item.product.id}><img src={item.product.image_url || ''} alt={item.product.name}/><div><h3>{item.product.name}</h3><p>{money(item.product.price)}</p>{item.available === false && <small role="status">No disponible en la cantidad actual. Ajusta o retira esta pieza.</small>}{item.product.is_custom_design ? <small>Cantidad incluida en el diseño</small> : <div className="customer-quantity"><button onClick={() => void changeQuantity(item.product.id, item.quantity - 1)} disabled={busy}><Minus size={14}/></button><span>{item.quantity}</span><button onClick={() => void changeQuantity(item.product.id, item.quantity + 1)} disabled={busy}><Plus size={14}/></button></div>}</div><strong>{money(item.subtotal)}</strong><button className="customer-remove" onClick={() => void changeQuantity(item.product.id, 0)} aria-label="Retirar producto" disabled={busy}><X size={17}/></button></article>)}</div><div className="customer-cart-total"><span>Total de productos</span><strong>{money(cart.total)}</strong></div><button className="customer-primary" disabled={busy || cart.items.some((item) => item.available === false)} onClick={() => setCheckoutOpen(true)}>Continuar con la compra</button></>}</section>}
 
       {view === 'account' && <section className="customer-account-section">
         <div className="customer-section-heading"><div><span className="customer-kicker">TU ACTIVIDAD</span><h2>Mi cuenta</h2></div><span>{accountNavigation.length} secciones habilitadas</span></div>

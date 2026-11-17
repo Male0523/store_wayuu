@@ -48,6 +48,7 @@ export interface CartItem {
   product: Pick<Product, 'id' | 'name' | 'image_url' | 'price'> & Partial<Product>
   quantity: number
   subtotal: string
+  available?: boolean
 }
 
 export interface Cart {
