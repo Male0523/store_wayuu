@@ -39,6 +39,7 @@ from .models import (
     Category,
     Customer,
     CustomerCartItem,
+    CustomerFavorite,
     NavigationItem,
     Order,
     OrderItem,
@@ -255,6 +256,93 @@ class StoreAPITests(TestCase):
         self.product.refresh_from_db()
         self.assertEqual(self.product.stock, 2)
         self.assertEqual(self.client.get('/api/v1/cart/').json()['count'], 0)
+
+    def test_repeated_checkout_does_not_create_duplicate_order_or_reduce_stock_twice(self):
+        self.client.force_login(self.user)
+        self.client.post('/api/v1/cart/items/', {'product_id': self.product.id, 'quantity': 2}, content_type='application/json')
+        payload = {'address': 'Calle 10 # 5-20', 'city': 'Riohacha', 'payment_method': 'contact'}
+
+        first = self.client.post('/api/v1/checkout/', payload, content_type='application/json')
+        second = self.client.post('/api/v1/checkout/', payload, content_type='application/json')
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 400)
+        self.assertEqual(Order.objects.filter(customer=self.customer).count(), 1)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 2)
+
+    def test_checkout_rejects_stock_changed_after_cart_without_consuming_cart(self):
+        self.client.force_login(self.user)
+        self.client.post('/api/v1/cart/items/', {'product_id': self.product.id, 'quantity': 3}, content_type='application/json')
+        Product.objects.filter(pk=self.product.pk).update(stock=2)
+
+        response = self.client.post('/api/v1/checkout/', {
+            'address': 'Calle 10 # 5-20', 'city': 'Riohacha', 'payment_method': 'contact',
+        }, content_type='application/json')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Order.objects.filter(customer=self.customer).exists())
+        self.assertEqual(CustomerCartItem.objects.get(customer=self.customer, product=self.product).quantity, 3)
+        self.assertEqual(Product.objects.get(pk=self.product.pk).stock, 2)
+
+    def test_cart_session_migrates_once_and_merges_with_persistent_quantity(self):
+        CustomerCartItem.objects.create(customer=self.customer, product=self.product, quantity=1)
+        self.client.force_login(self.user)
+        session = self.client.session
+        session['cart'] = {str(self.product.id): 2}
+        session.save()
+
+        first = self.client.get('/api/v1/cart/')
+        second = self.client.get('/api/v1/cart/')
+
+        self.assertEqual(first.json()['count'], 3)
+        self.assertEqual(second.json()['count'], 3)
+        self.assertEqual(CustomerCartItem.objects.get(customer=self.customer, product=self.product).quantity, 3)
+        self.assertNotIn('cart', self.client.session)
+
+    def test_unmigratable_legacy_session_items_are_preserved(self):
+        self.client.force_login(self.user)
+        session = self.client.session
+        session['cart'] = {'invalid-id': 'broken', '99999999': 1}
+        session.save()
+
+        response = self.client.get('/api/v1/cart/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client.session['cart'], {'invalid-id': 'broken', '99999999': 1})
+        self.assertEqual(response.json()['count'], 0)
+
+    def test_favorites_reject_inactive_and_missing_products(self):
+        self.client.force_login(self.user)
+        inactive = Product.objects.create(
+            sku='API-FAVORITE-INACTIVE', name='Inactivo', category=self.category,
+            price=Decimal('10000'), stock=1, active=False,
+        )
+
+        inactive_response = self.client.post('/api/v1/favorites/', {'product_id': inactive.id}, content_type='application/json')
+        missing_response = self.client.post('/api/v1/favorites/', {'product_id': 99999999}, content_type='application/json')
+
+        self.assertEqual(inactive_response.status_code, 404)
+        self.assertEqual(missing_response.status_code, 404)
+        self.assertFalse(CustomerFavorite.objects.filter(customer=self.customer).exists())
+
+    def test_favorites_persist_and_are_isolated_by_customer(self):
+        other_user = User.objects.create_user(username='otro-favoritos', password='ClaveSegura2026!')
+        other_customer = Customer.objects.create(user=other_user, name='Otro', email='otro-favoritos@example.com')
+        self.assign_role(other_user, AccessRole.Code.CUSTOMER)
+        self.client.force_login(self.user)
+
+        saved = self.client.post('/api/v1/favorites/', {'product_id': self.product.id}, content_type='application/json')
+        duplicate = self.client.post('/api/v1/favorites/', {'product_id': self.product.id}, content_type='application/json')
+        self.assertEqual(saved.status_code, 201)
+        self.assertEqual(duplicate.status_code, 200)
+        self.assertEqual(self.client.get('/api/v1/favorites/').json()['product_ids'], [self.product.id])
+        self.assertEqual(CustomerFavorite.objects.filter(customer=self.customer).count(), 1)
+
+        self.client.force_login(other_user)
+        self.assertEqual(self.client.get('/api/v1/favorites/').json()['product_ids'], [])
+        self.client.delete(f'/api/v1/favorites/{self.product.id}/')
+        self.assertTrue(CustomerFavorite.objects.filter(customer=self.customer, product=self.product).exists())
 
     def test_customer_cannot_multiply_own_inactive_custom_design_cart_item_and_can_remove_it(self):
         design = CustomDesign.objects.create(
@@ -1891,11 +1979,13 @@ class StoreAPITests(TestCase):
         craftswoman = self.create_role_user('rbac-matrix-craft', AccessRole.Code.CRAFTSWOMAN)
         superadmin = self.create_role_user('rbac-matrix-superadmin', AccessRole.Code.SUPERADMIN)
         catalog = permission_catalog()
-        expected_pairs = {(resource, action) for resource in PERMISSION_RESOURCES for action in ('view', 'create', 'edit', 'delete')}
+        expected_pairs = {(resource, action) for resource in PERMISSION_RESOURCES if resource != 'favorites' for action in ('view', 'create', 'edit', 'delete')}
+        expected_pairs.update({('favorites', action) for action in ('view', 'create', 'delete')})
         expected_pairs.update({('orders', action) for action in ('approve', 'assign', 'cancel')})
         expected_pairs.update({(resource, action) for resource in ('products', 'categories') for action in ('publish', 'unpublish')})
         expected_pairs.update({('role_assignments', 'assign'), ('roles', 'manage'), ('permissions', 'manage')})
         expected_superadmin = set(expected_pairs)
+        expected_superadmin.update({('favorites', 'edit'), ('favorites', 'change')})
         expected_superadmin.update({(resource, 'add') for resource, action in expected_pairs if action == 'create'})
         expected_superadmin.update({(resource, 'change') for resource, action in expected_pairs if action == 'edit'})
         catalog_pairs = {(item['resource'], item['action']) for item in catalog}
@@ -1914,6 +2004,7 @@ class StoreAPITests(TestCase):
                 ('orders', 'view'), ('orders', 'create'), ('orders', 'add'),
                 ('designs', 'view'), ('designs', 'create'), ('designs', 'add'),
                 ('cart', 'view'), ('cart', 'create'), ('cart', 'add'), ('cart', 'edit'), ('cart', 'change'), ('cart', 'delete'),
+                ('favorites', 'view'), ('favorites', 'create'), ('favorites', 'add'), ('favorites', 'delete'),
             },
             AccessRole.Code.CRAFTSWOMAN: {
                 ('products', 'view'), ('products', 'create'), ('products', 'add'), ('products', 'edit'), ('products', 'change'), ('products', 'publish'), ('products', 'unpublish'),

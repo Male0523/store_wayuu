@@ -21,6 +21,7 @@ from .models import (
 
 PERMISSION_RESOURCES = {
     'cart': ('store', 'order'),
+    'favorites': ('store', 'customerfavorite'),
     'products': ('store', 'product'),
     'categories': ('store', 'category'),
     'orders': ('store', 'order'),

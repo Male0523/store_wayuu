@@ -424,6 +424,21 @@ class CustomerCartItem(models.Model):
         return f'{self.customer} · {self.product} × {self.quantity}'
 
 
+class CustomerFavorite(models.Model):
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='favorites')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='customer_favorites')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('-created_at', '-id')
+        constraints = [
+            models.UniqueConstraint(fields=('customer', 'product'), name='unique_customer_favorite_product'),
+        ]
+
+    def __str__(self):
+        return f'{self.customer} · favorito {self.product}'
+
+
 class Order(models.Model):
     class Status(models.TextChoices):
         PENDING = 'pending', 'Pendiente'

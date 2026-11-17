@@ -15,7 +15,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 from django.conf import settings
 
-from .models import AccessRole, AuditEvent, Category, Craftswoman, CustomDesign, Customer, Order, OrderItem, Product
+from .models import AccessRole, AuditEvent, Category, Craftswoman, CustomerCartItem, CustomDesign, Customer, Order, OrderItem, Product
+from .cart_services import MAX_CART_QUANTITY, merge_legacy_session_cart
 from .order_workflow import allowed_order_transitions, can_transition_order, has_custom_design_items
 from .rbac import assign_role, has_permission as has_rbac_permission, has_role, record_audit, role_for_user
 
@@ -33,10 +34,6 @@ def development_version(request):
         if folder.exists():
             latest = max((item.stat().st_mtime_ns for item in folder.rglob('*') if item.is_file()), default=latest)
     return JsonResponse({'version': latest})
-
-
-def _cart(request):
-    return request.session.setdefault('cart', {})
 
 
 def _assign_access_role(user, role_code):
@@ -78,21 +75,29 @@ def _require_permission(request, resource, action):
 
 
 def _cart_items(request):
-    cart = _cart(request)
-    products = Product.objects.filter(id__in=cart).filter(models.Q(active=True) | models.Q(custom_design__isnull=False)).select_related('category', 'craftswoman', 'custom_design')
-    product_map = {str(product.id): product for product in products}
+    customer = _customer_for(request)
+    merge_legacy_session_cart(request, customer)
+    rows = CustomerCartItem.objects.filter(customer=customer).select_related(
+        'product__category', 'product__craftswoman', 'product__custom_design',
+        'product__custom_design__customer',
+    )
     items = []
     total = Decimal('0')
-    for product_id, quantity in cart.items():
-        product = product_map.get(str(product_id))
-        if not product:
+    for row in rows:
+        product = row.product
+        if product.custom_design_id and product.custom_design.customer_id != customer.id:
             continue
-        quantity = min(int(quantity), product.stock)
+        quantity = row.quantity
         if quantity < 1:
             continue
         subtotal = product.price * quantity
+        available = bool(
+            product.stock >= quantity
+            and (product.active or product.custom_design_id)
+            and (not product.custom_design_id or quantity == 1)
+        )
+        items.append({'product': product, 'quantity': quantity, 'subtotal': subtotal, 'available': available})
         total += subtotal
-        items.append({'product': product, 'quantity': quantity, 'subtotal': subtotal})
     return items, total
 
 
@@ -491,9 +496,11 @@ def custom_designer(request):
                         affected_user=request.user,
                         instance=design,
                     )
-                cart = _cart(request)
-                cart[str(product.id)] = 1
-                request.session.modified = True
+                CustomerCartItem.objects.update_or_create(
+                    customer=customer,
+                    product=product,
+                    defaults={'quantity': 1},
+                )
                 messages.success(request, 'Tu manta personalizada fue agregada al carrito.')
                 return redirect('store:cart')
     return render(request, 'store/custom_designer_real.html', {'prices': prices, 'patterns': patterns})
@@ -511,16 +518,30 @@ def cart(request):
 @login_required
 def add_to_cart(request, product_id):
     _require_permission(request, 'cart', 'add')
-    _customer_for(request)
-    product = get_object_or_404(Product, id=product_id, active=True)
-    requested_quantity = int(request.POST.get('quantity', 1))
-    if product.stock < 1:
-        messages.error(request, 'Este producto no tiene unidades disponibles.')
-        return redirect('store:product_detail', product_id=product.id)
-    cart = _cart(request)
-    current_quantity = int(cart.get(str(product.id), 0))
-    cart[str(product.id)] = min(max(requested_quantity, 1) + current_quantity, product.stock)
-    request.session.modified = True
+    customer = _customer_for(request)
+    try:
+        requested_quantity = int(request.POST.get('quantity', 1))
+    except (TypeError, ValueError):
+        requested_quantity = 0
+    if requested_quantity < 1 or requested_quantity > MAX_CART_QUANTITY:
+        messages.error(request, f'La cantidad debe estar entre 1 y {MAX_CART_QUANTITY}.')
+        return redirect('store:product_detail', product_id=product_id)
+    merge_legacy_session_cart(request, customer)
+    with transaction.atomic():
+        customer = Customer.objects.select_for_update().get(pk=customer.pk)
+        product = get_object_or_404(Product.objects.select_for_update(), id=product_id, active=True, custom_design__isnull=True)
+        row, created = CustomerCartItem.objects.select_for_update().get_or_create(
+            customer=customer, product=product, defaults={'quantity': requested_quantity},
+        )
+        next_quantity = row.quantity if created else row.quantity + requested_quantity
+        if product.stock < next_quantity:
+            if created:
+                row.delete()
+            messages.error(request, 'No hay suficientes unidades disponibles.')
+            return redirect('store:product_detail', product_id=product.id)
+        if not created:
+            row.quantity = next_quantity
+            row.save(update_fields=('quantity', 'updated_at'))
     messages.success(request, f'{product.name} fue agregado al carrito.')
     return redirect('store:cart')
 
@@ -529,17 +550,35 @@ def add_to_cart(request, product_id):
 @login_required
 def update_cart(request, product_id):
     _require_permission(request, 'cart', 'change')
-    _customer_for(request)
-    cart = _cart(request)
-    if str(product_id) not in cart:
-        raise Http404
-    product = get_object_or_404(Product, id=product_id, active=True)
-    quantity = int(request.POST.get('quantity', 1))
+    customer = _customer_for(request)
+    try:
+        quantity = int(request.POST.get('quantity', 1))
+    except (TypeError, ValueError):
+        quantity = 0
     if quantity < 1:
-        cart.pop(str(product_id), None)
-    else:
-        cart[str(product_id)] = min(quantity, product.stock)
-    request.session.modified = True
+        return remove_from_cart(request, product_id)
+    if quantity > MAX_CART_QUANTITY:
+        messages.error(request, f'La cantidad no puede superar {MAX_CART_QUANTITY}.')
+        return redirect('store:cart')
+    merge_legacy_session_cart(request, customer)
+    with transaction.atomic():
+        customer = Customer.objects.select_for_update().get(pk=customer.pk)
+        product = get_object_or_404(
+            Product.objects.select_for_update().filter(
+                models.Q(active=True, custom_design__isnull=True)
+                | models.Q(custom_design__customer=customer),
+            ).distinct(),
+            id=product_id,
+        )
+        row = get_object_or_404(CustomerCartItem.objects.select_for_update(), customer=customer, product=product)
+        if product.custom_design_id and quantity != 1:
+            messages.error(request, 'La cantidad del diseño personalizado ya está incluida en su precio.')
+            return redirect('store:cart')
+        if quantity > product.stock:
+            messages.error(request, 'No hay suficientes unidades disponibles para esa cantidad.')
+            return redirect('store:cart')
+        row.quantity = quantity
+        row.save(update_fields=('quantity', 'updated_at'))
     return redirect('store:cart')
 
 
@@ -547,10 +586,11 @@ def update_cart(request, product_id):
 @login_required
 def remove_from_cart(request, product_id):
     _require_permission(request, 'cart', 'delete')
-    _customer_for(request)
-    cart = _cart(request)
-    cart.pop(str(product_id), None)
-    request.session.modified = True
+    customer = _customer_for(request)
+    merge_legacy_session_cart(request, customer)
+    with transaction.atomic():
+        customer = Customer.objects.select_for_update().get(pk=customer.pk)
+        CustomerCartItem.objects.filter(customer=customer, product_id=product_id).delete()
     return redirect('store:cart')
 
 
@@ -562,10 +602,8 @@ def checkout(request):
     else:
         _require_permission(request, 'cart', 'view')
     customer_profile = _customer_for(request)
-    items, total = _cart_items(request)
-    if not items:
-        messages.error(request, 'Tu carrito está vacío.')
-        return redirect('store:catalog')
+    items = []
+    total = Decimal('0')
     if request.method == 'POST':
         name = request.POST.get('name', '').strip()
         email = customer_profile.email
@@ -576,6 +614,36 @@ def checkout(request):
             messages.error(request, 'Completa nombre, correo, ciudad y dirección de entrega.')
         else:
             with transaction.atomic():
+                customer_profile = Customer.objects.select_for_update().get(pk=customer_profile.pk)
+                merge_legacy_session_cart(request, customer_profile)
+                cart_rows = list(
+                    CustomerCartItem.objects.select_for_update()
+                    .filter(customer=customer_profile).order_by('product_id')
+                )
+                if not cart_rows:
+                    messages.error(request, 'Tu carrito está vacío.')
+                    return redirect('store:cart')
+                products = {
+                    product.pk: product
+                    for product in Product.objects.select_for_update().filter(
+                        pk__in=[row.product_id for row in cart_rows],
+                    ).select_related('custom_design').order_by('pk')
+                }
+                for row in cart_rows:
+                    product = products.get(row.product_id)
+                    if not product or row.quantity < 1 or row.quantity > MAX_CART_QUANTITY:
+                        messages.error(request, 'El carrito contiene un producto o una cantidad no válida. Revísalo antes de continuar.')
+                        return redirect('store:cart')
+                    if product.custom_design_id:
+                        if product.custom_design.customer_id != customer_profile.id or row.quantity != 1:
+                            messages.error(request, 'El diseño personalizado no pertenece a esta cuenta o su cantidad no es válida.')
+                            return redirect('store:cart')
+                    elif not product.active:
+                        messages.error(request, f'{product.name} ya no está disponible. Retíralo del carrito para continuar.')
+                        return redirect('store:cart')
+                    if product.stock < row.quantity:
+                        messages.error(request, f'No hay suficientes unidades de {product.name}. Ajusta la cantidad antes de confirmar.')
+                        return redirect('store:cart')
                 customer_profile.name = name
                 customer_profile.phone = phone
                 customer_profile.address = address
@@ -585,26 +653,28 @@ def checkout(request):
                     customer=customer_profile,
                     shipping_address=f'{address}, {city}',
                 )
-                for item in items:
-                    product = Product.objects.select_for_update().get(id=item['product'].id)
-                    if product.stock < item['quantity']:
-                        transaction.set_rollback(True)
-                        messages.error(request, f'No hay suficientes unidades de {product.name}.')
-                        return redirect('store:cart')
-                    OrderItem.objects.create(order=order, product=product, quantity=item['quantity'], unit_price=product.price)
-                    product.stock -= item['quantity']
+                for row in cart_rows:
+                    product = products[row.product_id]
+                    OrderItem.objects.create(order=order, product=product, quantity=row.quantity, unit_price=product.price)
+                    product.stock -= row.quantity
                     product.save(update_fields=['stock', 'updated_at'])
+                CustomerCartItem.objects.filter(pk__in=[row.pk for row in cart_rows]).delete()
                 record_audit(
                     request.user,
                     'checkout',
                     'orders',
                     affected_user=request.user,
-                    details={'item_count': len(items)},
+                    details={'item_count': len(cart_rows)},
                     instance=order,
                 )
-            request.session['cart'] = {}
+            request.session.pop('cart', None)
             request.session.modified = True
             return redirect('store:order_confirmation', order_id=order.id)
+    else:
+        items, total = _cart_items(request)
+        if not items:
+            messages.error(request, 'Tu carrito está vacío.')
+            return redirect('store:catalog')
     return render(request, 'store/checkout_pro.html', {'items': items, 'total': total})
 
 
