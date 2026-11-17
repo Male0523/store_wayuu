@@ -144,3 +144,43 @@ El hash del commit documental se informa en la entrega de Fase 0 y queda en el h
 - El PR #4 sigue abierto y sin fusionar; esta actualización no lo cerró ni lo integró.
 - Commits locales en `feature/pedidos-trazabilidad`: `6febd5d2c8450d842469df0d9bc5ac2f710a20c4` (`test: check credential permissions across platforms`) y `45e143ccae0bad617fca6b5cab843f06b5836215` (`docs: record sprint 1 technical closeout`).
 - Publicación pendiente: `git push origin feature/pedidos-trazabilidad` falló con `Could not resolve host: github.com`. GitHub confirma que el PR sigue abierto y sin fusionar, con head remoto `d76321d707c459635d6584cf714d0323320cba32`; los commits de cierre aún no aparecen en el PR. No se hizo force push.
+
+## 2026-11-17 — Sprint 2: RBAC dinámico configurable
+
+### Preparación y cambios
+
+- Se verificó `Male0523/store_wayuu`, remote `origin https://github.com/Male0523/store_wayuu.git` y la rama base local `feature/pedidos-trazabilidad`. El árbol estaba limpio antes de crear `feature/rbac-configurable`; no se cambió de rama con modificaciones pendientes.
+- `AccessRole.code` acepta códigos persistentes dinámicos. Los roles se pueden crear, editar, activar y desactivar; sus asignaciones y grants históricos se conservan al desactivarlos. El rol raíz y los roles base no se eliminan.
+- Se añadió la migración `store.0015_rbacaction_rbacresource_alter_accessrole_code_and_more`: catálogos independientes de recursos/acciones/capacidades y grants RBAC `ALLOW`/`DENY` por rol/usuario. La migración agrega registros de catálogo/capacidades iniciales y no borra roles, usuarios ni grants anteriores; estos se mantienen como fallback compatible.
+- La matriz inicial incluye CRUD expresado como `view/create/edit/delete` y operaciones especializadas solo donde existen operaciones reales. Las pantallas se asignan a roles por navegación, sin grants de datos. Los endpoints administrativos nuevos permiten administrar roles, recursos, acciones y capacidades; el panel superadmin incluye formularios y matrices dinámicas.
+- El backend conserva la autoridad: API y vistas HTML validan permisos. Los pedidos/diseños de cliente y tejedora conservan sus filtros de propietario/asignación. Las concesiones históricas de consulta de pedidos no abren las listas administrativas. Se revocan también los grants individuales que un administrador delegado hubiera emitido al perder su rol.
+- La interfaz genera controles desde las capacidades efectivas; publicación, cancelación, aprobación y asignación ya no se presentan como si fueran el permiso genérico `edit` cuando existe una acción especializada.
+- Se documentó precedencia, compatibilidad, límites y decisiones pendientes en `docs/FLUJO_RBAC.md`.
+- No se tocó `main`, no se publicó ni fusionó ningún cambio, no se modificó el diseñador de mantas ni se ejecutaron migraciones contra la base SQLite del proyecto.
+
+### Decisiones y límites de seguridad
+
+- Precedencia implementada: cualquier `DENY` dinámico del usuario o rol prevalece; si no hay denegación, un `ALLOW` individual prevalece sobre el rol; después se considera el `ALLOW` del rol y, por último, la compatibilidad histórica. Está probado, pero requiere aprobación del responsable de seguridad.
+- El superadministrador es raíz global, no recibe grants individuales y no puede ser limitado por la matriz ordinaria. No puede desactivarse el rol raíz ni retirar al último superadministrador activo.
+- Los roles personalizados fallan cerrado en colecciones administrativas con registros privados (`orders`, `designs`, `customers`, `users`, `craftswomen`) hasta que exista una política configurable de ámbito por registro. Los perfiles existentes mantienen sus ámbitos propios/asignados. Este sprint **no** crea aún catálogo/interfaz de ámbitos por registro; no se deben otorgar permisos de recursos privados a roles personalizados esperando que un `ALLOW` general defina qué filas pueden ver.
+- Se mantiene un fallback temporal: permisos históricos `edit` pueden habilitar `approve`, `publish`, `unpublish`, `assign` y `cancel` si la capacidad dinámica especializada no tiene grant explícito. `reject` y `export` están en catálogo pero no se vincularon a endpoints que hoy no existen. Ambos puntos requieren decisión/aprobación y están explicados en el flujo RBAC.
+- Roles cliente/tejedora conservan restricciones de perfil para operaciones de persona. No se implementan delegaciones administrativas avanzadas; la delegación heredada sigue limitada a los controles ya existentes.
+
+### Verificaciones ejecutadas
+
+- Desde `backend`: `$env:DJANGO_SECRET_KEY='test-only-wayuu-local-secret'; .\\.venv\\Scripts\\python.exe manage.py test` — **OK**, 100 pruebas, 0 fallos; comprobación de sistema sin incidencias. Django emitió el warning preexistente de directorio `backend/staticfiles/` ausente.
+- Pruebas dirigidas de creación/edición/desactivación de roles, catálogo extensible, precedencia, separación de vista/datos, aislamiento por perfil y delegaciones — **OK**, 4 pruebas en la última ejecución dirigida.
+- Desde `backend`: `$env:DJANGO_SECRET_KEY='test-only-wayuu-local-secret'; .\\.venv\\Scripts\\python.exe manage.py makemigrations --check --dry-run` — **OK**, `No changes detected`.
+- Desde `frontend`: `npm run build` — **OK**, `tsc -b` y Vite; 1946 módulos transformados.
+- Desde `frontend`: `npm run lint` — **falló**, 7 errores y 5 warnings de `react-hooks/set-state-in-effect` y `react-hooks/exhaustive-deps`. Coinciden con los hallazgos preexistentes registrados en el cierre del Sprint 1; el warning adicional que apareció durante la implementación se corrigió y no permanece en el resultado final. No se amplió el alcance con un refactor de lint ajeno al RBAC.
+- Desde `frontend`: `npm run` confirmó que no hay script de pruebas frontend (`dev`, `build`, `lint`, `preview`).
+- Desde la raíz: `git diff --check` — **OK**, sin errores de whitespace.
+
+### Commits y estado
+
+- `0bb0934ef97acd0e3f82b1f3e7bce4b20fa46d76` — `feat: add configurable RBAC grants and catalogs`.
+- `e2fc58529270c0a29c3844d648fd4e2f759423d1` — `feat: enforce dynamic RBAC in APIs and navigation`.
+- `b08d5c1ecd343f5c1200da28895d61cc19de971c` — `feat: add dynamic RBAC administration controls`.
+- `7e8207cfdc4a286e9931aafe83a0de914753292e` — `test: cover configurable RBAC and access boundaries`.
+- La documentación del flujo y esta bitácora se registran en un commit documental después de verificar los diffs.
+- Rama local: `feature/rbac-configurable`. No se hizo push, merge, despliegue ni modificación de ramas remotas.
