@@ -189,3 +189,38 @@ El hash del commit documental se informa en la entrega de Fase 0 y queda en el h
 - `e964f1c88cd399c4c757cfdc057782f4a6bf31bb` — `test: verify record scope and privilege boundaries`.
 - `ae056318926a84037c6ab37afbeb648b2e1770d9` — `docs: record configurable record scope policy`.
 - Rama local: `feature/rbac-configurable`. No se hizo push, merge, despliegue ni modificación de ramas remotas.
+
+## 2026-11-17 — Sprint 3: carrito, favoritos y checkout
+
+### Preparación y cambios
+
+- Se verificó el checkout local del repositorio `Male0523/store_wayuu`, remoto `origin https://github.com/Male0523/store_wayuu.git`, rama limpia `feature/rbac-configurable` en el estado `1af0d8ffba339d1219eaf9b22d809f34edf788c9`; se creó `feature/carrito-favoritos-checkout` desde esa base. No se cambió `main` ni se publicaron ramas.
+- Se añadió `CustomerFavorite` con unicidad por cliente/producto y la migración aditiva `store.0017_customerfavorite`. La migración registra el recurso RBAC `favorites` y concede al rol cliente acciones de consulta, alta y retiro sin borrar ni reescribir datos existentes.
+- El carrito autenticado usa `CustomerCartItem` como fuente persistente para API y vistas HTML. El merge de carritos de sesión agrega cantidades una sola vez, no trunca cantidades según el stock y retiene en sesión entradas no migrables para evitar perderlas silenciosamente. Las líneas disponibles y el estado de disponibilidad se calculan con el inventario actual.
+- Altas y cambios de cantidad comprueban producto activo, límites y stock. Los diseños personalizados continúan restringidos a su cliente propietario y a cantidad uno. El diseñador no se modificó; su producto ahora se guarda en el mismo carrito persistente.
+- El checkout API y HTML bloquean el cliente/carrito/productos, validan propietario, estado y stock, crean pedido e ítems, descuentan inventario y limpian el carrito dentro de una transacción. Un reenvío secuencial encuentra el carrito vacío y no crea un segundo pedido. Los errores de disponibilidad conservan el carrito.
+- Se agregaron endpoints de favoritos con acceso por cliente, alta idempotente y aislamiento entre clientes. El frontend lee y modifica favoritos en backend; los favoritos heredados de `localStorage` se importan al iniciar sesión. Catálogo, detalle y favoritos usan un único estado de cuenta. El carrito informa y bloquea continuar cuando una línea ya no está disponible.
+- Los estados, cobro, descuentos y reservas no se alteraron. No se ejecutaron migraciones sobre la base de datos local/de producción; `makemigrations --check` solo comparó el estado del modelo.
+
+### Decisiones comerciales pendientes
+
+- El sistema sigue descontando inventario al confirmar el pedido, como ya hacía el flujo existente. No hay reserva de stock durante la navegación/carrito. El negocio debe definir si requiere reservas y su vencimiento.
+- `payment_method` continúa registrándose como dato del pedido; no se realizan cobros. Falta definir y aprobar integración, confirmación de pago, reembolsos y reglas de cambio de estado asociadas al pago.
+- No se implementaron descuentos ni promociones, ni reglas de precio distintas a guardar el precio actual del producto al crear el ítem del pedido.
+- Las entradas de carrito de sesión con ID malformado, producto eliminado o diseño ajeno se conservan en la sesión, pero el catálogo del carrito no tiene una interfaz para resolver esas entradas heredadas. Requiere una decisión sobre limpieza/manual review si se presentan en producción.
+
+### Verificaciones ejecutadas
+
+- Desde `backend`: `$env:DJANGO_SECRET_KEY='sprint3-test-only-local-key'; $env:DB_ENGINE='sqlite'; .\\.venv\\Scripts\\python.exe manage.py test` — **OK**, 106 pruebas, 0 fallos, 0 errores; Django reportó `System check identified no issues`. Se emitió el warning preexistente de `backend/staticfiles/` ausente y la salida informativa de la prueba de auditoría de roles (`role-audit-candidate`).
+- Desde `backend`: `manage.py makemigrations --check --dry-run` con la misma clave temporal — **OK**, `No changes detected`.
+- Pruebas dirigidas — **OK**, 9 pruebas: compra y descuento de stock, rechazo tras cambio de inventario, reenvío duplicado, merge único del carrito de sesión, conservación de entradas heredadas no migrables, persistencia/aislamiento de favoritos, rechazo de producto inactivo/inexistente, matriz RBAC y checkout HTML con perfil autenticado.
+- Desde `frontend`: `npm run build` — **OK**, TypeScript y Vite, 1946 módulos transformados.
+- Desde `frontend`: `npm run lint` — **falló**, 6 errores y 5 warnings. La referencia previa era 7 errores y 5 warnings. Los diagnósticos actuales permanecen en `CustomerPanel.tsx` y `ShopApp.tsx`, en reglas de estado síncrono dentro de efectos y dependencias de hooks; el cambio de favoritos eliminó uno de los errores previos. No aparecieron errores nuevos en la lógica de API o componentes de Sprint 3.
+- Desde `frontend`: `npm run` confirmó que no hay script de pruebas frontend (`dev`, `build`, `lint`, `preview`).
+- `git diff --check` — **OK**, sin problemas de whitespace.
+
+### Commits y estado
+
+- `97fa0ca0e9af384919307db95ba1839f6c6a94d9` — `feat: persist customer carts and favorites`.
+- `c96a6307ee452e95515883940a74937d89798a25` — `feat: sync account favorites and cart availability`.
+- No se integraron ramas ni se realizó push, PR o despliegue. La rama de trabajo es `feature/carrito-favoritos-checkout`.
