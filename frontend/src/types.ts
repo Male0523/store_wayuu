@@ -6,6 +6,7 @@ export interface Category {
 
 export interface AdminCategory extends Category {
   active: boolean
+  is_internal: boolean
 }
 
 export interface CraftswomanSummary {
@@ -41,6 +42,14 @@ export interface AdminProduct extends Omit<Product, 'category' | 'craftswoman'> 
   category: number
   craftswoman: number | null
   craftswoman_name?: string | null
+  active: boolean
+}
+
+export interface AdminCraftswomanOption {
+  id: number
+  name: string
+  community: string
+  region: string
   active: boolean
 }
 

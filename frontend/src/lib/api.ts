@@ -1,6 +1,7 @@
 import type {
   AdminCategory,
   AdminProduct,
+  AdminCraftswomanOption,
   Cart,
   Category,
   CustomDesign,
@@ -139,6 +140,7 @@ export const api = {
   updateDesignStatus: (id: number, value: string) =>
     request<Pick<CustomDesign, 'id' | 'status'>>(`/craftswoman/designs/${id}/status/`, { method: 'PATCH', body: json({ status: value }) }),
   adminProducts: () => request<AdminProduct[]>('/admin/products/'),
+  adminProductOptions: () => request<{ categories: AdminCategory[]; craftswomen: AdminCraftswomanOption[] }>('/admin/products/options/'),
   superadminUsers: (params: URLSearchParams) => request<SuperadminUser[]>(`/admin/users/?${params}`),
   createSuperadminUser: (values: SuperadminUserInput) =>
     request<SuperadminUser>('/admin/users/', { method: 'POST', body: json(values) }),

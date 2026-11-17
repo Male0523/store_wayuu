@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from './lib/api'
 import { useUserSession } from './context/user-context'
-import type { AdminCategory, AdminOrderSummary, AdminProduct, AuditEvent, Cart, Category, CustomDesign, CraftswomanDashboard, Order, Page, Product, RBACCatalogEntry, RBACNavigationItem, RBACPermission, RBACRole, RBACRolePermissions, RBACRoleScopes, RBACUserPermissions, RBACUserScopes, SessionUser, SuperadminUser, SuperadminUserInput, UserProfile } from './types'
+import type { AdminCategory, AdminCraftswomanOption, AdminOrderSummary, AdminProduct, AuditEvent, Cart, Category, CustomDesign, CraftswomanDashboard, Order, Page, Product, RBACCatalogEntry, RBACNavigationItem, RBACPermission, RBACRole, RBACRolePermissions, RBACRoleScopes, RBACUserPermissions, RBACUserScopes, SessionUser, SuperadminUser, SuperadminUserInput, UserProfile } from './types'
 import './ShopApp.css'
 
 type Screen = 'shop' | 'orders' | 'craftswoman' | 'design' | 'admin'
@@ -81,6 +81,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
   const [adminOrderSummary, setAdminOrderSummary] = useState<AdminOrderSummary | null>(null)
   const [adminProducts, setAdminProducts] = useState<AdminProduct[]>([])
   const [adminCategories, setAdminCategories] = useState<AdminCategory[]>([])
+  const [adminCraftswomen, setAdminCraftswomen] = useState<AdminCraftswomanOption[]>([])
   const [designs, setDesigns] = useState<CustomDesign[]>([])
   const [profileDraft, setProfileDraft] = useState<UserProfile | null>(null)
   const [accountSection, setAccountSection] = useState<AccountSection>('orders')
@@ -142,17 +143,20 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
       Promise<AdminOrderSummary>,
       Promise<AdminProduct[]>,
       Promise<AdminCategory[]>,
+      Promise<{ categories: AdminCategory[]; craftswomen: AdminCraftswomanOption[] }>,
     ] = [
       hasEffectivePermission(user, 'orders.view') ? api.adminOrderSummary() : Promise.resolve(emptyOrderSummary),
       hasEffectivePermission(user, 'products.view') ? api.adminProducts() : Promise.resolve([]),
       hasEffectivePermission(user, 'categories.view') ? api.adminCategories() : Promise.resolve([]),
+      hasEffectivePermission(user, 'products.view') ? api.adminProductOptions() : Promise.resolve({ categories: [], craftswomen: [] }),
     ]
 
     try {
-      const [orderSummary, productsPage, categoryList] = await Promise.all(requests)
+      const [orderSummary, productsPage, categoryList, productOptions] = await Promise.all(requests)
       setAdminOrderSummary(orderSummary)
       setAdminProducts(Array.isArray(productsPage) ? productsPage : [])
       setAdminCategories(Array.isArray(categoryList) ? categoryList : [])
+      setAdminCraftswomen(productOptions.craftswomen)
     } catch (error) {
       setNotice(errorMessage(error))
     }
@@ -510,7 +514,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
     try {
       const created = await api.createAdminCategory(values)
       setAdminCategories((current) => [...current, created].sort((first, second) => first.name.localeCompare(second.name)))
-      setCategories((current) => [...current, created].sort((first, second) => first.name.localeCompare(second.name)))
+      if (created.active && !created.is_internal) setCategories((current) => [...current, created].sort((first, second) => first.name.localeCompare(second.name)))
       setNotice('Categoría creada.')
     } catch (error) { setNotice(errorMessage(error)) } finally { setBusy(false) }
   }
@@ -520,8 +524,22 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
     try {
       const updated = await api.updateAdminCategory(categoryId, { active })
       setAdminCategories((current) => current.map((category) => category.id === categoryId ? updated : category))
-      setCategories((current) => active ? [...current.filter((category) => category.id !== categoryId), updated] : current.filter((category) => category.id !== categoryId))
+      setCategories((current) => active && !updated.is_internal
+        ? [...current.filter((category) => category.id !== categoryId), updated].sort((first, second) => first.name.localeCompare(second.name))
+        : current.filter((category) => category.id !== categoryId))
       setNotice(`Categoría ${active ? 'activada' : 'desactivada'}.`)
+    } catch (error) { setNotice(errorMessage(error)) } finally { setBusy(false) }
+  }
+
+  async function saveAdminCategory(categoryId: number, values: Pick<AdminCategory, 'name' | 'description'>) {
+    setBusy(true)
+    try {
+      const updated = await api.updateAdminCategory(categoryId, values)
+      setAdminCategories((current) => current.map((category) => category.id === categoryId ? updated : category))
+      setCategories((current) => updated.active && !updated.is_internal
+        ? [...current.filter((category) => category.id !== categoryId), updated].sort((first, second) => first.name.localeCompare(second.name))
+        : current.filter((category) => category.id !== categoryId))
+      setNotice('Categoría actualizada.')
     } catch (error) { setNotice(errorMessage(error)) } finally { setBusy(false) }
   }
 
@@ -577,7 +595,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
 
     {screen === 'craftswoman' && user && <CraftswomanAccountView user={user} navigationItems={roleNavigation} dashboard={dashboard} products={craftswomanProducts} categories={categories} busy={busy} onCreateProduct={createCraftswomanProduct} onSignOut={signOut} onAcceptOrder={acceptOrder} onOrderStatus={updateOrder} onDesignStatus={updateDesignStatus} />}
 
-    {screen === 'admin' && user && <AdminAccountView user={user} isSuperadmin={user.role === 'superadmin'} navigationItems={roleNavigation} orderSummary={adminOrderSummary} products={adminProducts} categories={adminCategories} busy={busy} onSignOut={signOut} onSaveProduct={saveAdminProduct} onCreateProduct={createAdminProduct} onCreateCategory={createAdminCategory} onCategoryActive={updateAdminCategory} onOrderStatus={saveAdminOrderStatus} onNotice={setNotice} />}
+    {screen === 'admin' && user && <AdminAccountView user={user} isSuperadmin={user.role === 'superadmin'} navigationItems={roleNavigation} orderSummary={adminOrderSummary} products={adminProducts} categories={adminCategories} productCraftswomen={adminCraftswomen} busy={busy} onSignOut={signOut} onSaveProduct={saveAdminProduct} onCreateProduct={createAdminProduct} onCreateCategory={createAdminCategory} onSaveCategory={saveAdminCategory} onCategoryActive={updateAdminCategory} onOrderStatus={saveAdminOrderStatus} onNotice={setNotice} />}
 
     {screen !== 'shop' && screen !== 'admin' && <Footer onInstagram={() => setNotice('Pronto encontrarás nuestras novedades en Instagram.')} />}
     {selectedProduct && <ProductDialog product={selectedProduct} busy={busy} onClose={() => setSelectedProduct(null)} onAdd={() => addToCart(selectedProduct.id)} />}
@@ -589,13 +607,14 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
 }
 
 function ProductPhoto({ src, alt, className, loading = 'lazy' }: { src: string; alt: string; className: string; loading?: 'eager' | 'lazy' }) {
-  return src
-    ? <img src={src} alt={alt} className={className} loading={loading} />
+  const [failedSource, setFailedSource] = useState('')
+  return src && src !== failedSource
+    ? <img src={src} alt={alt} className={className} loading={loading} onError={() => setFailedSource(src)} />
     : <span className={`product-photo-fallback ${className}`} role="img" aria-label={alt}><ShoppingBag size={22} strokeWidth={1.4} /></span>
 }
 
 function ProductDialog({ product, busy, onClose, onAdd }: { product: Product; busy: boolean; onClose: () => void; onAdd: () => void }) {
-  return <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="product-dialog" role="dialog" aria-modal="true" aria-labelledby="product-title"><button className="close-button" onClick={onClose} aria-label="Cerrar"><X size={19} /></button><div className="dialog-image"><ProductPhoto src={product.image_url} alt={product.name} className="dialog-product-photo" /></div><div className="dialog-product-copy"><p className="eyebrow">{product.region || product.category.name}</p><h2 id="product-title">{product.name}</h2><p className="dialog-price">{money(product.price)}</p><p className="dialog-description">{product.description || 'Una pieza tejida a mano con el cuidado de quien conoce cada hilo.'}</p><dl className="product-details"><div><dt>Talla</dt><dd>{product.size}</dd></div><div><dt>Elaboración</dt><dd>{product.production_time || 'Artesanal'}</dd></div><div><dt>Disponibilidad</dt><dd>{product.stock > 0 ? `${product.stock} unidades` : 'Por pedido'}</dd></div>{product.craftswoman && <div><dt>Tejedora</dt><dd>{product.craftswoman.name}</dd></div>}</dl><button className="button button-dark full-button" onClick={onAdd} disabled={busy || product.stock < 1}>{busy ? <LoaderCircle className="spin" size={16} /> : <ShoppingBag size={16} />}{product.stock < 1 ? 'Sin existencias' : 'Agregar al carrito'}</button><p className="dialog-note"><Heart size={14} /> Una pieza hecha para acompañarte.</p></div></section></div>
+  return <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="product-dialog" role="dialog" aria-modal="true" aria-labelledby="product-title"><button className="close-button" onClick={onClose} aria-label="Cerrar"><X size={19} /></button><div className="dialog-image"><ProductPhoto src={product.image_url} alt={product.name} className="dialog-product-photo" /></div><div className="dialog-product-copy"><p className="eyebrow">{product.region || product.category.name}</p><h2 id="product-title">{product.name}</h2><p className="dialog-price">{money(product.price)}</p><p className="dialog-description">{product.description || 'Una pieza tejida a mano con el cuidado de quien conoce cada hilo.'}</p><dl className="product-details"><div><dt>Talla</dt><dd>{product.size}</dd></div><div><dt>Elaboración</dt><dd>{product.production_time || 'Artesanal'}</dd></div><div><dt>Disponibilidad</dt><dd>{product.stock > 0 ? `${product.stock} unidades` : 'Por pedido'}</dd></div>{product.craftswoman && <><div><dt>Tejedora</dt><dd>{product.craftswoman.name}</dd></div>{product.craftswoman.community && <div><dt>Comunidad</dt><dd>{product.craftswoman.community}</dd></div>}{product.craftswoman.region && <div><dt>Región de la tejedora</dt><dd>{product.craftswoman.region}</dd></div>}{product.craftswoman.biography && <div><dt>Perfil</dt><dd>{product.craftswoman.biography}</dd></div>}</>}</dl><button className="button button-dark full-button" onClick={onAdd} disabled={busy || product.stock < 1}>{busy ? <LoaderCircle className="spin" size={16} /> : <ShoppingBag size={16} />}{product.stock < 1 ? 'Sin existencias' : 'Agregar al carrito'}</button><p className="dialog-note"><Heart size={14} /> Una pieza hecha para acompañarte.</p></div></section></div>
 }
 
 function CartDrawer({ cart, checkoutOpen, busy, address, city, paymentMethod, notes, onClose, onCheckout, onBack, onQuantity, onAddress, onCity, onPayment, onNotes, onSubmit }: {
@@ -740,18 +759,20 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, products, ca
   </div>
 }
 
-function AdminAccountView({ user, isSuperadmin, navigationItems, orderSummary, products, categories, busy, onSignOut, onSaveProduct, onCreateProduct, onCreateCategory, onCategoryActive, onOrderStatus, onNotice }: {
+function AdminAccountView({ user, isSuperadmin, navigationItems, orderSummary, products, categories, productCraftswomen, busy, onSignOut, onSaveProduct, onCreateProduct, onCreateCategory, onSaveCategory, onCategoryActive, onOrderStatus, onNotice }: {
   user: SessionUser
   navigationItems: RBACNavigationItem[]
   isSuperadmin: boolean
   orderSummary: AdminOrderSummary | null
   products: AdminProduct[]
   categories: AdminCategory[]
+  productCraftswomen: AdminCraftswomanOption[]
   busy: boolean
   onSignOut: () => void
   onSaveProduct: (productId: number, values: Partial<AdminProduct>) => void
   onCreateProduct: (values: Partial<AdminProduct>) => void
   onCreateCategory: (values: Pick<AdminCategory, 'name' | 'description' | 'active'>) => void
+  onSaveCategory: (categoryId: number, values: Pick<AdminCategory, 'name' | 'description'>) => void
   onCategoryActive: (categoryId: number, active: boolean) => void
   onOrderStatus: (orderId: number, status: string) => void
   onNotice: (message: string) => void
@@ -780,6 +801,7 @@ function AdminAccountView({ user, isSuperadmin, navigationItems, orderSummary, p
     const values = Object.fromEntries(new FormData(event.currentTarget).entries()) as Record<string, string>
     onCreateProduct({
       sku: values.sku.trim(), name: values.name.trim(), category: Number(values.category),
+      craftswoman: values.craftswoman ? Number(values.craftswoman) : null,
       price: values.price, stock: Number(values.stock), size: values.size || 'M',
       region: values.region.trim(), image_url: values.image_url.trim(),
       active: values.active === 'on', made_to_order: values.made_to_order === 'on',
@@ -802,6 +824,7 @@ function AdminAccountView({ user, isSuperadmin, navigationItems, orderSummary, p
   const canUnpublishProducts = hasEffectivePermission(user, 'products.unpublish')
   const canViewCategories = hasEffectivePermission(user, 'categories.view')
   const canAddCategories = hasEffectivePermission(user, 'categories.add')
+  const canEditCategories = hasEffectivePermission(user, 'categories.edit')
   const canPublishCategories = hasEffectivePermission(user, 'categories.publish')
   const canUnpublishCategories = hasEffectivePermission(user, 'categories.unpublish')
   const accountName = resolveUserDisplayName(user)
@@ -891,9 +914,9 @@ function AdminAccountView({ user, isSuperadmin, navigationItems, orderSummary, p
         </div>}
         {canOpenSection('products') && activeSection === 'products' && <section className="craftswoman-panel craftswoman-products-section">
           <div className="craftswoman-panel-heading"><div><small>CATÁLOGO Y CONTROL DE PUBLICACIÓN</small><h1>Productos y tejidos</h1><p>Los tejidos enviados por las artesanas llegan aquí como pendientes. Aprueba su publicación cuando la información esté completa.</p></div>{canAddProducts && <button className="craftswoman-primary-action" onClick={() => setShowCreateForm((visible) => !visible)}><Plus size={16} /> {showCreateForm ? 'Cerrar formulario' : 'Agregar producto'}</button>}</div>
-          {showCreateForm && <form className="craftswoman-product-form" onSubmit={submitNewProduct}><label className="form-label">Referencia *<input name="sku" required maxLength={50} /></label><label className="form-label">Nombre de la pieza *<input name="name" required maxLength={180} /></label><label className="form-label">Categoría *<select name="category" required defaultValue=""><option value="" disabled>Selecciona una categoría</option>{categories.filter((category) => category.active).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label><label className="form-label">Precio COP *<input name="price" type="number" min="0" step="1" required /></label><label className="form-label">Stock inicial *<input name="stock" type="number" min="0" step="1" defaultValue="0" required /></label><label className="form-label">Talla<input name="size" maxLength={30} defaultValue="M" /></label><label className="form-label">Región<input name="region" maxLength={100} /></label><label className="form-label">Imagen (URL)<input name="image_url" type="url" placeholder="https://…" /></label><label className="admin-check"><input name="active" type="checkbox" /> Publicar directamente</label><label className="admin-check"><input name="made_to_order" type="checkbox" /> Elaborar por pedido</label><button className="button button-dark craftswoman-submit-review" disabled={busy || !categories.some((category) => category.active)}>{busy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} Guardar producto</button></form>}
-          {canViewProducts && <><div className="admin-section-subheading"><h2>Pendientes de aprobación</h2><span>{pendingProducts.length}</span></div>{pendingProducts.length ? <div className="admin-review-list">{pendingProducts.map((product) => <article className="admin-review-card" key={product.id}><div className="admin-review-card-main">{product.image_url ? <img src={product.image_url} alt={product.name} /> : <span className="admin-review-placeholder"><ShoppingBag size={22} /></span>}<div><strong>{product.name}</strong><small>{product.sku} · {categories.find((category) => category.id === product.category)?.name ?? 'Categoría'}</small><small>Taller vinculado: {product.craftswoman_name || (product.craftswoman ? `Taller #${product.craftswoman}` : 'No asignado')} · Stock: {product.stock}</small><p>{product.description || 'Sin descripción registrada.'}</p></div></div><div className="admin-review-actions"><span className="admin-review-pending">Pendiente de revisión</span>{canPublishProducts && <button className="craftswoman-submit-review" disabled={busy} onClick={() => onSaveProduct(product.id, { active: true })}><Check size={15} /> Aprobar y publicar</button>}</div></article>)}</div> : <p className="muted-copy">No hay tejidos pendientes. Cuando una tejedora envíe una pieza, aparecerá en esta sección.</p>}</>}
-          {canViewProducts && <><div className="admin-section-subheading"><h2>Productos publicados y catálogo</h2><span>{publishedProducts.length}</span></div><div className="admin-product-list">{publishedProducts.map((product) => <AdminProductRow key={product.id} product={product} busy={busy} canEdit={canChangeProducts} canPublish={canPublishProducts} canUnpublish={canUnpublishProducts} onSave={onSaveProduct} />)}</div></>}
+          {showCreateForm && <form className="craftswoman-product-form" onSubmit={submitNewProduct}><label className="form-label">Referencia *<input name="sku" required maxLength={50} /></label><label className="form-label">Nombre de la pieza *<input name="name" required maxLength={180} /></label><label className="form-label">Categoría *<select name="category" required defaultValue=""><option value="" disabled>Selecciona una categoría</option>{categories.filter((category) => category.active && !category.is_internal).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label><label className="form-label">Tejedora<select name="craftswoman" defaultValue=""><option value="">Sin asignar</option>{productCraftswomen.filter((craftswoman) => craftswoman.active).map((craftswoman) => <option key={craftswoman.id} value={craftswoman.id}>{craftswoman.name}{craftswoman.community ? ` · ${craftswoman.community}` : craftswoman.region ? ` · ${craftswoman.region}` : ""}</option>)}</select></label><label className="form-label">Precio COP *<input name="price" type="number" min="0" step="1" required /></label><label className="form-label">Stock inicial *<input name="stock" type="number" min="0" step="1" defaultValue="0" required /></label><label className="form-label">Talla<input name="size" maxLength={30} defaultValue="M" /></label><label className="form-label">Región<input name="region" maxLength={100} /></label><label className="form-label">Imagen (URL)<input name="image_url" type="url" placeholder="https://…" /></label><label className="admin-check"><input name="active" type="checkbox" /> Publicar directamente</label><label className="admin-check"><input name="made_to_order" type="checkbox" /> Elaborar por pedido</label><button className="button button-dark craftswoman-submit-review" disabled={busy || !categories.some((category) => category.active && !category.is_internal)}>{busy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} Guardar producto</button></form>}
+          {canViewProducts && <><div className="admin-section-subheading"><h2>Pendientes de aprobación</h2><span>{pendingProducts.length}</span></div>{pendingProducts.length ? <div className="admin-review-list">{pendingProducts.map((product) => <article className="admin-review-card" key={product.id}><div className="admin-review-card-main">{product.image_url ? <ProductPhoto src={product.image_url} alt={product.name} className="admin-review-image" /> : <span className="admin-review-placeholder"><ShoppingBag size={22} /></span>}<div><strong>{product.name}</strong><small>{product.sku} · {categories.find((category) => category.id === product.category)?.name ?? 'Categoría'}</small><small>Tejedora: {product.craftswoman_name || 'Sin asignar'} · Stock: {product.stock}</small><p>{product.description || 'Sin descripción registrada.'}</p></div></div><div className="admin-review-actions"><span className="admin-review-pending">Pendiente de revisión</span>{canPublishProducts && <button className="craftswoman-submit-review" disabled={busy} onClick={() => onSaveProduct(product.id, { active: true })}><Check size={15} /> Aprobar y publicar</button>}</div></article>)}</div> : <p className="muted-copy">No hay tejidos pendientes. Cuando una tejedora envíe una pieza, aparecerá en esta sección.</p>}</>}
+          {canViewProducts && <><div className="admin-section-subheading"><h2>Productos publicados y catálogo</h2><span>{publishedProducts.length}</span></div><div className="admin-product-list">{publishedProducts.map((product) => <AdminProductRow key={product.id} product={product} categories={categories} craftswomen={productCraftswomen} busy={busy} canEdit={canChangeProducts} canPublish={canPublishProducts} canUnpublish={canUnpublishProducts} onSave={onSaveProduct} />)}</div></>}
         </section>}
         {canOpenSection('orders') && activeSection === 'orders' && <section className="craftswoman-panel"><div className="craftswoman-panel-heading admin-orders-heading"><div><small>SEGUIMIENTO COMERCIAL</small><h1>Pedidos de clientes</h1><p>Busca por pedido, cliente, producto o tejedora; limita los resultados por estado y asignación.</p></div><span>{adminOrderPage.count} pedidos</span></div>{canViewOrders ? <>
           <div className="admin-order-filters">
@@ -906,10 +929,29 @@ function AdminAccountView({ user, isSuperadmin, navigationItems, orderSummary, p
           {ordersLoading ? <p className="muted-copy" role="status">Cargando pedidos…</p> : adminOrderPage.results.length ? <div className="orders-list">{adminOrderPage.results.map((order) => <AdminOrderRow key={order.id} order={order} busy={busy} canChange={canChangeOrders} canApprove={canApproveOrders} canCancel={canCancelOrders} onStatus={changeAdminOrderStatus} />)}</div> : <p className="muted-copy">No hay pedidos que coincidan con estos filtros.</p>}
           <nav className="admin-order-pagination" aria-label="Paginación de pedidos"><button type="button" className="button button-outline" disabled={!adminOrderPage.previous || ordersLoading} onClick={() => setOrderPageNumber((page) => Math.max(1, page - 1))}>Anterior</button><span>Página {orderPageNumber} de {Math.max(1, Math.ceil(adminOrderPage.count / 20))}</span><button type="button" className="button button-outline" disabled={!adminOrderPage.next || ordersLoading} onClick={() => setOrderPageNumber((page) => page + 1)}>Siguiente</button></nav>
         </> : <p className="muted-copy">Tu rol no tiene permiso para consultar pedidos.</p>}</section>}
-        {canOpenSection('categories') && activeSection === 'categories' && <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>ORGANIZACIÓN DEL CATÁLOGO</small><h1>Categorías</h1><p>Mantén las categorías disponibles para ordenar las piezas de la tienda.</p></div></div>{canAddCategories && <form className="admin-category-form" onSubmit={submitNewCategory}><label className="form-label">Nombre de categoría *<input name="name" required maxLength={100} placeholder="Ej. Mantas Wayúu" /></label><label className="form-label">Descripción<input name="description" maxLength={500} placeholder="Descripción breve" /></label><button className="button button-dark" disabled={busy}>{busy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} Crear categoría</button></form>}{canViewCategories && <div className="admin-category-list">{categories.map((category) => <div className="admin-category-row" key={category.id}><div><strong>{category.name}</strong><small>{category.description || 'Sin descripción'}</small></div><span className={category.active ? 'category-state active' : 'category-state'}>{category.active ? 'Activa' : 'Inactiva'}</span>{(category.active ? canUnpublishCategories : canPublishCategories) && <button className="text-button" disabled={busy} onClick={() => onCategoryActive(category.id, !category.active)}>{category.active ? 'Desactivar' : 'Activar'}</button>}</div>)}</div>}</section>}
+        {canOpenSection('categories') && activeSection === 'categories' && <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>ORGANIZACIÓN DEL CATÁLOGO</small><h1>Categorías</h1><p>Mantén las categorías disponibles para ordenar las piezas de la tienda.</p></div></div>{canAddCategories && <form className="admin-category-form" onSubmit={submitNewCategory}><label className="form-label">Nombre de categoría *<input name="name" required maxLength={100} placeholder="Ej. Mantas Wayúu" /></label><label className="form-label">Descripción<input name="description" maxLength={500} placeholder="Descripción breve" /></label><button className="button button-dark" disabled={busy}>{busy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} Crear categoría</button></form>}{canViewCategories && <div className="admin-category-list">{categories.map((category) => <AdminCategoryRow key={category.id} category={category} busy={busy} canEdit={canEditCategories && !category.is_internal} canChangeVisibility={!category.is_internal && (category.active ? canUnpublishCategories : canPublishCategories)} onSave={onSaveCategory} onActive={onCategoryActive} />)}</div>}</section>}
         {canOpenSection('access') && activeSection === 'access' && isSuperadmin && <SuperadminRBACPanel currentUser={user} />}
       </main>
     </section>
+  </div>
+}
+
+function AdminCategoryRow({ category, busy, canEdit, canChangeVisibility, onSave, onActive }: {
+  category: AdminCategory
+  busy: boolean
+  canEdit: boolean
+  canChangeVisibility: boolean
+  onSave: (categoryId: number, values: Pick<AdminCategory, 'name' | 'description'>) => void
+  onActive: (categoryId: number, active: boolean) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [name, setName] = useState(category.name)
+  const [description, setDescription] = useState(category.description)
+  const changed = name.trim() !== category.name || description.trim() !== category.description
+  return <div className="admin-category-row">
+    {editing ? <><label>Nombre<input value={name} maxLength={100} onChange={(event) => setName(event.target.value)} /></label><label>Descripción<input value={description} maxLength={500} onChange={(event) => setDescription(event.target.value)} /></label></> : <div><strong>{category.name}</strong><small>{category.is_internal ? 'Categoría interna del sistema' : category.description || 'Sin descripción'}</small></div>}
+    <span className={category.active ? 'category-state active' : 'category-state'}>{category.is_internal ? 'Interna' : category.active ? 'Activa' : 'Inactiva'}</span>
+    {editing ? <><button className="text-button" disabled={busy || !changed || !name.trim()} onClick={() => { onSave(category.id, { name: name.trim(), description: description.trim() }); setEditing(false) }}>Guardar</button><button className="text-button" disabled={busy} onClick={() => { setName(category.name); setDescription(category.description); setEditing(false) }}>Cancelar</button></> : <>{canEdit && !category.is_internal && <button className="text-button" disabled={busy} onClick={() => setEditing(true)}>Editar</button>}{canChangeVisibility && <button className="text-button" disabled={busy} onClick={() => onActive(category.id, !category.active)}>{category.active ? 'Desactivar' : 'Activar'}</button>}</>}
   </div>
 }
 
@@ -1392,13 +1434,18 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   </section>
 }
 
-function AdminProductRow({ product, busy, canEdit, canPublish, canUnpublish, onSave }: { product: AdminProduct; busy: boolean; canEdit: boolean; canPublish: boolean; canUnpublish: boolean; onSave: (id: number, values: Partial<AdminProduct>) => void }) {
+function AdminProductRow({ product, categories, craftswomen, busy, canEdit, canPublish, canUnpublish, onSave }: { product: AdminProduct; categories: AdminCategory[]; craftswomen: AdminCraftswomanOption[]; busy: boolean; canEdit: boolean; canPublish: boolean; canUnpublish: boolean; onSave: (id: number, values: Partial<AdminProduct>) => void }) {
   const [price, setPrice] = useState(product.price)
   const [stock, setStock] = useState(String(product.stock))
   const [active, setActive] = useState(product.active)
+  const [editingDetails, setEditingDetails] = useState(false)
+  const [name, setName] = useState(product.name)
+  const [categoryId, setCategoryId] = useState(String(product.category))
+  const [craftswomanId, setCraftswomanId] = useState(product.craftswoman ? String(product.craftswoman) : '')
   const canChangeVisibility = active ? canUnpublish : canPublish
-  const hasChanges = (canEdit && (price !== product.price || Number(stock) !== product.stock)) || active !== product.active
-  return <div className="admin-product-row"><div className="admin-product-name"><span className="product-origin">{product.sku}</span><strong>{product.name}</strong><small>{product.size} · {product.region || 'Sin región'}</small></div>{canEdit ? <><label className="admin-inline-field">Precio<input aria-label={`Precio de ${product.name}`} type="number" min="0" step="1" value={price} onChange={(event) => setPrice(event.target.value)} /></label><label className="admin-inline-field">Stock<input aria-label={`Stock de ${product.name}`} type="number" min="0" step="1" value={stock} onChange={(event) => setStock(event.target.value)} /></label></> : <><span>{money(product.price)}</span><span>Stock {product.stock}</span></>}{canChangeVisibility ? <label className="admin-check"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} /> Publicado</label> : <span>{product.active ? 'Publicado' : 'Oculto'}</span>}{hasChanges && <button className="button button-outline" disabled={busy} onClick={() => onSave(product.id, { ...(canEdit ? { price, stock: Number(stock) } : {}), ...(active !== product.active ? { active } : {}) })}>Guardar</button>}</div>
+  const hasDetailsChanges = name.trim() !== product.name || Number(categoryId) !== product.category || (craftswomanId ? Number(craftswomanId) : null) !== product.craftswoman
+  const hasChanges = (canEdit && (price !== product.price || Number(stock) !== product.stock || (editingDetails && hasDetailsChanges))) || active !== product.active
+  return <div className="admin-product-row"><div className="admin-product-name"><span className="product-origin">{product.sku}</span><strong>{product.name}</strong><small>{product.size} · {product.region || 'Sin región'}</small><small>Tejedora: {product.craftswoman_name || 'Sin asignar'}</small>{canEdit && <button className="text-button" type="button" onClick={() => setEditingDetails((value) => !value)}>{editingDetails ? 'Cerrar ficha' : 'Editar ficha'}</button>}</div>{canEdit ? <><label className="admin-inline-field">Precio<input aria-label={`Precio de ${product.name}`} type="number" min="0" step="1" value={price} onChange={(event) => setPrice(event.target.value)} /></label><label className="admin-inline-field">Stock<input aria-label={`Stock de ${product.name}`} type="number" min="0" step="1" value={stock} onChange={(event) => setStock(event.target.value)} /></label></> : <><span>{money(product.price)}</span><span>Stock {product.stock}</span></>}{editingDetails && canEdit && <div className="admin-product-edit-fields"><label className="admin-inline-field">Nombre<input value={name} maxLength={180} onChange={(event) => setName(event.target.value)} /></label><label className="admin-inline-field">Categoría<select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>{!categories.some((category) => category.id === product.category && category.active && !category.is_internal) && <option value={product.category} disabled>{categories.find((category) => category.id === product.category)?.name ?? 'Categoría actual no disponible'}</option>}{categories.filter((category) => category.active && !category.is_internal).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label><label className="admin-inline-field">Tejedora<select value={craftswomanId} onChange={(event) => setCraftswomanId(event.target.value)}><option value="">Sin asignar</option>{craftswomen.map((craftswoman) => <option key={craftswoman.id} value={craftswoman.id}>{craftswoman.name}{craftswoman.community ? ` · ${craftswoman.community}` : craftswoman.region ? ` · ${craftswoman.region}` : ''}{!craftswoman.active ? ' (inactiva)' : ''}</option>)}</select></label></div>}{canChangeVisibility ? <label className="admin-check"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} /> Publicado</label> : <span>{product.active ? 'Publicado' : 'Oculto'}</span>}{hasChanges && <button className="button button-outline" disabled={busy || !name.trim()} onClick={() => onSave(product.id, { ...(canEdit ? { price, stock: Number(stock), ...(editingDetails && hasDetailsChanges ? { name: name.trim(), category: Number(categoryId), craftswoman: craftswomanId ? Number(craftswomanId) : null } : {}) } : {}), ...(active !== product.active ? { active } : {}) })}>Guardar</button>}</div>
 }
 
 function AdminOrderRow({ order, busy, canChange, canApprove, canCancel, onStatus }: { order: Order; busy: boolean; canChange: boolean; canApprove: boolean; canCancel: boolean; onStatus: (id: number, status: string) => void }) {
