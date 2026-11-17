@@ -34,6 +34,7 @@ from .models import (
     RBACAction,
     RBACCapability,
     RBACGrant,
+    RBACRecordScopeGrant,
     RBACResource,
     RolePermission,
     UserPermissionGrant,
@@ -60,6 +61,7 @@ from .rbac import (
     permission_for,
     permission_key,
     record_audit,
+    record_scope_for,
     remove_user_permission,
     revoke_admin_delegations,
     role_for_user,
@@ -559,6 +561,16 @@ class CapabilityInputSerializer(serializers.Serializer):
     action = serializers.SlugField(max_length=40)
 
 
+class RecordScopeChangeSerializer(serializers.Serializer):
+    resource = serializers.SlugField(max_length=80)
+    scope = serializers.ChoiceField(choices=(('all', 'Todos los registros'), ('none', 'Sin registros')), allow_null=True)
+
+    def validate_resource(self, value):
+        if not RBACResource.objects.filter(code=value, active=True).exists():
+            raise serializers.ValidationError('Selecciona un recurso activo.')
+        return value
+
+
 def _session_display_name(user, profile_name=None):
     first_name = (user.first_name or '').strip()
     last_name = (user.last_name or '').strip()
@@ -978,6 +990,104 @@ class RBACCatalogView(APIView):
             'resources': list(RBACResource.objects.values('id', 'code', 'name', 'description', 'active')),
             'actions': list(RBACAction.objects.values('id', 'code', 'name', 'description', 'active')),
         })
+
+
+RECORD_SCOPE_RESOURCES = ('orders', 'designs', 'products', 'customers', 'users', 'craftswomen')
+
+
+def _record_scope_rows(principal_field, principal, effective_user=None):
+    saved = {
+        row.resource.code: row.scope
+        for row in RBACRecordScopeGrant.objects.filter(**{principal_field: principal}).select_related('resource')
+    }
+    rows = []
+    for resource in RBACResource.objects.filter(code__in=RECORD_SCOPE_RESOURCES).order_by('name'):
+        default_scope = (
+            'all' if getattr(principal, 'code', None) in (AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN)
+            else 'own' if getattr(principal, 'code', None) == AccessRole.Code.CUSTOMER
+            else 'assigned' if getattr(principal, 'code', None) == AccessRole.Code.CRAFTSWOMAN and resource.code in ('orders', 'designs', 'products')
+            else 'none'
+        )
+        rows.append({
+            'resource': resource.code,
+            'resource_name': resource.name,
+            'scope': saved.get(resource.code),
+            'effective_scope': record_scope_for(effective_user, resource.code) if effective_user else (
+                saved.get(resource.code) or default_scope
+            ),
+        })
+    return rows
+
+
+def _save_record_scopes(request, principal_field, principal, scope_rows, resource_name, affected_user=None):
+    keys = [item['resource'] for item in scope_rows]
+    if len(keys) != len(set(keys)):
+        raise serializers.ValidationError({'scopes': 'No repitas recursos en la misma operación.'})
+    with transaction.atomic():
+        for item in scope_rows:
+            lookup = {
+                principal_field: principal,
+                'resource': RBACResource.objects.get(code=item['resource']),
+            }
+            if item['scope'] is None:
+                RBACRecordScopeGrant.objects.filter(**lookup).delete()
+            else:
+                RBACRecordScopeGrant.objects.update_or_create(
+                    **lookup,
+                    defaults={
+                        'scope': item['scope'],
+                        'granted_by': request.user,
+                    },
+                )
+            record_audit(
+                request.user,
+                'set_record_scope',
+                item['resource'],
+                affected_user=affected_user,
+                details={'principal': resource_name, 'scope': item['scope']},
+            )
+
+
+class SuperadminRoleScopesView(APIView):
+    permission_classes = (SuperadminOnly,)
+
+    def get(self, request, role_code):
+        role = get_object_or_404(AccessRole, code=role_code)
+        return Response({'role': role.code, 'scopes': _record_scope_rows('role', role)})
+
+    def put(self, request, role_code):
+        role = get_object_or_404(AccessRole, code=role_code)
+        if role.code == AccessRole.Code.SUPERADMIN:
+            raise serializers.ValidationError({'role': 'El superadministrador siempre tiene alcance global.'})
+        serializer = RecordScopeChangeSerializer(data=request.data.get('scopes'), many=True)
+        serializer.is_valid(raise_exception=True)
+        _save_record_scopes(request, 'role', role, serializer.validated_data, role.code)
+        return self.get(request, role_code)
+
+
+class SuperadminUserScopesView(APIView):
+    permission_classes = (SuperadminOnly,)
+
+    def get(self, request, user_id):
+        target = get_object_or_404(User, pk=user_id)
+        role = role_for_user(target)
+        if role and role.code == AccessRole.Code.SUPERADMIN:
+            raise PermissionDenied('El superadministrador siempre tiene alcance global.')
+        return Response({
+            'user_id': target.id,
+            'username': target.username,
+            'scopes': _record_scope_rows('user', target, effective_user=target),
+        })
+
+    def put(self, request, user_id):
+        target = get_object_or_404(User, pk=user_id)
+        role = role_for_user(target)
+        if role and role.code == AccessRole.Code.SUPERADMIN:
+            raise PermissionDenied('No se pueden configurar ámbitos individuales para el superadministrador.')
+        serializer = RecordScopeChangeSerializer(data=request.data.get('scopes'), many=True)
+        serializer.is_valid(raise_exception=True)
+        _save_record_scopes(request, 'user', target, serializer.validated_data, target.username, affected_user=target)
+        return self.get(request, user_id)
 
 
 class SuperadminRolesView(APIView):

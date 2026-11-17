@@ -11,6 +11,7 @@ from .models import (
     RBACAction,
     RBACCapability,
     RBACGrant,
+    RBACRecordScopeGrant,
     RBACResource,
     RolePermission,
     UserPermissionGrant,
@@ -122,6 +123,28 @@ def capability_for(resource, action):
         action__code=canonical_action(action),
         action__active=True,
     ).first()
+
+
+def record_scope_for(user, resource):
+    """Return the explicit record scope; custom roles default to no records."""
+    role = role_for_user(user)
+    if role is None:
+        return RBACRecordScopeGrant.Scope.NONE
+    if role.code == AccessRole.Code.SUPERADMIN:
+        return RBACRecordScopeGrant.Scope.ALL
+    user_scope = RBACRecordScopeGrant.objects.filter(user=user, resource__code=resource).values_list('scope', flat=True).first()
+    if user_scope:
+        return user_scope
+    role_scope = RBACRecordScopeGrant.objects.filter(role=role, resource__code=resource).values_list('scope', flat=True).first()
+    if role_scope:
+        return role_scope
+    if role.code == AccessRole.Code.ADMIN:
+        return RBACRecordScopeGrant.Scope.ALL
+    if role.code == AccessRole.Code.CUSTOMER and resource in ('orders', 'designs', 'customers', 'cart'):
+        return 'own'
+    if role.code == AccessRole.Code.CRAFTSWOMAN and resource in ('orders', 'designs', 'products'):
+        return 'assigned'
+    return RBACRecordScopeGrant.Scope.NONE
 
 
 def permission_catalog():

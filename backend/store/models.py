@@ -160,6 +160,30 @@ class RBACGrant(models.Model):
         ]
 
 
+class RBACRecordScopeGrant(models.Model):
+    class Scope(models.TextChoices):
+        NONE = 'none', 'Sin registros'
+        ALL = 'all', 'Todos los registros'
+
+    role = models.ForeignKey(AccessRole, on_delete=models.CASCADE, null=True, blank=True, related_name='record_scope_grants')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, related_name='record_scope_grants')
+    resource = models.ForeignKey(RBACResource, on_delete=models.CASCADE, related_name='record_scope_grants')
+    scope = models.CharField(max_length=4, choices=Scope.choices)
+    granted_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='record_scope_grants_created')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(models.Q(role__isnull=False, user__isnull=True) | models.Q(role__isnull=True, user__isnull=False)),
+                name='rbac_scope_one_principal',
+            ),
+            models.UniqueConstraint(fields=('role', 'resource'), condition=models.Q(role__isnull=False), name='unique_role_resource_scope'),
+            models.UniqueConstraint(fields=('user', 'resource'), condition=models.Q(user__isnull=False), name='unique_user_resource_scope'),
+        ]
+
+
 class RolePermission(models.Model):
     role = models.ForeignKey(AccessRole, on_delete=models.CASCADE, related_name='permission_grants')
     permission = models.ForeignKey('auth.Permission', on_delete=models.CASCADE, related_name='wayuu_role_grants')

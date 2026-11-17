@@ -1,7 +1,7 @@
 from rest_framework.permissions import BasePermission
 
 from .models import AccessRole, Category, Craftswoman, Product
-from .rbac import has_permission as has_rbac_permission, record_audit, role_for_user
+from .rbac import has_permission as has_rbac_permission, record_audit, record_scope_for, role_for_user
 
 
 class RolePermission(BasePermission):
@@ -89,12 +89,11 @@ class AdminOrSuperadmin(RolePermission):
         # authorize an administrative collection endpoint.
         if role.code in (AccessRole.Code.CUSTOMER, AccessRole.Code.CRAFTSWOMAN):
             return False
-        # No record-scope catalog exists yet for cross-account operational data.
-        # Custom roles therefore fail closed for resources containing private
-        # records until an explicit, reviewed scope policy is configured.
-        if role.code not in (AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN) and resource in {
-            'orders', 'designs', 'customers', 'users', 'craftswomen',
-        }:
+        # A capability alone never grants cross-account access to private rows.
+        # Custom roles must also receive an explicit all-records scope.
+        if resource in {'orders', 'designs', 'products', 'customers', 'users', 'craftswomen'} and record_scope_for(
+            request.user, resource,
+        ) != 'all':
             return False
         if role.code not in (AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN) and not resource:
             return False
