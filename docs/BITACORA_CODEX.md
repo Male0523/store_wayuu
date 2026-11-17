@@ -142,3 +142,5 @@ El hash del commit documental se informa en la entrega de Fase 0 y queda en el h
 - No se abordaron los diagnósticos heredados de lint para respetar el alcance de este cierre (sin refactor general). No hay script de pruebas frontend declarado en `frontend/package.json`.
 - Pendiente de revisión humana: decidir las reglas comerciales listadas, resolver los hallazgos de lint preexistentes en un trabajo separado y revisar el PR.
 - El PR #4 sigue abierto y sin fusionar; esta actualización no lo cerró ni lo integró.
+- Commits locales en `feature/pedidos-trazabilidad`: `6febd5d2c8450d842469df0d9bc5ac2f710a20c4` (`test: check credential permissions across platforms`) y `45e143ccae0bad617fca6b5cab843f06b5836215` (`docs: record sprint 1 technical closeout`).
+- Publicación pendiente: `git push origin feature/pedidos-trazabilidad` falló con `Could not resolve host: github.com`. GitHub confirma que el PR sigue abierto y sin fusionar, con head remoto `d76321d707c459635d6584cf714d0323320cba32`; los commits de cierre aún no aparecen en el PR. No se hizo force push.
