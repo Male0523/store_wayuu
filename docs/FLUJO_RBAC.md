@@ -6,18 +6,21 @@
 - `NavigationItem` representa vistas existentes y su asignación por rol. Mostrar una vista en el menú no concede acceso a los datos ni a las operaciones.
 - `RBACResource`, `RBACAction` y `RBACCapability` forman catálogos independientes. Una capacidad existe solo cuando se vincula explícitamente un recurso con una acción.
 - `RBACGrant` representa grants `allow` o `deny` por rol o por usuario. Los grants individuales prevalecen únicamente cuando no hay un `deny` aplicable.
+- `RBACRecordScopeGrant` separa el alcance de filas de las acciones: por rol o usuario el superadministrador configura `all` o `none`; `null` hereda. Un rol/usuario personalizado sin ámbito configurado no recibe registros privados por tener solamente `view`.
 - `RolePermission`, `UserPermissionGrant` y los permisos Django siguen leyéndose como compatibilidad con las asignaciones históricas. Las tablas históricas no se eliminan ni se vacían.
 - La navegación, los endpoints API y las vistas HTML aplican controles en servidor. Las listas y detalles conservan los filtros de propiedad/asignación existentes.
 
 ## Precedencia provisional
 
-Para una cuenta distinta del superadministrador, la evaluación se realiza en este orden:
+Para una cuenta distinta del superadministrador, la evaluación de una acción se realiza en este orden:
 
 1. Una denegación explícita del usuario o de su rol deniega la capacidad.
 2. Si no existe denegación, un `allow` individual concede la capacidad.
 3. Si no existe grant individual, un `allow` del rol concede la capacidad.
 4. Si no hay grant dinámico para esa capacidad, se consulta la concesión heredada de Django/Wayuu.
 5. En ausencia de una concesión aplicable, se deniega.
+
+La consulta de colecciones administrativas de registros privados exige además el ámbito efectivo `all`. En este ámbito, un `none` individual restringe el `all` heredado del rol; en ausencia de ámbito individual se usa el del rol. Los roles existentes conservan su comportamiento: admin tiene ámbito global, cliente propio y tejedora asignado en sus operaciones de perfil. Roles personalizados empiezan sin ámbito. El superadministrador raíz conserva alcance global.
 
 El superadministrador es una raíz global: los grants ordinarios no pueden limitarlo, no se le pueden asignar grants individuales y su rol no se puede desactivar. Solo el superadministrador administra el catálogo y los grants de rol. Una cuenta sin rol superadministrador no puede elevarse por sí misma; los cambios de rol requieren una operación del superadministrador.
 
@@ -33,16 +36,16 @@ Los nombres `add`/`change` se aceptan como alias de `create`/`edit` para conserv
 
 ## Alcance de registros
 
-Los perfiles de cliente y tejedora conservan los límites existentes: pedidos y diseños propios para clientes, pedidos asignados y datos de taller para tejedoras. Las concesiones históricas `orders.view` no se interpretan como autorización para los listados administrativos. Los endpoints administrativos de recursos con registros privados (`orders`, `designs`, `customers`, `users` y `craftswomen`) quedan reservados a los roles administrativos existentes; un rol personalizado falla cerrado allí hasta que exista una política de alcance por registro aprobada y configurable.
+Los perfiles de cliente y tejedora conservan los límites existentes: pedidos y diseños propios para clientes, pedidos asignados y datos de taller para tejedoras. Las concesiones históricas `orders.view` no se interpretan como autorización para los listados administrativos. Los endpoints administrativos de recursos con registros privados (`orders`, `designs`, `products`, `customers`, `users` y `craftswomen`) requieren permiso de acción y ámbito `all`. Los ámbitos se administran separadamente por rol y usuario; por defecto, un rol personalizado falla cerrado.
 
-La versión actual no incluye un catálogo configurable de ámbitos (`propios`, `asignados`, `globales` u otros) ni filtros de alcance para cada modelo. Por tanto, **no deben otorgarse capacidades de datos sensibles a roles personalizados esperando que eso defina su alcance**. Definir y administrar esos ámbitos es un pendiente de seguridad para el siguiente incremento, no una regla inferida en este sprint.
+El catálogo configurable de ámbitos permite únicamente `none` y `all`; no se inventó semántica de propiedad/asignación para cada modelo. Los ámbitos propios/asignados de perfiles cliente/tejedora siguen aplicándose en sus vistas existentes. Ampliar ámbitos personalizados con `own` o `assigned` requiere definir y probar la relación correcta para cada recurso.
 
 ## Decisiones que requieren aprobación
 
 - Aprobar la precedencia `DENY` sobre grants `ALLOW` del rol y del usuario.
 - Aprobar al superadministrador como raíz sin posibilidad de auto-denegación ordinaria y la protección del último superadministrador activo.
-- Definir si los administradores pueden acceder a registros ajenos y qué roles pueden recibir alcance `global`, `propio` o `asignado` por recurso.
-- Definir las relaciones de propiedad/asignación para recursos personalizados antes de habilitar roles personalizados sobre esos registros.
+- Aprobar qué roles personalizados pueden recibir ámbito `all` por recurso privado y si `all` debe requerir aprobación adicional.
+- Definir y probar ámbitos `own`/`assigned` para roles personalizados antes de ofrecerlos; por ahora solo se admiten `none` y `all`.
 - Decidir cómo retirar el fallback histórico que permite acciones especializadas a partir de `edit`.
 - Asociar `reject` y `export` a operaciones reales antes de concederlas; se mantienen en el catálogo general, pero no hay capacidades iniciales para endpoints que no existen.
 
