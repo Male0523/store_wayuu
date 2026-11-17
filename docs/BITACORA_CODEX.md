@@ -253,3 +253,30 @@ El hash del commit documental se informa en la entrega de Fase 0 y queda en el h
 - `814cd46a2fffd8dc0b05b44272c8dd5631cbdb79` — `feat: separate commercial and internal catalog categories`.
 - `36b4bd1f65821211a29411d5f31e4871a8faff26` — `feat: manage catalog profiles and category edits`.
 - No hubo push, merge, despliegue ni cambios en `main`. Rama local: `feature/catalogo-productos`.
+
+## 2026-11-17 — Sprint 5: estabilización del diseñador de mantas
+
+### Preparación, hallazgos y cambios
+
+- Se verificó el checkout local en `feature/catalogo-productos`, limpio y basado en el historial previo; se creó `feature/estabilizacion-disenador-mantas`. El remote se mantiene en `https://github.com/Male0523/store_wayuu.git`.
+- Se revisaron solamente el modelo `CustomDesign`, sus endpoints y vista HTML, serializers, componentes de diseño, permisos de diseños y asociaciones con pedidos. El modelo ya conserva cliente, patrón, colores, talla, cantidad, indicaciones, precio, estado y tejedora; el producto privado del diseño sirve como relación con líneas de pedido. La API y la vista HTML permiten crear y consultar el diseño; la edición de sus parámetros por cliente no está implementada. No se creó un endpoint de edición porque el código/documentación no define cuándo deja de ser editable un diseño ya agregado al carrito o vinculado a un pedido.
+- Se detectó que ambos flujos de creación persistían diseño/producto y después escribían el carrito fuera de la transacción. Se movió el `update_or_create` del carrito dentro de la misma transacción en API y HTML.
+- La vista HTML ahora valida patrón, colores hexadecimales, talla, cantidad entre 1 y 20 e indicaciones hasta 2000 caracteres, conforme a las opciones ya admitidas por la API; se evita la excepción al recibir una cantidad malformada. No se alteró la lista de patrones ni la experiencia visual.
+- Se encontró que la actualización administrativa de estado de un pedido no sincronizaba los diseños enlazados y no requería `designs.change`. Ahora la ruta API exige ese permiso cuando hay diseños y sincroniza sus estados en la misma transacción que el pedido y la auditoría. Se conserva la matriz existente; no se crean transiciones comerciales.
+- No se modificaron modelos, migraciones, diseñador visual, carrito fuera del guardado del diseño, checkout ni trazabilidad de tejedoras. La administración de Django y el panel de tejedora conservan los caminos existentes de consulta filtrados por sus permisos/relaciones; no se añadieron superficies nuevas de consulta.
+
+### Verificaciones ejecutadas
+
+- Pruebas dirigidas — **OK**, 4 pruebas: flujo de creación/listado API y carrito, validación/guardado HTML, permiso `designs.change` y sincronización de estado admin/diseño, y matriz compartida de transiciones.
+- Desde `backend`: `$env:DJANGO_SECRET_KEY='sprint5-test-only-local'; $env:DB_ENGINE='sqlite'; .\\.venv\\Scripts\\python.exe manage.py test` — **OK**, 113 pruebas, 0 fallos, 0 errores; Django informó `System check identified no issues`. Se conservó el warning ya visto de `backend/staticfiles/` ausente y la salida informativa de la prueba de auditoría de roles.
+- Desde `backend`: `manage.py makemigrations --check --dry-run` con la clave temporal — **OK**, `No changes detected`. No se modificaron migraciones ni se aplicó operación a la base de datos local/de producción.
+- Desde `frontend`: `npm run build` — **OK**, TypeScript/Vite y 1946 módulos transformados.
+- Desde `frontend`: `npm run lint` — **falló** con 6 errores y 5 warnings en `CustomerPanel.tsx` y `ShopApp.tsx`, igual a la referencia registrada al cierre del Sprint 4; no se modificó frontend en este sprint. No existe script de pruebas frontend (`npm run` lista `dev`, `build`, `lint`, `preview`).
+- `git diff --check` — **OK**, sin errores de whitespace.
+
+### Commits y pendientes
+
+- `1375a5501c37eef93962fd76fac4ae44371c9e9d` — `fix: preserve custom designs through order updates` (código funcional y pruebas).
+- Commit documental: se creará después de registrar este hash y las verificaciones finales.
+- Este registro describe lo verificado en la rama `feature/estabilizacion-disenador-mantas`. No hubo push, merge, despliegue ni cambios en `main`.
+- Pendiente funcional: definir y aprobar el ciclo de vida de edición de un diseño (quién puede editar y hasta qué estado/relación); implementar edición cliente únicamente tras esa definición. La ruta de pedido y cambios de estado mantienen aislamiento RBAC; no se cambió la matriz comercial.
