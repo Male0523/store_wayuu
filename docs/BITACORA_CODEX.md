@@ -280,3 +280,33 @@ El hash del commit documental se informa en la entrega de Fase 0 y queda en el h
 - Commit documental: se creará después de registrar este hash y las verificaciones finales.
 - Este registro describe lo verificado en la rama `feature/estabilizacion-disenador-mantas`. No hubo push, merge, despliegue ni cambios en `main`.
 - Pendiente funcional: definir y aprobar el ciclo de vida de edición de un diseño (quién puede editar y hasta qué estado/relación); implementar edición cliente únicamente tras esa definición. La ruta de pedido y cambios de estado mantienen aislamiento RBAC; no se cambió la matriz comercial.
+
+## 2026-11-17 — Sprint 6: inventario, perfiles y reportes
+
+### Preparación y revisión enfocada
+
+- Se comprobó que `feature/estabilizacion-disenador-mantas` tenía un árbol limpio en `ee484d9609ba1f307dbbd3f9db679690520512c4`; se creó `feature/inventario-perfiles-reportes` desde ese commit. Remote: `https://github.com/Male0523/store_wayuu.git`.
+- Se consultó esta bitácora y se limitaron las lecturas a existencias, modelos/permisos de perfiles, productos de tejedoras y reportes administrativos con sus dependencias directas.
+- El checkout y la ruta HTML de compra validan cantidad y existencia dentro de transacciones; serializan el acceso con `select_for_update` a perfil, filas de carrito y productos, crean pedido/items y descuentan stock juntos. El endpoint de checkout realiza el mismo control. El stock es `PositiveIntegerField`; el serializer de producto rechaza valores negativos. No se detectó una vía de pedido que descuente stock fuera del checkout.
+- La actualización de inventario del administrador requiere permiso `products.edit` por el permiso RBAC de la vista; la tejedora modifica solo productos ligados a su perfil, y sus consultas listan solo esos productos. El perfil de producto serializa la relación real cuando existe; no se asignaron relaciones ni datos artificiales.
+- El endpoint de perfil de cliente obtiene el perfil asociado a la sesión, y `email` es de solo lectura en `ProfileSerializer`. El código no ofrece una operación equivalente de autoedición de perfil para tejedoras; la administración puede gestionarlo mediante operaciones administrativas protegidas. No se añadieron campos o permisos de autoedición sin definición autorizada.
+- El único reporte agregado encontrado es el resumen administrativo de pedidos: agrega por estado, cuenta el total y selecciona los tres pedidos recientes desde `Order`, sin calcular sobre una página parcial. `AdminOrSuperadmin` exige `orders.view` y ámbito de registros `all`. No existe un reporte de inventario ni una interfaz de filtros para el resumen; no se añadieron métricas ni definiciones comerciales.
+- Se añadieron pruebas de rechazo de stock negativo y aislamiento de listado/edición de productos por perfil real de tejedora. Se reforzó la prueba de perfil de cliente para confirmar que el correo no se puede alterar mediante PATCH. Se reutilizan pruebas existentes de checkout/descuento de stock, checkout repetido, inventario cambiado antes de comprar, resumen más allá de una página y matriz de permisos.
+
+### Verificaciones ejecutadas
+
+- Pruebas dirigidas — **OK**, 7 pruebas: stock negativo, aislamiento de productos de tejedora, resumen de todos los estados (105 pedidos, sin depender de paginación), actualización de perfil de cliente con email de solo lectura, checkout con descuento, checkout repetido y rechazo por stock insuficiente.
+- Desde `backend`: `$env:DJANGO_SECRET_KEY='sprint6-test-only-local'; $env:DB_ENGINE='sqlite'; .\\.venv\\Scripts\\python.exe manage.py test` — **OK**, 115 pruebas, 0 fallos, 0 errores; Django informó `System check identified no issues`. Se emitió el warning conocido de `backend/staticfiles/` ausente y salida informativa de la prueba de auditoría de roles.
+- Desde `backend`: `manage.py makemigrations --check --dry-run` con clave temporal — **OK**, `No changes detected`; no se aplicaron migraciones.
+- Desde `frontend`: `npm run build` — **OK**, TypeScript/Vite y 1946 módulos transformados.
+- Desde `frontend`: `npm run lint` — **falló** con 6 errores y 5 warnings en `CustomerPanel.tsx` y `ShopApp.tsx`, sin archivos frontend cambiados; coincide con la referencia Sprint 5. `npm run` confirma que no existe script de pruebas frontend (`dev`, `build`, `lint`, `preview`).
+- `git diff --check` — **OK**, sin errores de whitespace.
+
+### Decisiones/limitaciones y commits
+
+- No se simularon transacciones concurrentes con varios procesos; la suite corre sobre SQLite local, que no ofrece el mismo bloqueo de filas que el motor de producción configurado potencialmente. El checkout usa `select_for_update`; una comprobación de competencia real requiere ejecutar contra el motor de base de datos de despliegue.
+- Pendiente definir si las tejedoras pueden editar campos de su propio perfil y cuáles; la capacidad no está implementada actualmente y no se inventó una política.
+- No hay reporte de inventario existente. Cualquier indicador (unidades disponibles, piezas por encargo, valorización u otro) requiere definición y queda fuera de este sprint sin aprobación.
+- `cde22ca0199b50a5746c11b07ae7df934bb5d2a3` — `test: cover inventory profile isolation and reporting`.
+- Commit documental de cierre: pendiente de creación.
+- No hubo push, merge, despliegue ni cambios en `main`.
