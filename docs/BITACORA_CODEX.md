@@ -117,3 +117,28 @@ El hash del commit documental se informa en la entrega de Fase 0 y queda en el h
 ### Estado del PR
 
 - El PR #4 continúa abierto hacia `integration/consolidacion-wayuu`. No se cerró ni fusionó. Las correcciones se publicarán como commits adicionales cuando queden registrados.
+
+## 2026-11-17 — Cierre técnico del Sprint 1 / PR #4
+
+### Cambios y decisiones
+
+- Se revisó `docs/FLUJO_ESTADOS_PEDIDOS.md`. La matriz implementada y las decisiones comerciales pendientes siguen explícitas; no se agregaron reglas nuevas. Continúan pendientes la obligatoriedad del pago antes de preparar/enviar, la posibilidad de cancelación por cliente o tejedora, el sentido comercial de `weaving → accepted`, quién puede cancelar y la definición de pedido “activo”.
+- `backend/store/tests.py`: la prueba de credenciales ahora comprueba modo `0600` en POSIX. En Windows invoca `icacls.exe` y rechaza ACL que incluyan Everyone, Authenticated Users o BUILTIN Users (incluidas sus variantes de SID/localización). El contenido e idempotencia del archivo siguen verificándose.
+- No se modificó frontend: el `npm run lint` actual y el análisis de referencia muestran los mismos diagnósticos; ninguno corresponde a los filtros de pedidos añadidos por Sprint 1.
+
+### Comandos y resultados exactos
+
+- Desde `backend`: `$env:DJANGO_SECRET_KEY='test-only-wayuu-local-secret'; .\\.venv\\Scripts\\python.exe manage.py test` — **OK**, 97 pruebas, 0 fallos; comprobación del sistema sin incidencias. Django mostró el warning existente de que no hay directorio `backend/staticfiles/`.
+- Desde `backend`: `$env:DJANGO_SECRET_KEY='test-only-wayuu-local-secret'; .\\.venv\\Scripts\\python.exe manage.py test store.tests.StoreAPITests.test_seed_rbac_users_dry_run_create_profiles_and_remain_idempotent` — **OK**, 1 prueba, 0 fallos.
+- Desde `frontend`: `npm run build` — **OK**, `tsc -b` y `vite build` finalizaron; Vite transformó 1946 módulos.
+- Desde `frontend`: `npm run lint` — **falló**, 7 errores y 5 warnings. `CustomerPanel.tsx`: 2 errores `react-hooks/set-state-in-effect` y 1 warning `react-hooks/exhaustive-deps`. `ShopApp.tsx`: 5 errores `react-hooks/set-state-in-effect` y 4 warnings `react-hooks/exhaustive-deps`.
+- Referencia: se extrajo `integration/consolidacion-wayuu:frontend/src/ShopApp.tsx` a un archivo temporal ignorado y se ejecutó ESLint con formato JSON: 5 errores y 4 warnings, las mismas reglas. `CustomerPanel.tsx` coincide con la rama de integración (`git diff --quiet integration/consolidacion-wayuu -- frontend/src/CustomerPanel.tsx`, código 0). Por tanto, los 12 hallazgos del lint son preexistentes; no se atribuye ninguno al sprint. El archivo de comparación se eliminó.
+- Desde la raíz del repositorio: `git diff --check` — **OK**, sin errores de whitespace.
+- Una primera ejecución de la suite, antes de cambiar la verificación Windows a `icacls.exe`, falló porque `Get-Acl` no pudo cargar el módulo de seguridad PowerShell en este entorno. Se reemplazó esa vía, la prueba dirigida pasó y la suite completa se repitió con éxito.
+
+### Alcance y estado
+
+- No se tocaron `main`, migraciones, funcionalidades ajenas a pedidos, el diseñador de mantas, ni datos de aplicación. Las pruebas usaron la base temporal de Django.
+- No se abordaron los diagnósticos heredados de lint para respetar el alcance de este cierre (sin refactor general). No hay script de pruebas frontend declarado en `frontend/package.json`.
+- Pendiente de revisión humana: decidir las reglas comerciales listadas, resolver los hallazgos de lint preexistentes en un trabajo separado y revisar el PR.
+- El PR #4 sigue abierto y sin fusionar; esta actualización no lo cerró ni lo integró.
