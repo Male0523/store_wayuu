@@ -17,8 +17,10 @@ import type {
   RBACNavigationItem,
   RBACNavigationInput,
   RBACRolePermissions,
+  RBACRoleScopes,
   RBACRole,
   RBACUserPermissions,
+  RBACUserScopes,
   SessionUser,
   SuperadminUser,
   SuperadminUserInput,
@@ -150,6 +152,9 @@ export const api = {
     request<RBACRolePermissions>(`/admin/rbac/roles/${role}/permissions/`, {
       method: 'PUT', body: json({ permissions }),
     }),
+  roleScopes: (role: string) => request<RBACRoleScopes>(`/admin/rbac/roles/${role}/scopes/`),
+  updateRoleScopes: (role: string, scopes: Pick<RBACRoleScopes['scopes'][number], 'resource' | 'scope'>[]) =>
+    request<RBACRoleScopes>(`/admin/rbac/roles/${role}/scopes/`, { method: 'PUT', body: json({ scopes }) }),
   setRoleActive: (role: string, active: boolean) =>
     request<{ role: string; active: boolean }>(`/admin/rbac/roles/${role}/permissions/`, {
       method: 'PATCH', body: json({ active }),
@@ -160,6 +165,9 @@ export const api = {
     request<RBACUserPermissions>(`/admin/rbac/users/${userId}/permissions/`, {
       method: 'PUT', body: json({ permissions }),
     }),
+  userScopes: (userId: number) => request<RBACUserScopes>(`/admin/rbac/users/${userId}/scopes/`),
+  updateUserScopes: (userId: number, scopes: Pick<RBACUserScopes['scopes'][number], 'resource' | 'scope'>[]) =>
+    request<RBACUserScopes>(`/admin/rbac/users/${userId}/scopes/`, { method: 'PUT', body: json({ scopes }) }),
   permissionDelegations: () => request<RBACDelegation[]>('/admin/rbac/delegations/'),
   setPermissionDelegation: (values: { admin_user_id: number; resource: string; action: RBACAction; allowed: boolean }) =>
     request<{ detail: string }>('/admin/rbac/delegations/', { method: 'POST', body: json(values) }),

@@ -229,6 +229,24 @@ export interface RBACUserPermissions {
   permissions: RBACPermission[]
 }
 
+export interface RBACRecordScope {
+  resource: string
+  resource_name: string
+  scope: 'all' | 'none' | null
+  effective_scope: 'all' | 'none' | 'own' | 'assigned'
+}
+
+export interface RBACRoleScopes {
+  role: string
+  scopes: RBACRecordScope[]
+}
+
+export interface RBACUserScopes {
+  user_id: number
+  username: string
+  scopes: RBACRecordScope[]
+}
+
 export interface RBACDelegation {
   admin_user_id: number
   username: string
