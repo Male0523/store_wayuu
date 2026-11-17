@@ -1,6 +1,6 @@
 from rest_framework.permissions import BasePermission
 
-from .models import AccessRole, Craftswoman
+from .models import AccessRole, Category, Craftswoman, Product
 from .rbac import has_permission as has_rbac_permission, record_audit, role_for_user
 
 
@@ -12,7 +12,7 @@ class RolePermission(BasePermission):
         if not request.user or not request.user.is_authenticated:
             return False
         role = role_for_user(request.user)
-        if role is None or role.code not in self.role_codes:
+        if role is None or (self.role_codes and role.code not in self.role_codes):
             return False
         resource = getattr(view, 'rbac_resource', None)
         if resource:
@@ -20,13 +20,16 @@ class RolePermission(BasePermission):
                 'GET': 'view',
                 'HEAD': 'view',
                 'OPTIONS': 'view',
-                'POST': 'add',
-                'PUT': 'change',
-                'PATCH': 'change',
+                'POST': 'create',
+                'PUT': 'edit',
+                'PATCH': 'edit',
                 'DELETE': 'delete',
             }.get(request.method)
             action = getattr(view, 'rbac_actions', {}).get(request.method, default_action)
-            allowed = action is not None and has_rbac_permission(request.user, resource, action)
+            if callable(action):
+                action = action(request, view)
+            actions = action if isinstance(action, (tuple, list)) else (action,)
+            allowed = bool(actions) and all(has_rbac_permission(request.user, resource, required) for required in actions)
             if not allowed:
                 record_audit(
                     request.user,
@@ -39,12 +42,12 @@ class RolePermission(BasePermission):
 
 
 class HasAssignedRole(RolePermission):
-    role_codes = tuple(AccessRole.Code.values)
+    role_codes = ()
     message = 'Tu cuenta no tiene un rol de acceso asignado.'
 
 
 class OrderAccess(RolePermission):
-    role_codes = tuple(AccessRole.Code.values)
+    role_codes = ()
     message = 'Tu rol no tiene acceso a pedidos.'
 
     def has_permission(self, request, view):
@@ -74,8 +77,59 @@ class CraftswomanOnly(RolePermission):
 
 
 class AdminOrSuperadmin(RolePermission):
-    role_codes = (AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN)
+    role_codes = ()
     message = 'Esta operación requiere rol de administración.'
+
+    def has_permission(self, request, view):
+        role = role_for_user(request.user) if request.user and request.user.is_authenticated else None
+        if role is None:
+            return False
+        resource = getattr(view, 'rbac_resource', None)
+        # Persona permissions describe their own records; they must never
+        # authorize an administrative collection endpoint.
+        if role.code in (AccessRole.Code.CUSTOMER, AccessRole.Code.CRAFTSWOMAN):
+            return False
+        # No record-scope catalog exists yet for cross-account operational data.
+        # Custom roles therefore fail closed for resources containing private
+        # records until an explicit, reviewed scope policy is configured.
+        if role.code not in (AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN) and resource in {
+            'orders', 'designs', 'customers', 'users', 'craftswomen',
+        }:
+            return False
+        if role.code not in (AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN) and not resource:
+            return False
+        if resource:
+            return super().has_permission(request, view)
+        return role.code in (AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN)
+
+
+def product_publish_action(request, view):
+    if 'active' not in request.data:
+        return 'edit'
+    product = Product.objects.filter(pk=view.kwargs.get('product_id')).only('active').first()
+    if product and bool(request.data.get('active')) == product.active:
+        return 'edit'
+    visibility_action = 'publish' if request.data.get('active') else 'unpublish'
+    return ('edit', visibility_action) if set(request.data.keys()) - {'active'} else visibility_action
+
+
+def category_visibility_action(request, view):
+    if 'active' not in request.data:
+        return 'edit'
+    category = Category.objects.filter(pk=view.kwargs.get('category_id')).only('active').first()
+    if category and bool(request.data.get('active')) == category.active:
+        return 'edit'
+    visibility_action = 'publish' if request.data.get('active') else 'unpublish'
+    return ('edit', visibility_action) if set(request.data.keys()) - {'active'} else visibility_action
+
+
+def order_admin_action(request, view):
+    next_status = request.data.get('status')
+    if next_status == 'cancelled':
+        return 'cancel'
+    if next_status == 'paid':
+        return 'approve'
+    return 'edit'
 
 
 class SuperadminOnly(RolePermission):

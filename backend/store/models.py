@@ -15,7 +15,7 @@ class AccessRole(models.Model):
         CUSTOMER = 'customer', 'Usuario o cliente'
         CRAFTSWOMAN = 'craftswoman', 'Tejedora'
 
-    code = models.CharField('código', max_length=30, choices=Code.choices, unique=True)
+    code = models.SlugField('código', max_length=30, unique=True)
     name = models.CharField('nombre', max_length=80)
     description = models.TextField('descripción', blank=True)
     priority = models.PositiveSmallIntegerField('prioridad', default=10)
@@ -27,23 +27,24 @@ class AccessRole(models.Model):
         ordering = ('priority', 'name')
 
     def save(self, *args, **kwargs):
-            if self.code not in self.Code.values:
-                raise ValidationError('Solo se permiten los cuatro roles fijos del sistema.')
-            with transaction.atomic():
-                if self.pk:
-                    previous = AccessRole.objects.select_for_update().filter(pk=self.pk).first()
-                    if previous and previous.code != self.code:
-                        raise ValidationError('El código de un rol existente no se puede cambiar.')
-                    if previous and previous.active and not self.active and UserRole.objects.filter(
-                        role=self,
-                        user__is_active=True,
-                    ).exists():
-                        raise ValidationError('No se puede desactivar un rol con cuentas activas asignadas.')
-                super().save(*args, **kwargs)
+        with transaction.atomic():
+            previous = None
+            if self.pk:
+                previous = AccessRole.objects.select_for_update().filter(pk=self.pk).first()
+                if previous and previous.code != self.code:
+                    raise ValidationError('El código de un rol existente no se puede cambiar.')
+                if previous and previous.code == self.Code.SUPERADMIN and previous.active and not self.active:
+                    raise ValidationError('El rol raíz superadmin no se puede desactivar.')
+            super().save(*args, **kwargs)
+            if previous and previous.active != self.active:
+                User.objects.filter(access_profile__role=self).update(
+                    is_staff=self.active and self.code == self.Code.ADMIN,
+                    is_superuser=self.active and self.code == self.Code.SUPERADMIN,
+                )
 
     def delete(self, *args, **kwargs):
         if self.code in self.Code.values:
-            raise ValidationError('Los roles fijos no se pueden eliminar.')
+            raise ValidationError('Los roles base del sistema no se pueden eliminar; desactiva roles personalizados.')
         if self.users.exists():
             raise ValidationError('No se puede eliminar un rol que tenga usuarios asignados.')
         return super().delete(*args, **kwargs)
@@ -95,6 +96,68 @@ class UserRole(models.Model):
 
     def __str__(self):
         return f'{self.user.username} · {self.role.name}'
+
+
+class RBACResource(models.Model):
+    code = models.SlugField(max_length=80, unique=True)
+    name = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ('name', 'code')
+
+    def __str__(self):
+        return self.name
+
+
+class RBACAction(models.Model):
+    code = models.SlugField(max_length=40, unique=True)
+    name = models.CharField(max_length=80)
+    description = models.TextField(blank=True)
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ('name', 'code')
+
+    def __str__(self):
+        return self.name
+
+
+class RBACCapability(models.Model):
+    resource = models.ForeignKey(RBACResource, on_delete=models.PROTECT, related_name='capabilities')
+    action = models.ForeignKey(RBACAction, on_delete=models.PROTECT, related_name='capabilities')
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=('resource', 'action'), name='unique_rbac_capability')]
+        ordering = ('resource__code', 'action__code')
+
+    def __str__(self):
+        return f'{self.resource.code}.{self.action.code}'
+
+
+class RBACGrant(models.Model):
+    class Effect(models.TextChoices):
+        ALLOW = 'allow', 'Permitir'
+        DENY = 'deny', 'Denegar'
+
+    role = models.ForeignKey(AccessRole, on_delete=models.CASCADE, null=True, blank=True, related_name='rbac_grants')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, related_name='rbac_grants')
+    capability = models.ForeignKey(RBACCapability, on_delete=models.CASCADE, related_name='grants')
+    effect = models.CharField(max_length=5, choices=Effect.choices)
+    granted_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='rbac_grants_created')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(models.Q(role__isnull=False, user__isnull=True) | models.Q(role__isnull=True, user__isnull=False)),
+                name='rbac_grant_one_principal',
+            ),
+            models.UniqueConstraint(fields=('role', 'capability'), condition=models.Q(role__isnull=False), name='unique_role_capability_grant'),
+            models.UniqueConstraint(fields=('user', 'capability'), condition=models.Q(user__isnull=False), name='unique_user_capability_grant'),
+        ]
 
 
 class RolePermission(models.Model):
