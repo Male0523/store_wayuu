@@ -379,15 +379,17 @@ El hash del commit documental se informa en la entrega de Fase 0 y queda en el h
 
 - `npm run build` — **OK**, TypeScript y Vite (1948 módulos transformados).
 - `python -m compileall -q store` — **OK**.
-- `makemigrations --check --dry-run --skip-checks` — **OK**, `No changes detected`.
+- `makemigrations --check --dry-run` — **bloqueado** por el mismo chequeo E210. `makemigrations --check --dry-run --skip-checks` — **OK**, `No changes detected`.
 - `git diff --check` — **OK**.
 - Verificación aislada de exportadores — **OK**: XLSX abre como ZIP y su XML parsea con datos de producto; PDF tiene cabecera/cierre y contiene la fila de producto de muestra. Esto no equivale a probar el endpoint ni abrir el archivo en aplicaciones de usuario.
-- Pruebas dirigidas Django — **bloqueadas**, 7 casos detectados, pero el chequeo del modelo detiene la ejecución con `store.Product.image (fields.E210): Cannot use ImageField because Pillow is not installed`. Se usó una `DJANGO_SECRET_KEY` temporal de prueba y SQLite; no se instaló Pillow ni se modificó una base local. `manage.py test` no acepta `--skip-checks`.
+- Pruebas dirigidas Django — **bloqueadas**, 14 casos detectados en la ejecución enfocada y 137 en la suite completa; el chequeo del modelo detiene ambas antes de ejecutar pruebas con `store.Product.image (fields.E210): Cannot use ImageField because Pillow is not installed`. Se usaron una `DJANGO_SECRET_KEY` temporal de prueba y SQLite; no se instaló Pillow ni se modificó una base local. `manage.py test` no acepta `--skip-checks`.
 - No existe suite frontend configurada. No se verificó manualmente en navegador ni se probaron XLSX/PDF en Excel/lector PDF.
 
 ### Migraciones, decisiones y estado
 
 - Migración nueva: `backend/store/migrations/0023_admin_inventory_navigation.py`; registra `products.export` y la entrada administrativa del reporte de inventario sin alterar datos de productos.
-- Las migraciones locales anteriores `0021_product_image.py` y `0022_craftswoman_self_profile_permissions.py` siguen pendientes en el árbol. Pillow debe instalarse en un entorno habilitado antes de que Django pase los checks y puedan ejecutarse las pruebas del sprint.
+- `0021_product_image.py`, `0022_craftswoman_self_profile_permissions.py` y `0023_admin_inventory_navigation.py` forman una cadena consecutiva sin nombres duplicados; el chequeo de estado de modelos pasa al omitir checks del sistema. Su ejecución sobre una base sigue pendiente hasta disponer de Pillow.
 - No se inventaron datos de tejedoras ni relaciones; productos históricos sin perfil continúan permitiendo `craftswoman = NULL`. No hay decisiones comerciales nuevas.
-- No se crearon commits: el árbol ya contenía cambios sin validar de tareas anteriores y el bloqueo E210 impidió validar conjuntamente este sprint. No hubo push, merge, despliegue ni cambios en `main`.
+- Rama de recuperación: `feature/consolidacion-correcciones-funcionales`, creada desde `integration/consolidacion-wayuu` en `a10faec8c356b791cddd089a1b307b2424b569b2`.
+- Commits locales: `2b3eb626ddfbfb17766d927ae6fdea73d81dd4fc` (productos e imágenes), `c570ead89c9baaac4a085aa1fc9cd8ad40f12a0c` (RBAC y menú), `84927a65fe2d4f6c3f0df8b7088ff0a6aa34eb5a` (perfil y propiedad de tejedoras), `088f2d73380838528fdcedc1f6d6d78cce11809f` (reportes de inventario) y `f864c93d4fd142da264a2272a808cc4cc1e98a29` (catálogo y documentación).
+- No hubo push, merge, despliegue ni cambios en `main`. Pillow debe instalarse en Codespaces o en otro entorno habilitado antes de que Django pase los checks y puedan ejecutarse las pruebas.
