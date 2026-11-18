@@ -758,9 +758,15 @@
 .rbac-nav-row > div:first-child { display:grid; gap:4px; min-width:0; }
 .rbac-nav-row strong { color:var(--ink); font:16px var(--serif); }
 .rbac-nav-row small { color:var(--muted); font-size:10px; overflow-wrap:anywhere; }
+.rbac-navigation-edit { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; width:100%; }
+.rbac-navigation-edit .rbac-role-picker, .rbac-navigation-edit > .rbac-warning, .rbac-navigation-edit .admin-product-edit-fields, .rbac-navigation-edit .rbac-nav-actions { grid-column:1/-1; }
+.rbac-navigation-edit .form-label { display:grid; gap:6px; color:var(--muted); font-size:11px; }
+.rbac-navigation-edit input, .rbac-navigation-edit select { width:100%; min-width:0; }
+.rbac-navigation-edit .admin-product-edit-fields { padding:0; border:0; background:transparent; }
 .rbac-nav-actions { display:flex; align-items:center; gap:12px; flex:0 0 auto; }
 .rbac-nav-actions input, .rbac-role-picker input { accent-color:var(--clay); }
 @media (max-width:650px) { .rbac-nav-row { align-items:flex-start; flex-direction:column; } .rbac-nav-actions { width:100%; justify-content:space-between; } }
+@media (max-width:650px) { .rbac-navigation-edit, .admin-product-edit-fields { grid-template-columns:1fr; } .admin-inventory-exports { justify-content:stretch; } .admin-inventory-exports .button { flex:1; } }
 
 .rbac-role-heading-actions { display:flex; align-items:center; justify-content:flex-end; gap:10px; flex-wrap:wrap; }
 .rbac-role-heading-actions .button { white-space:nowrap; }

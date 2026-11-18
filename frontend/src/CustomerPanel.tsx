@@ -165,16 +165,16 @@ export default function CustomerPanel() {
     try {
       const items = await api.roleNavigation()
       setNavigationItems(items)
-      const routes = items.map((item) => item.route_name)
+      const sections = items.map((item) => item.route_name.split('.')[1])
       const [orderPage, customerDesigns, customerProfile] = await Promise.all([
-        routes.includes('customer.orders') ? api.orders() : Promise.resolve({ results: [] as Order[] }),
-        routes.includes('customer.designs') ? api.designs() : Promise.resolve([] as CustomDesign[]),
-        routes.includes('customer.profile') ? api.profile() : Promise.resolve(null),
+        sections.includes('orders') ? api.orders() : Promise.resolve({ results: [] as Order[] }),
+        sections.includes('designs') ? api.designs() : Promise.resolve([] as CustomDesign[]),
+        sections.includes('profile') ? api.profile() : Promise.resolve(null),
       ])
       setOrders(orderPage.results)
       setDesigns(customerDesigns)
       setProfile(customerProfile)
-      const firstSection = items.find((item) => item.route_name.startsWith('customer.'))?.route_name.split('.')[1] as AccountSection | undefined
+      const firstSection = items.find((item) => ['orders', 'designs', 'profile'].includes(item.route_name.split('.')[1]))?.route_name.split('.')[1] as AccountSection | undefined
       setAccountSection(firstSection ?? 'orders')
       setView('account')
     } catch (error) { setNotice(messageOf(error)) } finally { setBusy(false) }
@@ -228,7 +228,7 @@ export default function CustomerPanel() {
   }
 
   const fullName = profile?.name || user?.name || user?.username || 'Cliente'
-  const accountNavigation = navigationItems.filter((item) => item.route_name.startsWith('customer.'))
+  const accountNavigation = navigationItems.filter((item) => ['orders', 'designs', 'profile'].includes(item.route_name.split('.')[1]))
   const canEditProfile = Boolean(user?.permissions?.includes('customers.change'))
 
   return <div className="customer-shell">
@@ -275,9 +275,9 @@ export default function CustomerPanel() {
             return <button type="button" role="tab" aria-selected={accountSection === section} className={accountSection === section ? 'active' : ''} key={item.id} onClick={() => { setAccountSection(section); setProfileEditing(false) }}>{item.label}</button>
           })}
         </div>
-        {accountSection === 'orders' && accountNavigation.some((item) => item.route_name === 'customer.orders') && <><div className="customer-section-heading"><h2>Mis pedidos</h2><span>{orders.length} pedidos</span></div>{!orders.length ? <p className="customer-empty">Aún no tienes pedidos registrados.</p> : <div className="customer-order-list">{orders.map((order) => <article className="customer-order-card" key={order.id}><div><small>PEDIDO #{order.id} · {new Date(order.created_at).toLocaleDateString('es-CO')}</small><h3>{order.items.map((item) => item.product.name).join(', ')}</h3><p>{order.items.reduce((sum, item) => sum + item.quantity, 0)} unidades · {money(order.total)}</p></div><span className="customer-order-status">{order.status_label || order.status}</span></article>)}</div>}</>}
-        {accountSection === 'designs' && accountNavigation.some((item) => item.route_name === 'customer.designs') && <><div className="customer-section-heading"><h2>Mis diseños personalizados</h2><span>{designs.length} diseños</span></div>{!designs.length ? <p className="customer-empty">Aún no has creado diseños personalizados. Puedes diseñar tu manta desde la tienda.</p> : <div className="customer-order-list">{designs.map((design) => <article className="customer-order-card" key={design.id}><div><small>DISEÑO #{design.id} · {new Date(design.created_at).toLocaleDateString('es-CO')}</small><h3>{design.pattern.charAt(0).toUpperCase() + design.pattern.slice(1)} · Talla {design.size}</h3><p>Base {design.base_color} · Acentos {design.accent_color_one} y {design.accent_color_two} · {design.quantity} unidad(es)</p><p>{money(design.estimated_price)}</p></div><span className="customer-order-status">{design.status_label || design.status}</span></article>)}</div>}</>}
-        {accountSection === 'profile' && accountNavigation.some((item) => item.route_name === 'customer.profile') && <div className="customer-profile-block"><div className="customer-section-heading"><div><span className="customer-kicker">DATOS PERSONALES</span><h2>Mi perfil</h2></div>{canEditProfile && <button className="customer-text-button" onClick={() => setProfileEditing((value) => !value)}>{profileEditing ? 'Cancelar' : 'Editar datos'}</button>}</div>{profile && (profileEditing && canEditProfile ? <form className="customer-profile-form" onSubmit={saveProfile}><label>Nombre completo<input name="name" defaultValue={profile.name}/></label><label>Teléfono<input name="phone" defaultValue={profile.phone || ''}/></label><label>Dirección<input name="address" defaultValue={profile.address || ''}/></label><label>Ciudad<input name="city" defaultValue={profile.city || ''}/></label><button className="customer-primary" disabled={busy}>Guardar cambios</button></form> : <div className="customer-profile-grid"><p><small>Nombre</small>{profile.name}</p><p><small>Correo</small>{profile.email}</p><p><small>Teléfono</small>{profile.phone || 'Sin registrar'}</p><p><small>Dirección</small>{profile.address || 'Sin registrar'}</p><p><small>Ciudad</small>{profile.city || 'Sin registrar'}</p></div>)}</div>}
+        {accountSection === 'orders' && accountNavigation.some((item) => item.route_name.split('.')[1] === 'orders') && <><div className="customer-section-heading"><h2>Mis pedidos</h2><span>{orders.length} pedidos</span></div>{!orders.length ? <p className="customer-empty">Aún no tienes pedidos registrados.</p> : <div className="customer-order-list">{orders.map((order) => <article className="customer-order-card" key={order.id}><div><small>PEDIDO #{order.id} · {new Date(order.created_at).toLocaleDateString('es-CO')}</small><h3>{order.items.map((item) => item.product.name).join(', ')}</h3><p>{order.items.reduce((sum, item) => sum + item.quantity, 0)} unidades · {money(order.total)}</p></div><span className="customer-order-status">{order.status_label || order.status}</span></article>)}</div>}</>}
+        {accountSection === 'designs' && accountNavigation.some((item) => item.route_name.split('.')[1] === 'designs') && <><div className="customer-section-heading"><h2>Mis diseños personalizados</h2><span>{designs.length} diseños</span></div>{!designs.length ? <p className="customer-empty">Aún no has creado diseños personalizados. Puedes diseñar tu manta desde la tienda.</p> : <div className="customer-order-list">{designs.map((design) => <article className="customer-order-card" key={design.id}><div><small>DISEÑO #{design.id} · {new Date(design.created_at).toLocaleDateString('es-CO')}</small><h3>{design.pattern.charAt(0).toUpperCase() + design.pattern.slice(1)} · Talla {design.size}</h3><p>Base {design.base_color} · Acentos {design.accent_color_one} y {design.accent_color_two} · {design.quantity} unidad(es)</p><p>{money(design.estimated_price)}</p></div><span className="customer-order-status">{design.status_label || design.status}</span></article>)}</div>}</>}
+        {accountSection === 'profile' && accountNavigation.some((item) => item.route_name.split('.')[1] === 'profile') && <div className="customer-profile-block"><div className="customer-section-heading"><div><span className="customer-kicker">DATOS PERSONALES</span><h2>Mi perfil</h2></div>{canEditProfile && <button className="customer-text-button" onClick={() => setProfileEditing((value) => !value)}>{profileEditing ? 'Cancelar' : 'Editar datos'}</button>}</div>{profile && (profileEditing && canEditProfile ? <form className="customer-profile-form" onSubmit={saveProfile}><label>Nombre completo<input name="name" defaultValue={profile.name}/></label><label>Teléfono<input name="phone" defaultValue={profile.phone || ''}/></label><label>Dirección<input name="address" defaultValue={profile.address || ''}/></label><label>Ciudad<input name="city" defaultValue={profile.city || ''}/></label><button className="customer-primary" disabled={busy}>Guardar cambios</button></form> : <div className="customer-profile-grid"><p><small>Nombre</small>{profile.name}</p><p><small>Correo</small>{profile.email}</p><p><small>Teléfono</small>{profile.phone || 'Sin registrar'}</p><p><small>Dirección</small>{profile.address || 'Sin registrar'}</p><p><small>Ciudad</small>{profile.city || 'Sin registrar'}</p></div>)}</div>}
         {!accountNavigation.length && <p className="customer-empty">No tienes secciones habilitadas. El superadministrador debe revisar tu menú y permisos.</p>}
       </section>}
 

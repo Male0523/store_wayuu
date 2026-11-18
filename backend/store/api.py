@@ -597,22 +597,16 @@ class SuperadminUserWriteSerializer(serializers.Serializer):
         return attrs
 
 
-NAVIGATION_ROUTE_RULES = {
-    'customer.orders': {'roles': {AccessRole.Code.CUSTOMER}, 'permissions': (('orders', 'view'),)},
-    'customer.designs': {'roles': {AccessRole.Code.CUSTOMER}, 'permissions': (('designs', 'view'),)},
-    'customer.profile': {'roles': {AccessRole.Code.CUSTOMER}, 'permissions': (('customers', 'view'),)},
-    'craftswoman.dashboard': {'roles': {AccessRole.Code.CRAFTSWOMAN}, 'permissions': (('products', 'view'), ('orders', 'view'))},
-    'craftswoman.products': {'roles': {AccessRole.Code.CRAFTSWOMAN}, 'permissions': (('products', 'view'),)},
-    'craftswoman.inventory': {'roles': {AccessRole.Code.CRAFTSWOMAN}, 'permissions': (('products', 'view'),)},
-    'craftswoman.orders': {'roles': {AccessRole.Code.CRAFTSWOMAN}, 'permissions': (('orders', 'view'),)},
-    'admin.dashboard': {'roles': {AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN}, 'permissions': (('products', 'view'), ('orders', 'view'))},
-    'admin.products': {'roles': {AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN}, 'permissions': (('products', 'view'),)},
-    'admin.orders': {'roles': {AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN}, 'permissions': (('orders', 'view'),)},
-    'admin.categories': {'roles': {AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN}, 'permissions': (('categories', 'view'),)},
-}
+SUPPORTED_NAVIGATION_ROUTES = (
+    'customer.orders', 'customer.designs', 'customer.profile',
+    'craftswoman.dashboard', 'craftswoman.products', 'craftswoman.inventory', 'craftswoman.orders',
+    'admin.dashboard', 'admin.products', 'admin.inventory', 'admin.orders', 'admin.categories',
+)
+
+
 class NavigationItemWriteSerializer(serializers.Serializer):
     label = serializers.CharField(max_length=80)
-    route_name = serializers.ChoiceField(choices=tuple((key, key) for key in NAVIGATION_ROUTE_RULES))
+    route_name = serializers.ChoiceField(choices=tuple((key, key) for key in SUPPORTED_NAVIGATION_ROUTES))
     anchor = serializers.CharField(max_length=80, required=False, allow_blank=True)
     description = serializers.CharField(max_length=220, required=False, allow_blank=True)
     role_codes = serializers.ListField(
@@ -631,6 +625,16 @@ class NavigationItemWriteSerializer(serializers.Serializer):
     )
     order = serializers.IntegerField(min_value=0, max_value=32767, required=False, default=10)
     active = serializers.BooleanField(required=False, default=True)
+
+    def validate_route_name(self, value):
+        existing = NavigationItem.objects.filter(route_name=value)
+        if self.instance:
+            existing = existing.exclude(pk=self.instance.pk)
+            if value == self.instance.route_name:
+                return value
+        if existing.exists():
+            raise serializers.ValidationError('Esa ruta ya está configurada; edita la opción existente y agrega los roles allí.')
+        return value
 
     def validate(self, attrs):
         resource = attrs.get('permission_resource')
@@ -1621,7 +1625,7 @@ class SuperadminNavigationDetailView(APIView):
 
     def patch(self, request, item_id):
         item = get_object_or_404(NavigationItem, pk=item_id)
-        serializer = NavigationItemWriteSerializer(data=request.data, partial=True)
+        serializer = NavigationItemWriteSerializer(item, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         values = serializer.validated_data
         role_codes = values.pop('role_codes', None)
@@ -1660,6 +1664,10 @@ class RoleNavigationMenuView(APIView):
         visible = []
         items = NavigationItem.objects.filter(active=True, roles=role).select_related('permission__content_type').order_by('order', 'label')
         for item in items:
+            if item.permission_id:
+                key = permission_key(item.permission)
+                if not key or not has_rbac_permission(request.user, *key):
+                    continue
             visible.append(SuperadminNavigationView.serialize_item(item))
         return Response(visible)
 

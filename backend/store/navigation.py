@@ -1,7 +1,7 @@
 from django.urls import NoReverseMatch, reverse
 
 from .models import NavigationItem
-from .rbac import role_for_user
+from .rbac import has_permission, permission_key, role_for_user
 
 
 def navigation_menu(request):
@@ -12,6 +12,13 @@ def navigation_menu(request):
 
     items = []
     for item in NavigationItem.objects.filter(active=True, roles=role).distinct():
+        if item.permission_id:
+            key = permission_key(item.permission)
+            if not key:
+                continue
+            resource, action = key
+            if not has_permission(request.user, resource, action):
+                continue
         try:
             url = reverse(item.route_name)
         except NoReverseMatch:

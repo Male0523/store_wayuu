@@ -991,17 +991,18 @@ const rbacResourceLabels: Record<string, string> = {
   delegations: 'Delegaciones', navigation: 'Menú y navegación', audit: 'Registro de actividad',
 }
 const navigationRouteOptions = [
-  { value: 'customer.orders', label: 'Cliente · Mis pedidos', roles: ['customer'] },
-  { value: 'customer.designs', label: 'Cliente · Mis diseños', roles: ['customer'] },
-  { value: 'customer.profile', label: 'Cliente · Mis datos', roles: ['customer'] },
-  { value: 'craftswoman.dashboard', label: 'Tejedora · Panel principal', roles: ['craftswoman'] },
-  { value: 'craftswoman.products', label: 'Tejedora · Mis tejidos', roles: ['craftswoman'] },
-  { value: 'craftswoman.inventory', label: 'Tejedora · Mi inventario', roles: ['craftswoman'] },
-  { value: 'craftswoman.orders', label: 'Tejedora · Mis pedidos', roles: ['craftswoman'] },
-  { value: 'admin.dashboard', label: 'Administrador · Panel principal', roles: ['admin', 'superadmin'] },
-  { value: 'admin.products', label: 'Administrador · Productos', roles: ['admin', 'superadmin'] },
-  { value: 'admin.orders', label: 'Administrador · Pedidos', roles: ['admin', 'superadmin'] },
-  { value: 'admin.categories', label: 'Administrador · Categorías', roles: ['admin', 'superadmin'] },
+  { value: 'customer.orders', label: 'Cliente · Mis pedidos' },
+  { value: 'customer.designs', label: 'Cliente · Mis diseños' },
+  { value: 'customer.profile', label: 'Cliente · Mis datos' },
+  { value: 'craftswoman.dashboard', label: 'Tejedora · Panel principal' },
+  { value: 'craftswoman.products', label: 'Tejedora · Mis tejidos' },
+  { value: 'craftswoman.inventory', label: 'Tejedora · Mi inventario' },
+  { value: 'craftswoman.orders', label: 'Tejedora · Mis pedidos' },
+  { value: 'admin.dashboard', label: 'Administrador · Panel principal' },
+  { value: 'admin.products', label: 'Administrador · Productos' },
+  { value: 'admin.inventory', label: 'Administración · Inventario' },
+  { value: 'admin.orders', label: 'Administrador · Pedidos' },
+  { value: 'admin.categories', label: 'Administrador · Categorías' },
 ] as const
 type RBACSection = 'roles' | 'users' | 'audit' | 'navigation' | 'catalog'
 
@@ -1027,7 +1028,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   const [permissionSearch, setPermissionSearch] = useState('')
   const [createUserRole, setCreateUserRole] = useState<string>('customer')
   const [newNavigationRoute, setNewNavigationRoute] = useState('customer.orders')
-  const [newNavigationRoles, setNewNavigationRoles] = useState<SessionUser['role'][]>(['customer'])
+  const [newNavigationRoles, setNewNavigationRoles] = useState<string[]>(['customer'])
   const canViewCatalog = hasEffectivePermission(currentUser, 'permissions.view')
   const canChangePermissions = hasEffectivePermission(currentUser, 'permissions.change')
   const canViewUsers = hasEffectivePermission(currentUser, 'users.view')
@@ -1240,10 +1241,11 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
     if (!canAddNavigation) return
     const form = event.currentTarget
     const values = new FormData(form)
-    const roleCodes = values.getAll('role_codes').map(String) as SessionUser['role'][]
+    const roleCodes = values.getAll('role_codes').map(String)
     const permissionResource = String(values.get('permission_resource') ?? '')
     const permissionAction = String(values.get('permission_action') ?? '')
     if (!roleCodes.length) { setError('Selecciona al menos un rol para mostrar esta opción.'); return }
+    if (navigationItems.some((item) => item.route_name === String(values.get('route_name') ?? ''))) { setError('Esa ruta ya está configurada. Edita la opción existente para sumar roles.'); return }
     if (Boolean(permissionResource) !== Boolean(permissionAction)) { setError('El permiso adicional está incompleto: selecciona recurso y acción, o deja ambos sin requisito adicional.'); return }
     setSaving(true)
     setError('')
@@ -1286,6 +1288,22 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
       } catch {
         setError(`${errorMessage(saveError)} No pudimos volver a consultar el estado guardado.`)
       }
+    } finally { setSaving(false) }
+  }
+
+  async function saveNavigationItem(itemId: number, values: RBACNavigationInput): Promise<boolean> {
+    if (!canChangeNavigation) return false
+    setSaving(true)
+    setError('')
+    setFeedback('')
+    try {
+      const updated = await api.updateNavigationItem(itemId, values)
+      setNavigationItems((current) => current.map((entry) => entry.id === itemId ? updated : entry).sort((a, b) => a.order - b.order || a.label.localeCompare(b.label)))
+      setFeedback(`“${updated.label}” se actualizó.`)
+      return true
+    } catch (saveError) {
+      setError(errorMessage(saveError))
+      return false
     } finally { setSaving(false) }
   }
 
@@ -1434,7 +1452,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
         {canAddNavigation && <form className="rbac-user-form rbac-navigation-form" onSubmit={createNavigationItem}>
           <div className="rbac-form-section-title"><span>1</span><div><strong>Identificación de la opción</strong><small>Los campos con * son obligatorios.</small></div></div>
           <label className="form-label">Nombre visible *<input name="label" required maxLength={80} placeholder="Ej. Mis pedidos" /><small>Es el texto que verá la persona en su menú.</small></label>
-          <label className="form-label">Pantalla permitida *<select name="route_name" required value={newNavigationRoute} onChange={(event) => setNewNavigationRoute(event.target.value)}>{navigationRouteOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><small>Selecciona la función existente que se abrirá.</small></label>
+          <label className="form-label">Pantalla permitida *<select name="route_name" required value={newNavigationRoute} onChange={(event) => setNewNavigationRoute(event.target.value)}>{navigationRouteOptions.map((option) => <option key={option.value} value={option.value} disabled={navigationItems.some((item) => item.route_name === option.value)}>{option.label}{navigationItems.some((item) => item.route_name === option.value) ? ' · ya configurada' : ''}</option>)}</select><small>Selecciona la función existente que abrirá el enlace. Para sumar roles a una ruta existente, edítala.</small></label>
           <p className="rbac-warning">Asignar una pantalla controla su aparición en el menú; no concede acceso a datos ni acciones. El servidor valida cada endpoint por separado.</p>
           <div className="rbac-form-section-title"><span>2</span><div><strong>Presentación y orden</strong><small>Estos datos organizan el menú; no habilitan permisos.</small></div></div>
           <label className="form-label">Sección (opcional)<input name="anchor" maxLength={80} placeholder="Ej. pedidos" /><small>Identificador auxiliar; puedes dejarlo vacío si no sabes qué colocar.</small></label>
@@ -1443,9 +1461,9 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
           <div className="rbac-form-section-title"><span>3</span><div><strong>¿Quién verá esta opción?</strong><small>Selecciona al menos un rol.</small></div></div>
           <fieldset className="rbac-role-picker"><legend>Roles permitidos *</legend>{roles.filter((role) => role.active).map((role) => <label key={role.code}><input type="checkbox" name="role_codes" value={role.code} checked={newNavigationRoles.includes(role.code)} onChange={(event) => setNewNavigationRoles((current) => event.target.checked ? [...current, role.code] : current.filter((item) => item !== role.code))} /> {role.name}</label>)}</fieldset>
           {!newNavigationRoles.length && <p className="rbac-warning">Selecciona al menos un rol para que esta opción pueda mostrarse.</p>}
-          <button className="button button-dark" disabled={saving || !newNavigationRoles.length}>{saving ? 'Guardando…' : 'Añadir opción al menú'}</button>
+          <button className="button button-dark" disabled={saving || !newNavigationRoles.length || navigationItems.some((item) => item.route_name === newNavigationRoute)}>{saving ? 'Guardando…' : 'Añadir opción al menú'}</button>
         </form>}
-        <div className="rbac-nav-list">{[...navigationItems].sort((a, b) => a.order - b.order || a.label.localeCompare(b.label)).map((item) => <article className="rbac-nav-row" key={item.id}><div><strong>{item.label}</strong><small>{item.route_name} · Posición {item.order}</small><small>{item.order <= 10 ? 'Aparece al inicio del menú' : item.order <= 20 ? 'Aparece después de las opciones con posición 10' : 'Aparece después de las opciones con posiciones menores'}</small><small>Visible para: {item.role_codes.map((role) => rbacRoleLabels[role] ?? roles.find((entry) => entry.code === role)?.name ?? role).join(', ')}</small><small>{item.permission_resource ? 'Filtro adicional: ' + (rbacResourceLabels[item.permission_resource] ?? item.permission_resource) + ' · ' + (rbacActionLabels[item.permission_action ?? 'view'] ?? item.permission_action ?? 'view') : 'Sin permiso adicional configurado'}</small></div><div className="rbac-nav-actions"><label><input type="checkbox" checked={item.active} disabled={saving || !canChangeNavigation} onChange={(event) => void toggleNavigationItem(item, event.target.checked)} /> Visible</label>{canDeleteNavigation && <button type="button" className="button button-outline" disabled={saving} onClick={() => void removeNavigationItem(item)}>Eliminar</button>}</div></article>)}</div>
+        <div className="rbac-nav-list">{[...navigationItems].sort((a, b) => a.order - b.order || a.label.localeCompare(b.label)).map((item) => <AdminNavigationRow key={item.id} item={item} allItems={navigationItems} roles={roles.filter((role) => role.active)} resources={resources.filter((resource) => resource.active)} actions={actions.filter((action) => action.active)} routes={navigationRouteOptions} busy={saving} canEdit={canChangeNavigation} canDelete={canDeleteNavigation} onSave={saveNavigationItem} onToggle={toggleNavigationItem} onDelete={removeNavigationItem} />)}</div>
         {navigationItems.length === 0 && <p className="muted-copy">Todavía no hay opciones de menú configuradas.</p>}
       </section>}
       {activeSection === "audit" && canViewAudit && <section className="rbac-block"><div className="rbac-block-heading"><h3>Actividad sensible</h3><span>{audit.length} eventos recientes</span></div>
@@ -1455,14 +1473,89 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   </section>
 }
 
-function AdminProductRow({ product, categories, craftswomen, busy, canEdit, canPublish, canUnpublish, onSave }: { product: AdminProduct; categories: AdminCategory[]; craftswomen: AdminCraftswomanOption[]; busy: boolean; canEdit: boolean; canPublish: boolean; canUnpublish: boolean; onSave: (id: number, values: Partial<AdminProduct>) => void }) {
+function AdminNavigationRow({ item, allItems, roles, resources, actions, routes, busy, canEdit, canDelete, onSave, onToggle, onDelete }: {
+  item: RBACNavigationItem
+  allItems: RBACNavigationItem[]
+  roles: RBACRole[]
+  resources: RBACCatalogEntry[]
+  actions: RBACCatalogEntry[]
+  routes: readonly { value: string; label: string }[]
+  busy: boolean
+  canEdit: boolean
+  canDelete: boolean
+  onSave: (id: number, values: RBACNavigationInput) => Promise<boolean>
+  onToggle: (item: RBACNavigationItem, active: boolean) => Promise<void>
+  onDelete: (item: RBACNavigationItem) => Promise<void>
+}) {
+  const [editing, setEditing] = useState(false)
+  const [label, setLabel] = useState(item.label)
+  const [routeName, setRouteName] = useState(item.route_name)
+  const [description, setDescription] = useState(item.description)
+  const [anchor, setAnchor] = useState(item.anchor)
+  const [order, setOrder] = useState(String(item.order))
+  const [active, setActive] = useState(item.active)
+  const [roleCodes, setRoleCodes] = useState<string[]>(item.role_codes)
+  const [permissionResource, setPermissionResource] = useState(item.permission_resource ?? '')
+  const [permissionAction, setPermissionAction] = useState(item.permission_action ?? '')
+  const duplicateRoute = routeName !== item.route_name && allItems.some((entry) => entry.id !== item.id && entry.route_name === routeName)
+
+  function resetDraft() {
+    setLabel(item.label)
+    setRouteName(item.route_name)
+    setDescription(item.description)
+    setAnchor(item.anchor)
+    setOrder(String(item.order))
+    setActive(item.active)
+    setRoleCodes(item.role_codes)
+    setPermissionResource(item.permission_resource ?? '')
+    setPermissionAction(item.permission_action ?? '')
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!roleCodes.length || duplicateRoute || !permissionResource !== !permissionAction) return
+    const saved = await onSave(item.id, {
+      label: label.trim(), route_name: routeName, description: description.trim(), anchor: anchor.trim(),
+      order: Number(order), active, role_codes: roleCodes,
+      permission_resource: permissionResource || null,
+      permission_action: permissionResource ? permissionAction : null,
+    })
+    if (saved) setEditing(false)
+  }
+
+  return <article className="rbac-nav-row" key={item.id}>
+    {editing ? <form className="rbac-navigation-edit" onSubmit={(event) => void submit(event)}>
+      <label className="form-label">Nombre visible<input value={label} maxLength={80} required onChange={(event) => setLabel(event.target.value)} /></label>
+      <label className="form-label">Ruta<select value={routeName} onChange={(event) => setRouteName(event.target.value)}>{routes.map((route) => <option key={route.value} value={route.value}>{route.label}</option>)}</select></label>
+      {duplicateRoute && <p className="rbac-warning" role="alert">Esa ruta ya tiene una opción de menú. Añade otros roles a la opción existente.</p>}
+      <label className="form-label">Descripción<input value={description} maxLength={220} onChange={(event) => setDescription(event.target.value)} /></label>
+      <label className="form-label">Sección auxiliar<input value={anchor} maxLength={80} onChange={(event) => setAnchor(event.target.value)} /></label>
+      <label className="form-label">Posición<input type="number" min="0" max="32767" value={order} onChange={(event) => setOrder(event.target.value)} /></label>
+      <label className="admin-check"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} /> Visible</label>
+      <fieldset className="rbac-role-picker"><legend>Roles autorizados</legend>{roles.map((role) => <label key={role.code}><input type="checkbox" checked={roleCodes.includes(role.code)} onChange={(event) => setRoleCodes((current) => event.target.checked ? [...current, role.code] : current.filter((code) => code !== role.code))} /> {role.name}</label>)}</fieldset>
+      <div className="admin-product-edit-fields"><label className="form-label">Recurso requerido (opcional)<select value={permissionResource} onChange={(event) => { setPermissionResource(event.target.value); if (!event.target.value) setPermissionAction('') }}><option value="">Sin requisito adicional</option>{resources.map((resource) => <option key={resource.code} value={resource.code}>{resource.name}</option>)}</select></label><label className="form-label">Acción requerida<select value={permissionAction} disabled={!permissionResource} required={Boolean(permissionResource)} onChange={(event) => setPermissionAction(event.target.value)}><option value="">Selecciona una acción</option>{actions.map((action) => <option key={action.code} value={action.code}>{action.name}</option>)}</select></label></div>
+      {(!roleCodes.length || (permissionResource && !permissionAction)) && <p className="rbac-warning" role="alert">Asigna al menos un rol y completa ambos valores del permiso opcional.</p>}
+      <div className="rbac-nav-actions"><button className="button button-dark" disabled={busy || !canEdit || !label.trim() || !roleCodes.length || duplicateRoute || Boolean(permissionResource) !== Boolean(permissionAction)}>Guardar cambios</button><button className="button button-outline" type="button" disabled={busy} onClick={() => { resetDraft(); setEditing(false) }}>Cancelar</button></div>
+    </form> : <><div><strong>{item.label}</strong><small>{item.route_name} · Posición {item.order}</small><small>{item.description || 'Sin descripción'}</small><small>{item.order <= 10 ? 'Aparece al inicio del menú' : item.order <= 20 ? 'Aparece después de las opciones con posición 10' : 'Aparece después de las opciones con posiciones menores'}</small><small>Visible para: {item.role_codes.map((role) => rbacRoleLabels[role] ?? roles.find((entry) => entry.code === role)?.name ?? role).join(', ')}</small><small>{item.permission_resource ? 'Filtro adicional: ' + (rbacResourceLabels[item.permission_resource] ?? item.permission_resource) + ' · ' + (rbacActionLabels[item.permission_action ?? 'view'] ?? item.permission_action ?? 'view') : 'Sin permiso adicional configurado'}</small></div><div className="rbac-nav-actions"><label><input type="checkbox" checked={item.active} disabled={busy || !canEdit} onChange={(event) => void onToggle(item, event.target.checked)} /> Visible</label>{canEdit && <button type="button" className="button button-outline" disabled={busy} onClick={() => setEditing(true)}>Editar</button>}{canDelete && <button type="button" className="button button-outline" disabled={busy} onClick={() => void onDelete(item)}>Eliminar</button>}</div></>}
+  </article>
+}
+
+function AdminProductRow({ product, categories, craftswomen, busy, canEdit, canPublish, canUnpublish, onSave }: { product: AdminProduct; categories: AdminCategory[]; craftswomen: AdminCraftswomanOption[]; busy: boolean; canEdit: boolean; canPublish: boolean; canUnpublish: boolean; onSave: (id: number, values: AdminProductInput) => void }) {
   const [price, setPrice] = useState(product.price)
   const [stock, setStock] = useState(String(product.stock))
   const [active, setActive] = useState(product.active)
   const [editingDetails, setEditingDetails] = useState(false)
   const [name, setName] = useState(product.name)
+  const [description, setDescription] = useState(product.description)
   const [categoryId, setCategoryId] = useState(String(product.category))
   const [craftswomanId, setCraftswomanId] = useState(product.craftswoman ? String(product.craftswoman) : '')
+  const [region, setRegion] = useState(product.region)
+  const [color, setColor] = useState(product.color)
+  const [size, setSize] = useState(product.size)
+  const [productionTime, setProductionTime] = useState(product.production_time)
+  const [madeToOrder, setMadeToOrder] = useState(product.made_to_order)
+  const [imageUrl, setImageUrl] = useState(product.image_url)
+  const [imageFile, setImageFile] = useState<File | undefined>()
   const canChangeVisibility = active ? canUnpublish : canPublish
   const hasDetailsChanges = name.trim() !== product.name || description !== product.description || Number(categoryId) !== product.category || (craftswomanId ? Number(craftswomanId) : null) !== product.craftswoman || region !== product.region || color !== product.color || size !== product.size || productionTime !== product.production_time || madeToOrder !== product.made_to_order || imageUrl !== product.image_url
   const hasChanges = (canEdit && (price !== product.price || Number(stock) !== product.stock || (editingDetails && hasDetailsChanges) || Boolean(imageFile))) || active !== product.active

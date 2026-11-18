@@ -292,7 +292,7 @@ export interface RBACNavigationItem {
   route_name: string
   anchor: string
   description: string
-  role_codes: SessionUser['role'][]
+  role_codes: string[]
   permission_resource: string | null
   permission_action: RBACAction | null
   order: number
@@ -304,7 +304,7 @@ export interface RBACNavigationInput {
   route_name: string
   anchor?: string
   description?: string
-  role_codes: SessionUser['role'][]
+  role_codes: string[]
   permission_resource?: string | null
   permission_action?: RBACAction | null
   order?: number
