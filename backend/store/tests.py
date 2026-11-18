@@ -805,6 +805,76 @@ class StoreAPITests(TestCase):
             customer=self.customer, product__custom_design=design, quantity=1,
         ).exists())
 
+    def test_custom_design_survives_cart_checkout_assignment_weaving_and_delivery(self):
+        self.client.force_login(self.user)
+        created = self.client.post('/api/v1/designs/', {
+            'pattern': 'caminos', 'base_color': '#112233', 'accent_color_one': '#223344',
+            'accent_color_two': '#334455', 'size': 'L', 'quantity': 2,
+            'notes': 'Conservar colores del diseño',
+        }, content_type='application/json')
+        self.assertEqual(created.status_code, 201)
+        design_id = created.json()['id']
+        product_id = created.json()['product_id']
+        cart = self.client.get('/api/v1/cart/')
+        self.assertEqual(cart.status_code, 200)
+        self.assertEqual(cart.json()['count'], 1)
+
+        checkout = self.client.post('/api/v1/checkout/', {
+            'address': 'Calle del tejido 10', 'city': 'Uribia', 'payment_method': 'contact',
+        }, content_type='application/json')
+        self.assertEqual(checkout.status_code, 201)
+        order_id = checkout.json()['id']
+        order_item = OrderItem.objects.get(order_id=order_id)
+        self.assertEqual(order_item.product_id, product_id)
+        self.assertEqual(order_item.product.custom_design_id, design_id)
+        design = CustomDesign.objects.get(pk=design_id)
+        self.assertEqual(design.customer_id, self.customer.id)
+        self.assertEqual(design.quantity, 2)
+        self.assertEqual(design.notes, 'Conservar colores del diseño')
+        self.assertEqual(Product.objects.get(pk=product_id).stock, 0)
+
+        craft_user = self.create_role_user('full-flow-craftswoman', AccessRole.Code.CRAFTSWOMAN)
+        craftswoman = Craftswoman.objects.create(user=craft_user, name='Tejedora de flujo', active=True)
+        self.client.force_login(craft_user)
+        accepted = self.client.post(f'/api/v1/craftswoman/orders/{order_id}/accept/')
+        self.assertEqual(accepted.status_code, 200)
+        design.refresh_from_db()
+        self.assertEqual(design.craftswoman_id, craftswoman.id)
+        self.assertEqual(design.status, Order.Status.ACCEPTED)
+
+        weaving = self.client.patch(
+            f'/api/v1/craftswoman/orders/{order_id}/status/',
+            {'status': Order.Status.WEAVING}, content_type='application/json',
+        )
+        completed = self.client.patch(
+            f'/api/v1/craftswoman/orders/{order_id}/status/',
+            {'status': Order.Status.COMPLETED}, content_type='application/json',
+        )
+        self.assertEqual(weaving.status_code, 200)
+        self.assertEqual(completed.status_code, 200)
+        design.refresh_from_db()
+        self.assertEqual(design.status, Order.Status.COMPLETED)
+
+        admin = self.create_role_user('full-flow-admin', AccessRole.Code.ADMIN)
+        superadmin = self.create_role_user('full-flow-superadmin', AccessRole.Code.SUPERADMIN)
+        set_role_permission(
+            superadmin, AccessRole.Code.ADMIN, 'designs', 'change', allowed=True,
+        )
+        self.client.force_login(admin)
+        for next_status in (
+            Order.Status.PAID, Order.Status.PREPARING, Order.Status.SHIPPED, Order.Status.DELIVERED,
+        ):
+            response = self.client.patch(
+                f'/api/v1/admin/orders/{order_id}/status/',
+                {'status': next_status}, content_type='application/json',
+            )
+            self.assertEqual(response.status_code, 200, response.content)
+        order = Order.objects.get(pk=order_id)
+        design.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.DELIVERED)
+        self.assertEqual(design.status, Order.Status.DELIVERED)
+        self.assertEqual(order.items.get().product.custom_design_id, design.id)
+
     def test_craftswoman_can_accept_order_without_design_change_permission(self):
         craft_user = self.create_role_user(
             'tejedora-order-without-design-change',
