@@ -341,3 +341,12 @@ El hash del commit documental se informa en la entrega de Fase 0 y queda en el h
 - `1782b6648eadd4c7530c1e9659c188caa8aae94c` — `test: verify custom order integration flow`.
 - `27c718c3f38c0b28e4a7db1b4c9012e3976f91e0` — `docs: record cross-module integration verification` (cierre documental de Sprint 7).
 - No hubo push, merge, despliegue, cambios en `main` ni cambios de esquema.
+
+## 2026-11-17 — Fase D1: permiso específico para estado de diseños en pedidos
+
+- Se reemplazó el requisito administrativo `designs.change` por la capacidad acotada `orders.manage_design_status` cuando una transición de pedido sincroniza un diseño personalizado. La migración aditiva `store.0019_order_design_status_capability` registra la acción/capacidad y concede `ALLOW` al rol admin base sin modificar ni retirar grants existentes. No crea permiso de edición completa para diseños.
+- API y Django Admin verifican la capacidad en backend. Django Admin también sincroniza el estado del diseño al estado del pedido en el flujo de guardado. Las rutas de tejedora siguen exigiendo `designs.change`; clientes y ámbitos existentes no se modifican.
+- Pruebas dirigidas: **OK**, 5 pruebas para administrador autorizado sin `designs.change`, rechazo tras retirar la capacidad, actualización normal de pedidos, guardado/sincronización vía Django Admin y conservación de la autorización de tejedora/matriz de transiciones.
+- `makemigrations --check --dry-run`: **OK**, `No changes detected` (la migración es de datos RBAC). `git diff --check`: **OK**.
+- `c5c6518535331b8a440bcc3b9d95697a5318e476` — `feat: add scoped design status permission for orders`.
+- No se ejecutaron pruebas completas ni frontend; no hubo push, merge, despliegue ni cambios en `main`.
