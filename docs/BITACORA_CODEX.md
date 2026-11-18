@@ -393,3 +393,14 @@ El hash del commit documental se informa en la entrega de Fase 0 y queda en el h
 - Rama de recuperación: `feature/consolidacion-correcciones-funcionales`, creada desde `integration/consolidacion-wayuu` en `a10faec8c356b791cddd089a1b307b2424b569b2`.
 - Commits locales: `2b3eb626ddfbfb17766d927ae6fdea73d81dd4fc` (productos e imágenes), `c570ead89c9baaac4a085aa1fc9cd8ad40f12a0c` (RBAC y menú), `84927a65fe2d4f6c3f0df8b7088ff0a6aa34eb5a` (perfil y propiedad de tejedoras), `088f2d73380838528fdcedc1f6d6d78cce11809f` (reportes de inventario) y `f864c93d4fd142da264a2272a808cc4cc1e98a29` (catálogo y documentación).
 - No hubo push, merge, despliegue ni cambios en `main`. Pillow debe instalarse en Codespaces o en otro entorno habilitado antes de que Django pase los checks y puedan ejecutarse las pruebas.
+
+## 2026-11-18 — Verificación final de consolidación
+
+- Rama `feature/consolidacion-correcciones-funcionales`; HEAD funcional verificado `8c3d37b31cf18c06e7c98c853dbf90c3abd68bbe`. La rama contiene los seis commits de consolidación y el commit correctivo `8c3d37b`. `integration/consolidacion-wayuu` permaneció en `a10faec8c356b791cddd089a1b307b2424b569b2`; `main` permaneció en `6c120f70892170b97dd33006908ebca3ed30176e`.
+- En `backend/.venv` con Python 3.13.17 se instaló `Pillow==13.0.0`, ya declarado en `backend/requirements.txt`; `from PIL import Image` importó correctamente.
+- `manage.py check`: **OK**, sin problemas del sistema. `makemigrations --check --dry-run`: **OK**, `No changes detected`.
+- `manage.py test store`: **OK**, 137 pruebas ejecutadas y aprobadas, 0 fallidas. Django informó un warning no bloqueante por ausencia del directorio `backend/staticfiles/`.
+- `manage.py migrate --plan`: **OK**, grafo resuelto e incluye `0021`, `0022` y `0023` como operaciones pendientes en la base seleccionada. No se ejecutó `migrate` sin `--plan` ni se modificó la base de datos.
+- `python -m compileall .`: **OK**. `npm run build`: **OK**, 1948 módulos transformados. `git diff --check`: **OK**.
+- Las migraciones forman la cadena `0021_product_image` → `0022_craftswoman_self_profile_permissions` → `0023_admin_inventory_navigation`; no se encontraron nombres duplicados. `DEPLOY.md`, los archivos `.env.example`, `docs/API.md` y `frontend/README.md` documentan despliegue y arranque desde cero. El arranque local usa SQLite por defecto e instala Pillow mediante `pip install -r requirements.txt`.
+- El diff de los commits de consolidación no incluye `.env`, `db.sqlite3`, credenciales, archivos de base de datos, fixtures, temporales, entornos virtuales ni artefactos de build. El árbol de trabajo quedó limpio después del commit documental de cierre.

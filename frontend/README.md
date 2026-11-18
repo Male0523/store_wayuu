@@ -24,7 +24,7 @@ export default defineConfig([
   ## Requisitos
 
   - Node.js 22 o superior y npm.
-  - Backend Django iniciado en `http://localhost:8000` y MySQL disponible.
+  - Backend Django iniciado en `http://localhost:8000`; SQLite está configurado por defecto para desarrollo local. Consulta [`../docs/API.md`](../docs/API.md) para preparar backend, Pillow y migraciones.
   - Origen de Vite (`http://localhost:5173`) permitido en `CORS_ALLOWED_ORIGINS` y `CSRF_TRUSTED_ORIGINS` del backend.
 
   ## Iniciar
@@ -32,7 +32,7 @@ export default defineConfig([
   Desde esta carpeta:
 
   ```powershell
-  npm install
+  npm ci
   Copy-Item .env.example .env.local
   npm run dev
   ```

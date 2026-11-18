@@ -105,11 +105,32 @@ La API usa códigos HTTP estándar: `400` para datos inválidos o falta de stock
 
 ## Arranque local
 
-Desde `backend/`, instala `requirements.txt`, copia `.env.example` a `.env`, completa `DJANGO_SECRET_KEY` y las credenciales MySQL, y ejecuta:
+Requisitos: Python 3.13, Node.js 22 o superior y npm. El backend usa SQLite por defecto; no hace falta instalar un servidor de base de datos para desarrollo local. `backend/requirements.txt` incluye Django, DRF y Pillow 13 para validar y guardar imágenes.
+
+En PowerShell, prepara el backend desde la raíz del repositorio:
 
 ```powershell
+cd backend
+py -3.13 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
+```
+
+Genera una clave con `python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"` y pega el resultado en `DJANGO_SECRET_KEY` dentro de `backend/.env`. Conserva `DB_ENGINE=sqlite` para desarrollo local. Después ejecuta:
+
+```powershell
+python manage.py check
 python manage.py migrate
 python manage.py runserver 127.0.0.1:8000
 ```
 
-La configuración activa actualmente requiere MySQL. El administrador existente está disponible en `/admin/`.
+Para iniciar el frontend, abre otra terminal desde `frontend/`:
+
+```powershell
+npm ci
+Copy-Item .env.example .env.local
+npm run dev
+```
+
+Abre `http://localhost:5173`. El backend permite ese origen en la configuración de ejemplo. Para administración, inicia sesión con una cuenta autorizada; Django Admin está disponible en `/admin/`.
