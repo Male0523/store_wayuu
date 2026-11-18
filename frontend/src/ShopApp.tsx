@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import {
   ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, Check, ChevronDown, Eye,
   Camera, CircleUserRound, Heart, LoaderCircle, LockKeyhole, Minus,
@@ -8,7 +8,7 @@ import {
 import { api, ApiError } from './lib/api'
 import { useUserSession } from './context/user-context'
 import LegacyCartNotice from './LegacyCartNotice'
-import type { AdminCategory, AdminCraftswomanOption, AdminOrderSummary, AdminProduct, AuditEvent, Cart, Category, CustomDesign, CraftswomanDashboard, Order, Page, Product, RBACCatalogEntry, RBACNavigationItem, RBACPermission, RBACRole, RBACRolePermissions, RBACRoleScopes, RBACUserPermissions, RBACUserScopes, SessionUser, SuperadminUser, SuperadminUserInput, UserProfile } from './types'
+import type { AdminCategory, AdminCraftswomanOption, AdminOrderSummary, AdminProduct, AdminProductInput, AuditEvent, Cart, Category, CustomDesign, CraftswomanDashboard, CraftswomanProfile, CraftswomanProfileInput, InventoryReport, Order, Page, Product, RBACCatalogEntry, RBACNavigationInput, RBACNavigationItem, RBACPermission, RBACRole, RBACRolePermissions, RBACRoleScopes, RBACUserPermissions, RBACUserScopes, SessionUser, SuperadminUser, SuperadminUserInput, UserProfile } from './types'
 import './ShopApp.css'
 
 type Screen = 'shop' | 'orders' | 'craftswoman' | 'design' | 'admin'
@@ -507,7 +507,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
     } catch (error) { setNotice(errorMessage(error)) }
   }
 
-  async function saveAdminProduct(productId: number, values: Partial<AdminProduct>) {
+  async function saveAdminProduct(productId: number, values: AdminProductInput) {
     setBusy(true)
     try {
       const updated = await api.updateAdminProduct(productId, values)
@@ -516,7 +516,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
     } catch (error) { setNotice(errorMessage(error)) } finally { setBusy(false) }
   }
 
-  async function createAdminProduct(values: Partial<AdminProduct>) {
+  async function createAdminProduct(values: AdminProductInput) {
     setBusy(true)
     try {
       const created = await api.createAdminProduct(values)
@@ -815,12 +815,16 @@ function AdminAccountView({ user, isSuperadmin, navigationItems, orderSummary, p
   }
   function submitNewProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const values = Object.fromEntries(new FormData(event.currentTarget).entries()) as Record<string, string>
+    const formData = new FormData(event.currentTarget)
+    const values = Object.fromEntries(formData.entries()) as Record<string, string | File>
+    const image = values.image instanceof File && values.image.size > 0 ? values.image : undefined
     onCreateProduct({
-      sku: values.sku.trim(), name: values.name.trim(), category: Number(values.category),
+      sku: String(values.sku).trim(), name: String(values.name).trim(), category: Number(values.category),
       craftswoman: values.craftswoman ? Number(values.craftswoman) : null,
-      price: values.price, stock: Number(values.stock), size: values.size || 'M',
-      region: values.region.trim(), image_url: values.image_url.trim(),
+      price: String(values.price), stock: Number(values.stock), size: String(values.size || 'M'),
+      region: String(values.region).trim(), color: String(values.color ?? '').trim(),
+      description: String(values.description ?? '').trim(), production_time: String(values.production_time ?? '').trim(),
+      image_url: String(values.image_url).trim(), image,
       active: values.active === 'on', made_to_order: values.made_to_order === 'on',
     })
     event.currentTarget.reset()
@@ -1460,9 +1464,98 @@ function AdminProductRow({ product, categories, craftswomen, busy, canEdit, canP
   const [categoryId, setCategoryId] = useState(String(product.category))
   const [craftswomanId, setCraftswomanId] = useState(product.craftswoman ? String(product.craftswoman) : '')
   const canChangeVisibility = active ? canUnpublish : canPublish
-  const hasDetailsChanges = name.trim() !== product.name || Number(categoryId) !== product.category || (craftswomanId ? Number(craftswomanId) : null) !== product.craftswoman
-  const hasChanges = (canEdit && (price !== product.price || Number(stock) !== product.stock || (editingDetails && hasDetailsChanges))) || active !== product.active
-  return <div className="admin-product-row"><div className="admin-product-name"><span className="product-origin">{product.sku}</span><strong>{product.name}</strong><small>{product.size} · {product.region || 'Sin región'}</small><small>Tejedora: {product.craftswoman_name || 'Sin asignar'}</small>{canEdit && <button className="text-button" type="button" onClick={() => setEditingDetails((value) => !value)}>{editingDetails ? 'Cerrar ficha' : 'Editar ficha'}</button>}</div>{canEdit ? <><label className="admin-inline-field">Precio<input aria-label={`Precio de ${product.name}`} type="number" min="0" step="1" value={price} onChange={(event) => setPrice(event.target.value)} /></label><label className="admin-inline-field">Stock<input aria-label={`Stock de ${product.name}`} type="number" min="0" step="1" value={stock} onChange={(event) => setStock(event.target.value)} /></label></> : <><span>{money(product.price)}</span><span>Stock {product.stock}</span></>}{editingDetails && canEdit && <div className="admin-product-edit-fields"><label className="admin-inline-field">Nombre<input value={name} maxLength={180} onChange={(event) => setName(event.target.value)} /></label><label className="admin-inline-field">Categoría<select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>{!categories.some((category) => category.id === product.category && category.active && !category.is_internal) && <option value={product.category} disabled>{categories.find((category) => category.id === product.category)?.name ?? 'Categoría actual no disponible'}</option>}{categories.filter((category) => category.active && !category.is_internal).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label><label className="admin-inline-field">Tejedora<select value={craftswomanId} onChange={(event) => setCraftswomanId(event.target.value)}><option value="">Sin asignar</option>{craftswomen.map((craftswoman) => <option key={craftswoman.id} value={craftswoman.id}>{craftswoman.name}{craftswoman.community ? ` · ${craftswoman.community}` : craftswoman.region ? ` · ${craftswoman.region}` : ''}{!craftswoman.active ? ' (inactiva)' : ''}</option>)}</select></label></div>}{canChangeVisibility ? <label className="admin-check"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} /> Publicado</label> : <span>{product.active ? 'Publicado' : 'Oculto'}</span>}{hasChanges && <button className="button button-outline" disabled={busy || !name.trim()} onClick={() => onSave(product.id, { ...(canEdit ? { price, stock: Number(stock), ...(editingDetails && hasDetailsChanges ? { name: name.trim(), category: Number(categoryId), craftswoman: craftswomanId ? Number(craftswomanId) : null } : {}) } : {}), ...(active !== product.active ? { active } : {}) })}>Guardar</button>}</div>
+  const hasDetailsChanges = name.trim() !== product.name || description !== product.description || Number(categoryId) !== product.category || (craftswomanId ? Number(craftswomanId) : null) !== product.craftswoman || region !== product.region || color !== product.color || size !== product.size || productionTime !== product.production_time || madeToOrder !== product.made_to_order || imageUrl !== product.image_url
+  const hasChanges = (canEdit && (price !== product.price || Number(stock) !== product.stock || (editingDetails && hasDetailsChanges) || Boolean(imageFile))) || active !== product.active
+  return <article className="admin-product-row">
+    <div className="admin-product-name">{product.image_url && <ProductPhoto src={product.image_url} alt={product.name} className="admin-review-image" />}<span className="product-origin">{product.sku}</span><strong>{product.name}</strong><small>{product.size} · {product.region || 'Sin región'}</small><small>Tejedora: {product.craftswoman_name || 'Sin asignar'}</small>{canEdit && <button className="button button-outline" type="button" onClick={() => setEditingDetails((value) => !value)}>{editingDetails ? 'Cerrar edición' : 'Editar producto'}</button>}</div>
+    {canEdit ? <><label className="admin-inline-field">Precio COP<input aria-label={`Precio de ${product.name}`} type="number" min="0" step="1" value={price} onChange={(event) => setPrice(event.target.value)} /></label><label className="admin-inline-field">Stock<input aria-label={`Stock de ${product.name}`} type="number" min="0" step="1" value={stock} onChange={(event) => setStock(event.target.value)} /></label></> : <><span>{money(product.price)}</span><span>Stock {product.stock}</span></>}
+    {editingDetails && canEdit && <div className="admin-product-edit-fields">
+      <label className="admin-inline-field">Nombre<input value={name} maxLength={180} onChange={(event) => setName(event.target.value)} /></label>
+      <label className="admin-inline-field">Descripción<textarea value={description} rows={3} onChange={(event) => setDescription(event.target.value)} /></label>
+      <label className="admin-inline-field">Categoría<select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>{!categories.some((category) => category.id === product.category && category.active && !category.is_internal) && <option value={product.category} disabled>{categories.find((category) => category.id === product.category)?.name ?? 'Categoría actual no disponible'}</option>}{categories.filter((category) => category.active && !category.is_internal).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+      <label className="admin-inline-field">Tejedora<select value={craftswomanId} onChange={(event) => setCraftswomanId(event.target.value)}><option value="">Sin asignar</option>{craftswomen.map((craftswoman) => <option key={craftswoman.id} value={craftswoman.id}>{craftswoman.name}{craftswoman.community ? ` · ${craftswoman.community}` : craftswoman.region ? ` · ${craftswoman.region}` : ''}{!craftswoman.active ? ' (inactiva)' : ''}</option>)}</select></label>
+      <label className="admin-inline-field">Talla<input value={size} maxLength={30} onChange={(event) => setSize(event.target.value)} /></label>
+      <label className="admin-inline-field">Color<input value={color} maxLength={150} onChange={(event) => setColor(event.target.value)} /></label>
+      <label className="admin-inline-field">Región<input value={region} maxLength={100} onChange={(event) => setRegion(event.target.value)} /></label>
+      <label className="admin-inline-field">Tiempo de elaboración<input value={productionTime} maxLength={100} onChange={(event) => setProductionTime(event.target.value)} /></label>
+      <label className="admin-inline-field">URL externa de imagen<input type="url" value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="https://…" /></label>
+      <label className="admin-inline-field">Cargar imagen JPEG, PNG o WebP<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setImageFile(event.target.files?.[0])} /></label>
+      <label className="admin-check"><input type="checkbox" checked={madeToOrder} onChange={(event) => setMadeToOrder(event.target.checked)} /> Elaborar por pedido</label>
+    </div>}
+    {canChangeVisibility ? <label className="admin-check"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} /> Publicado</label> : <span>{product.active ? 'Publicado' : 'Oculto'}</span>}
+    {hasChanges && <button className="button button-outline" disabled={busy || !name.trim()} onClick={() => onSave(product.id, {
+      ...(canEdit ? { price, stock: Number(stock), ...(imageFile ? { image: imageFile } : {}), ...(editingDetails && hasDetailsChanges ? {
+        name: name.trim(), description, category: Number(categoryId), craftswoman: craftswomanId ? Number(craftswomanId) : null,
+        region, color, size, production_time: productionTime, made_to_order: madeToOrder,
+        ...(imageUrl !== product.image_url ? { image_url: imageUrl } : {}),
+      } : {}) } : {}),
+      ...(active !== product.active ? { active } : {}),
+    })}>Guardar producto</button>}
+  </article>
+}
+
+function AdminInventoryReport({ canExport }: { canExport: boolean }) {
+  const [thresholdInput, setThresholdInput] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+  const [statusInput, setStatusInput] = useState('all')
+  const [filters, setFilters] = useState<{ threshold: string; search: string; status: string } | null>(null)
+  const [pageNumber, setPageNumber] = useState(1)
+  const [report, setReport] = useState<InventoryReport | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!filters) return
+    let active = true
+    const params = new URLSearchParams({ threshold: filters.threshold, status: filters.status, page: String(pageNumber) })
+    if (filters.search) params.set('search', filters.search)
+    setLoading(true)
+    setError('')
+    api.adminInventoryReport(params)
+      .then((result) => { if (active) setReport(result) })
+      .catch((requestError: unknown) => { if (active) setError(errorMessage(requestError)) })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [filters, pageNumber])
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setPageNumber(1)
+    setFilters({ threshold: thresholdInput, search: searchInput.trim(), status: statusInput })
+  }
+
+  function downloadReport(format: 'pdf' | 'xlsx') {
+    if (!filters) return
+    const params = new URLSearchParams({ threshold: filters.threshold, status: filters.status })
+    if (filters.search) params.set('search', filters.search)
+    window.location.assign(api.adminInventoryExportUrl(params, format))
+  }
+
+  const reasonLabels: Record<string, string> = {
+    admin_adjustment: 'Ajuste administrativo',
+    craftswoman_adjustment: 'Actualización de tejedora',
+    checkout: 'Checkout',
+  }
+
+  return <section className="admin-inventory-report" aria-labelledby="inventory-report-title">
+    <div className="admin-section-subheading"><h2 id="inventory-report-title">Reporte de inventario</h2></div>
+    <form className="admin-inventory-filters" onSubmit={submit}>
+      <label>Umbral de stock bajo<input aria-label="Umbral de stock bajo" type="number" min="1" step="1" required value={thresholdInput} onChange={(event) => setThresholdInput(event.target.value)} placeholder="Definir unidades" /></label>
+      <label>Estado<select value={statusInput} onChange={(event) => setStatusInput(event.target.value)}><option value="all">Todos</option><option value="low">Stock bajo</option><option value="out">Agotados</option><option value="in_stock">Con existencias</option></select></label>
+      <label>Buscar<input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="Producto, referencia o tejedora" /></label>
+      <button className="button button-outline" disabled={loading}>{loading ? 'Consultando…' : 'Consultar'}</button>
+    </form>
+    {!filters && <p className="muted-copy">Define un umbral para consultar existencias y productos con stock bajo.</p>}
+    {error && <p className="catalog-error" role="alert">{error}</p>}
+    {report && <>
+      <p className="muted-copy">Los indicadores resumen todo el inventario autorizado; la lista aplica búsqueda, estado y paginación.</p>
+      <div className="admin-inventory-metrics"><article><span>Productos</span><strong>{report.summary.product_count}</strong></article><article><span>Unidades actuales</span><strong>{report.summary.total_units}</strong></article><article><span>Agotados</span><strong>{report.summary.out_of_stock_count}</strong></article><article><span>Stock bajo (≤ {report.threshold})</span><strong>{report.summary.low_stock_count}</strong></article></div>
+      {canExport ? <div className="admin-inventory-exports"><button type="button" className="button button-outline" onClick={() => downloadReport('pdf')}>Exportar PDF</button><button type="button" className="button button-outline" onClick={() => downloadReport('xlsx')}>Exportar Excel</button></div> : <p className="muted-copy">La exportación requiere el permiso products.export.</p>}
+      {report.products.results.length ? <div className="admin-inventory-table-wrap"><table className="admin-inventory-table"><thead><tr><th>Producto</th><th>Categoría</th><th>Tejedora</th><th>Estado</th><th>Unidades</th></tr></thead><tbody>{report.products.results.map((product) => <tr key={product.id}><td><strong>{product.name}</strong><small>{product.sku}</small></td><td>{product.category}</td><td>{product.craftswoman_name || 'Sin asignar'}</td><td>{product.stock === 0 ? 'Agotado' : product.stock <= report.threshold ? 'Stock bajo' : 'Disponible'}{!product.active && ' · No publicado'}</td><td>{product.stock}</td></tr>)}</tbody></table></div> : <p className="muted-copy">No hay productos que coincidan con los filtros.</p>}
+      <nav className="admin-order-pagination" aria-label="Paginación de inventario"><button type="button" className="button button-outline" disabled={!report.products.previous || loading} onClick={() => setPageNumber((page) => Math.max(1, page - 1))}>Anterior</button><span>Página {pageNumber} · {report.products.count} productos</span><button type="button" className="button button-outline" disabled={!report.products.next || loading} onClick={() => setPageNumber((page) => page + 1)}>Siguiente</button></nav>
+      <div className="admin-inventory-movements"><div className="admin-section-subheading"><h3>Movimientos recientes</h3><span>{report.movement_count} registrados</span></div><p className="muted-copy">El historial comienza con los movimientos registrados por el reporte; los cambios anteriores no tienen cantidades históricas disponibles.</p>{report.movements.length ? <ul>{report.movements.map((movement) => <li key={movement.id}><div><strong>{movement.product_name} · {movement.sku}</strong><small>{dateLabel(movement.created_at)} · {reasonLabels[movement.reason] ?? movement.reason}{movement.order_id ? ` · Pedido #${movement.order_id}` : ''}</small></div><span>{movement.before} → {movement.after} ({movement.delta > 0 ? '+' : ''}{movement.delta})</span></li>)}</ul> : <p className="muted-copy">Todavía no hay movimientos registrados.</p>}</div>
+    </>}
+  </section>
 }
 
 function AdminOrderRow({ order, busy, canChange, canApprove, canCancel, onStatus }: { order: Order; busy: boolean; canChange: boolean; canApprove: boolean; canCancel: boolean; onStatus: (id: number, status: string) => void }) {
@@ -1485,3 +1578,11 @@ function OrderSuccess({ order, onClose, onOrders }: { order: Order; onClose: () 
 function Footer({ onInstagram }: { onInstagram: () => void }) {
   return <footer className="site-footer"><div className="footer-main"><div className="footer-brand"><span className="wordmark-symbol" aria-hidden="true"><span /><span /><span /></span><div><strong>wayuuwaa</strong><p>Tejido con origen.</p></div></div><p className="footer-note">Cada pieza lleva consigo el tiempo y la mirada de quien la teje.</p><button className="social-button" onClick={onInstagram} aria-label="Instagram"><Camera size={18} /></button></div><div className="footer-bottom"><span>© WAYUUWAA · LA GUAJIRA, COLOMBIA</span><span>HECHO A MANO, CON RESPETO</span><a href="#coleccion">VOLVER ARRIBA <ArrowUpRight size={12} /></a></div></footer>
 }
+  const [description, setDescription] = useState(product.description)
+  const [region, setRegion] = useState(product.region)
+  const [color, setColor] = useState(product.color)
+  const [size, setSize] = useState(product.size)
+  const [productionTime, setProductionTime] = useState(product.production_time)
+  const [madeToOrder, setMadeToOrder] = useState(product.made_to_order)
+  const [imageUrl, setImageUrl] = useState(product.image_url)
+  const [imageFile, setImageFile] = useState<File | undefined>()

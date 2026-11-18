@@ -45,6 +45,8 @@ export interface AdminProduct extends Omit<Product, 'category' | 'craftswoman'> 
   active: boolean
 }
 
+export type AdminProductInput = Partial<AdminProduct> & { image?: File }
+
 export interface AdminCraftswomanOption {
   id: number
   name: string

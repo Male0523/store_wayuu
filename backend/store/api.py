@@ -1,11 +1,15 @@
 from decimal import Decimal
+from html import escape as html_escape
+from io import BytesIO
+from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models, transaction
-from django.db.models import Count
-from django.http import JsonResponse
+from django.db.models import Count, Q, Sum
+from django.http import HttpResponse, JsonResponse
 from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
@@ -97,10 +101,67 @@ class CraftswomanSummarySerializer(serializers.ModelSerializer):
         fields = ('id', 'name', 'community', 'region', 'biography')
 
 
+MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024
+MAX_PRODUCT_IMAGE_PIXELS = 25_000_000
+PRODUCT_IMAGE_FORMATS = {'JPEG': '.jpg', 'PNG': '.png', 'WEBP': '.webp'}
+
+
+def product_image_url(product, request=None):
+    image = getattr(product, 'image', None)
+    url = image.url if image and image.name else product.image_url
+    if url and request:
+        return request.build_absolute_uri(url)
+    return url or ''
+
+
+class ProductImageUploadField(serializers.ImageField):
+    def to_internal_value(self, data):
+        if getattr(data, 'size', 0) > MAX_PRODUCT_IMAGE_BYTES:
+            raise serializers.ValidationError('La imagen supera el tamaño máximo de 5 MB.')
+        try:
+            from PIL import Image, UnidentifiedImageError
+        except ImportError as exc:
+            if exc.name and exc.name.startswith('PIL'):
+                raise serializers.ValidationError('La carga de imágenes no está disponible porque Pillow no está instalado.')
+            raise
+        try:
+            uploaded = super().to_internal_value(data)
+        except serializers.ValidationError:
+            raise serializers.ValidationError('El archivo no contiene una imagen válida o está dañado.')
+        try:
+            uploaded.seek(0)
+            with Image.open(uploaded) as image:
+                image_format = image.format
+                width, height = image.size
+                if image_format not in PRODUCT_IMAGE_FORMATS:
+                    raise serializers.ValidationError('Formato no permitido. Usa JPEG, PNG o WebP.')
+                if width < 1 or height < 1 or width * height > MAX_PRODUCT_IMAGE_PIXELS:
+                    raise serializers.ValidationError('La imagen tiene dimensiones no permitidas.')
+                image.verify()
+            uploaded.seek(0)
+            uploaded.name = f'{Path(uploaded.name).stem}{PRODUCT_IMAGE_FORMATS[image_format]}'
+        except serializers.ValidationError:
+            raise
+        except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
+            raise serializers.ValidationError('El archivo no contiene una imagen válida o está dañado.')
+        return uploaded
+
+
+class NullableProductCraftswomanField(serializers.PrimaryKeyRelatedField):
+    def to_internal_value(self, data):
+        if data == '':
+            return None
+        return super().to_internal_value(data)
+
+
 class ProductSerializer(serializers.ModelSerializer):
     category = CategorySerializer(read_only=True)
     craftswoman = CraftswomanSummarySerializer(read_only=True)
     is_custom_design = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
+
+    def get_image_url(self, product):
+        return product_image_url(product, self.context.get('request'))
 
     @staticmethod
     def get_is_custom_design(product):
@@ -118,9 +179,15 @@ class ProductSerializer(serializers.ModelSerializer):
 class AdminProductSerializer(serializers.ModelSerializer):
     category = serializers.PrimaryKeyRelatedField(queryset=Category.objects.filter(active=True, is_internal=False))
     craftswoman_name = serializers.CharField(source='craftswoman.name', read_only=True, allow_null=True, default=None)
-    craftswoman = serializers.PrimaryKeyRelatedField(
+    craftswoman = NullableProductCraftswomanField(
         queryset=Craftswoman.objects.all(), required=False, allow_null=True,
     )
+    image = ProductImageUploadField(write_only=True, required=False, allow_empty_file=False)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['image_url'] = product_image_url(instance, self.context.get('request'))
+        return data
 
     def validate_active(self, value):
         if value and self.instance and self.instance.custom_design_id:
@@ -142,9 +209,26 @@ class AdminProductSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'sku', 'name', 'category', 'craftswoman', 'craftswoman_name', 'description', 'region',
             'color', 'size', 'production_time', 'price', 'stock', 'image_url',
-            'made_to_order', 'active', 'created_at', 'updated_at',
+            'image', 'made_to_order', 'active', 'created_at', 'updated_at',
         )
         read_only_fields = ('id', 'created_at', 'updated_at')
+
+    def update(self, instance, validated_data):
+        image = validated_data.pop('image', serializers.empty)
+        if image is not serializers.empty:
+            instance.image = image
+        elif 'image_url' in validated_data and validated_data['image_url'] != instance.image_url:
+            # Changing the source URL is an explicit switch away from the stored upload.
+            instance.image = None
+        return super().update(instance, validated_data)
+
+    def create(self, validated_data):
+        image = validated_data.pop('image', serializers.empty)
+        product = super().create(validated_data)
+        if image is not serializers.empty:
+            product.image = image
+            product.save(update_fields=('image', 'updated_at'))
+        return product
 
 
 class SuperadminUserSerializer(serializers.ModelSerializer):
@@ -222,6 +306,11 @@ class SuperadminUserSerializer(serializers.ModelSerializer):
 
 
 class ProductSummarySerializer(serializers.ModelSerializer):
+    image_url = serializers.SerializerMethodField()
+
+    def get_image_url(self, product):
+        return product_image_url(product, self.context.get('request'))
+
     class Meta:
         model = Product
         fields = ('id', 'name', 'image_url', 'price')
@@ -735,7 +824,7 @@ def _cart_items(request, customer):
             and (not product.custom_design_id or quantity == 1)
         )
         items.append({
-            'product': ProductSerializer(product).data,
+            'product': ProductSerializer(product, context={'request': request}).data,
             'quantity': quantity,
             'subtotal': str(subtotal),
             'available': available,
@@ -830,7 +919,7 @@ class ProductListView(PaginatedAPIView):
         if ordering in ('price', '-price', 'name', '-created_at'):
             products = products.order_by(ordering)
         page = self.paginate_queryset(products)
-        return self.get_paginated_response(ProductSerializer(page, many=True).data)
+        return self.get_paginated_response(ProductSerializer(page, many=True, context={'request': request}).data)
 
 
 class ProductDetailView(APIView):
@@ -842,7 +931,7 @@ class ProductDetailView(APIView):
             id=product_id, active=True, custom_design__isnull=True,
             category__active=True, category__is_internal=False,
         )
-        return Response(ProductSerializer(product).data)
+        return Response(ProductSerializer(product, context={'request': request}).data)
 
 
 class AdminProductListView(APIView):
@@ -851,10 +940,10 @@ class AdminProductListView(APIView):
 
     def get(self, request):
         products = Product.objects.select_related('category', 'craftswoman').all()
-        return Response(AdminProductSerializer(products, many=True).data)
+        return Response(AdminProductSerializer(products, many=True, context={'request': request}).data)
 
     def post(self, request):
-        serializer = AdminProductSerializer(data=request.data)
+        serializer = AdminProductSerializer(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         product = serializer.save()
         record_audit(request.user, 'create_product', 'products', instance=product)
@@ -1611,11 +1700,33 @@ class AdminProductDetailView(APIView):
 
     def patch(self, request, product_id):
         product = get_object_or_404(Product, id=product_id)
-        serializer = AdminProductSerializer(product, data=request.data, partial=True)
+        previous_stock = product.stock
+        serializer = AdminProductSerializer(product, data=request.data, partial=True, context={'request': request})
         serializer.is_valid(raise_exception=True)
-        product = serializer.save()
-        record_audit(request.user, 'update_product', 'products', instance=product)
-        return Response(AdminProductSerializer(product).data)
+        with transaction.atomic():
+            product = serializer.save()
+            if product.stock != previous_stock:
+                record_audit(
+                    request.user,
+                    'stock_adjustment',
+                    'products',
+                    details={'stock_movement': {
+                        'sku': product.sku,
+                        'product_name': product.name,
+                        'before': previous_stock,
+                        'after': product.stock,
+                        'delta': product.stock - previous_stock,
+                        'reason': 'admin_adjustment',
+                    }},
+                    instance=product,
+                )
+            record_audit(
+                request.user,
+                'update_product',
+                'products',
+                instance=product,
+            )
+        return Response(AdminProductSerializer(product, context={'request': request}).data)
 
 
 class AdminOrderStatusView(APIView):
@@ -1989,7 +2100,7 @@ class CheckoutView(APIView):
         request.session.pop('cart', None)
         request.session.modified = True
         order = Order.objects.prefetch_related('items__product').select_related('craftswoman').get(id=order.id)
-        return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
+        return Response(OrderSerializer(order, context={'request': request}).data, status=status.HTTP_201_CREATED)
 
 
 class OrderListView(PaginatedAPIView):
@@ -1998,7 +2109,7 @@ class OrderListView(PaginatedAPIView):
 
     def get(self, request):
         orders = _customer_orders(request.user).select_related('craftswoman').prefetch_related('items__product')
-        return self.get_paginated_response(OrderSerializer(self.paginate_queryset(orders), many=True).data)
+        return self.get_paginated_response(OrderSerializer(self.paginate_queryset(orders), many=True, context={'request': request}).data)
 
 
 class AdminOrderListView(PaginatedAPIView):
@@ -2099,7 +2210,7 @@ class AdminOrderSummaryView(APIView):
             # Preserve the dashboard's prior active-status definition. Whether
             # completed and paid should count as active remains a business decision.
             'active_count': sum(count_by_status[value] for value in ADMIN_ACTIVE_ORDER_STATUSES),
-            'recent_orders': OrderSerializer(recent, many=True).data,
+            'recent_orders': OrderSerializer(recent, many=True, context={'request': request}).data,
         })
 
 
@@ -2112,7 +2223,7 @@ class OrderDetailView(APIView):
             _customer_orders(request.user).select_related('craftswoman').prefetch_related('items__product'),
             id=order_id,
         )
-        return Response(OrderSerializer(order).data)
+        return Response(OrderSerializer(order, context={'request': request}).data)
 
 
 class CustomDesignListView(APIView):
@@ -2188,7 +2299,7 @@ class CraftswomanProductsView(APIView):
     def get(self, request):
         craftswoman = get_object_or_404(Craftswoman, user=request.user)
         products = Product.objects.filter(craftswoman=craftswoman).select_related('category', 'craftswoman')
-        return Response(ProductSerializer(products, many=True).data)
+        return Response(ProductSerializer(products, many=True, context={'request': request}).data)
 
     def post(self, request):
         if not has_rbac_permission(request.user, 'products', 'add'):
@@ -2204,7 +2315,7 @@ class CraftswomanProductsView(APIView):
             details={'product_name': product.name, 'publication_status': 'pending'},
             instance=product,
         )
-        return Response(ProductSerializer(product).data, status=status.HTTP_201_CREATED)
+        return Response(ProductSerializer(product, context={'request': request}).data, status=status.HTTP_201_CREATED)
 
 
 class CraftswomanProductDetailView(APIView):
@@ -2242,7 +2353,7 @@ class CraftswomanDashboardView(APIView):
         designs = craftswoman.custom_designs.select_related('customer') if has_rbac_permission(request.user, 'designs', 'view') else CustomDesign.objects.none()
         return Response({
             'active': craftswoman.active,
-            'available_orders': OrderSerializer(available, many=True).data,
+            'available_orders': OrderSerializer(available, many=True, context={'request': request}).data,
             'orders': OrderSerializer(
                 assigned, many=True, context={'request': request, 'status_actor': 'craftswoman'},
             ).data,

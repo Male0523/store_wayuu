@@ -373,6 +373,7 @@ class Product(models.Model):
     stock = models.PositiveIntegerField('unidades disponibles', default=0)
     # También admite las imágenes base64 del prototipo inicial.
     image_url = models.TextField('URL o imagen', blank=True)
+    image = models.ImageField('imagen cargada', upload_to='products/', blank=True, null=True)
     made_to_order = models.BooleanField('se elabora por pedido', default=False)
     active = models.BooleanField('publicado', default=True)
     created_at = models.DateTimeField('creado el', auto_now_add=True)

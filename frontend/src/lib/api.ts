@@ -1,6 +1,7 @@
 import type {
   AdminCategory,
   AdminProduct,
+  AdminProductInput,
   AdminCraftswomanOption,
   Cart,
   Category,
@@ -90,6 +91,17 @@ const json = (value: unknown): string => JSON.stringify(value)
 export const api = {
   health: () => request<{ status: string }>('/'),
   categories: () => request<Category[]>('/categories/'),
+function adminProductBody(values: AdminProductInput): BodyInit {
+  if (!values.image) return json(values)
+  const body = new FormData()
+  Object.entries(values).forEach(([key, value]) => {
+    if (value === undefined || key === 'image') return
+    body.append(key, value === null ? '' : String(value))
+  })
+  body.append('image', values.image)
+  return body
+}
+
   products: (params: URLSearchParams) => request<Page<Product>>(`/products/?${params}`),
   product: (id: number) => request<Product>(`/products/${id}/`),
   me: () => request<{ user: SessionUser }>('/auth/me/'),
@@ -209,10 +221,10 @@ export const api = {
     request<AdminCategory>('/admin/categories/', { method: 'POST', body: json(values) }),
   updateAdminCategory: (id: number, values: Partial<AdminCategory>) =>
     request<AdminCategory>(`/admin/categories/${id}/`, { method: 'PATCH', body: json(values) }),
-  createAdminProduct: (values: Partial<AdminProduct>) =>
-    request<AdminProduct>('/admin/products/', { method: 'POST', body: json(values) }),
-  updateAdminProduct: (id: number, values: Partial<AdminProduct>) =>
-    request<AdminProduct>(`/admin/products/${id}/`, { method: 'PATCH', body: json(values) }),
+  createAdminProduct: (values: AdminProductInput) =>
+    request<AdminProduct>('/admin/products/', { method: 'POST', body: adminProductBody(values) }),
+  updateAdminProduct: (id: number, values: AdminProductInput) =>
+    request<AdminProduct>(`/admin/products/${id}/`, { method: 'PATCH', body: adminProductBody(values) }),
   updateAdminOrderStatus: (id: number, value: string) =>
     request<Order>(`/admin/orders/${id}/status/`, { method: 'PATCH', body: json({ status: value }) }),
   adminUrl: API_BASE.replace(/\/api\/v1\/?$/, '/admin/'),

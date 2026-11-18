@@ -2,9 +2,10 @@ import json
 import os
 import stat
 import subprocess
+from zipfile import ZipFile
 from decimal import Decimal
 from datetime import timedelta
-from io import StringIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -16,6 +17,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import Client, RequestFactory, SimpleTestCase, TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
+from django.core.files.uploadedfile import SimpleUploadedFile
 
 from .navigation import navigation_menu
 from .admin import (
@@ -117,6 +119,14 @@ class OrderWorkflowTests(SimpleTestCase):
 
 
 class StoreAPITests(TestCase):
+    @staticmethod
+    def make_test_image(image_format='PNG'):
+        from PIL import Image
+
+        stream = BytesIO()
+        Image.new('RGB', (3, 2), color='red').save(stream, format=image_format)
+        return stream.getvalue()
+
     def setUp(self):
         self.category = Category.objects.create(name='Mantas', active=True)
         self.product = Product.objects.create(
@@ -1417,6 +1427,141 @@ class StoreAPITests(TestCase):
             f'/api/v1/admin/orders/{normal_order.id}/status/',
             {'status': Order.Status.PREPARING}, content_type='application/json',
         )
+    def test_admin_can_fully_update_product_and_assign_real_craftswoman(self):
+        admin = self.create_role_user('admin-full-product-edit', AccessRole.Code.ADMIN)
+        craft_user = self.create_role_user('admin-full-product-edit-craft', AccessRole.Code.CRAFTSWOMAN)
+        craftswoman = Craftswoman.objects.create(user=craft_user, name='Artesana registrada', active=True)
+        self.product.image_url = 'https://images.example.test/manta-original.jpg'
+        self.product.save(update_fields=('image_url',))
+        self.client.force_login(admin)
+
+        updated = self.client.patch(f'/api/v1/admin/products/{self.product.id}/', {
+            'name': 'Manta editada', 'description': 'Descripción completa actualizada.',
+            'price': '55000', 'category': self.category.id, 'size': 'L', 'color': 'Rojo y crema',
+            'region': 'La Guajira', 'production_time': '30 días', 'stock': 6,
+            'made_to_order': True, 'craftswoman': craftswoman.id,
+        }, content_type='application/json')
+
+        self.assertEqual(updated.status_code, 200, updated.content)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.name, 'Manta editada')
+        self.assertEqual(self.product.description, 'Descripción completa actualizada.')
+        self.assertEqual(self.product.size, 'L')
+        self.assertEqual(self.product.color, 'Rojo y crema')
+        self.assertEqual(self.product.craftswoman_id, craftswoman.id)
+        self.assertTrue(self.product.made_to_order)
+        self.assertEqual(self.product.image_url, 'https://images.example.test/manta-original.jpg')
+
+    def test_admin_inventory_report_aggregates_full_stock_and_filters_products(self):
+        admin = self.create_role_user('admin-inventory-report', AccessRole.Code.ADMIN)
+        low = Product.objects.create(
+            sku='REPORT-INVENTORY-LOW', name='Manta stock bajo', category=self.category,
+            price=Decimal('10000'), stock=3,
+        )
+        out = Product.objects.create(
+            sku='REPORT-INVENTORY-OUT', name='Manta agotada', category=self.category,
+            price=Decimal('10000'), stock=0,
+        )
+        Product.objects.create(
+            sku='REPORT-INVENTORY-HEALTHY', name='Manta disponible', category=self.category,
+            price=Decimal('10000'), stock=10,
+        )
+        self.client.force_login(admin)
+
+        report = self.client.get('/api/v1/admin/inventory/report/?threshold=4')
+        low_filter = self.client.get('/api/v1/admin/inventory/report/?threshold=4&status=low&search=LOW')
+        out_filter = self.client.get('/api/v1/admin/inventory/report/?threshold=4&status=out')
+        missing_threshold = self.client.get('/api/v1/admin/inventory/report/')
+        invalid_status = self.client.get('/api/v1/admin/inventory/report/?threshold=4&status=unknown')
+        export_without_permission = self.client.get('/api/v1/admin/inventory/report/?threshold=4&export=xlsx')
+        self.assertEqual(export_without_permission.status_code, 403)
+        root = self.create_role_user('inventory-export-root', AccessRole.Code.SUPERADMIN)
+        set_role_permission(root, admin.access_profile.role.code, 'products', 'export', allowed=True)
+        xlsx = self.client.get('/api/v1/admin/inventory/report/?threshold=4&status=low&search=LOW&export=xlsx')
+        pdf = self.client.get('/api/v1/admin/inventory/report/?threshold=4&status=low&search=LOW&export=pdf')
+
+        self.assertEqual(report.status_code, 200)
+        self.assertEqual(report.json()['summary'], {
+            'product_count': 4, 'total_units': 17, 'out_of_stock_count': 1, 'low_stock_count': 2,
+        })
+        self.assertEqual(report.json()['products']['count'], 4)
+        self.assertEqual([item['id'] for item in low_filter.json()['products']['results']], [low.id])
+        self.assertEqual([item['id'] for item in out_filter.json()['products']['results']], [out.id])
+        self.assertEqual(missing_threshold.status_code, 400)
+        self.assertEqual(invalid_status.status_code, 400)
+        self.assertEqual(xlsx.status_code, 200)
+        self.assertIn('spreadsheetml.sheet', xlsx['Content-Type'])
+        with ZipFile(BytesIO(xlsx.content)) as workbook:
+            worksheet = workbook.read('xl/worksheets/sheet1.xml')
+        self.assertIn(b'REPORT-INVENTORY-LOW', worksheet)
+        self.assertNotIn(b'REPORT-INVENTORY-OUT', worksheet)
+        self.assertEqual(pdf.status_code, 200)
+        self.assertEqual(pdf.content[:8], b'%PDF-1.4')
+        self.assertIn(b'REPORT-INVENTORY-LOW', pdf.content)
+        self.assertNotIn(b'REPORT-INVENTORY-OUT', pdf.content)
+
+        customer = self.create_role_user('inventory-report-unauthorized', AccessRole.Code.CUSTOMER)
+        self.client.force_login(customer)
+        self.assertEqual(self.client.get('/api/v1/admin/inventory/report/?threshold=4&export=xlsx').status_code, 403)
+
+    def test_inventory_report_records_admin_adjustments_and_checkout_movements(self):
+        admin = self.create_role_user('admin-inventory-movements', AccessRole.Code.ADMIN)
+        self.client.force_login(admin)
+        adjusted = self.client.patch(
+            f'/api/v1/admin/products/{self.product.id}/', {'stock': 2}, content_type='application/json',
+        )
+        self.assertEqual(adjusted.status_code, 200)
+
+        checkout_product = Product.objects.create(
+            sku='REPORT-CHECKOUT-MOVEMENT', name='Pieza comprada', category=self.category,
+            price=Decimal('20000'), stock=3, active=True,
+        )
+        self.client.force_login(self.user)
+        added = self.client.post('/api/v1/cart/items/', {
+            'product_id': checkout_product.id, 'quantity': 1,
+        }, content_type='application/json')
+        checkout = self.client.post('/api/v1/checkout/', {
+            'address': 'Calle 10 # 5-20', 'city': 'Riohacha', 'payment_method': 'contact',
+        }, content_type='application/json')
+        self.assertEqual(added.status_code, 201)
+        self.assertEqual(checkout.status_code, 201)
+
+        self.client.force_login(admin)
+        report = self.client.get('/api/v1/admin/inventory/report/?threshold=2')
+        movements = report.json()['movements']
+        self.assertEqual(report.status_code, 200)
+        self.assertEqual(report.json()['movement_count'], 2)
+        self.assertEqual({item['reason'] for item in movements}, {'admin_adjustment', 'checkout'})
+        checkout_movement = next(item for item in movements if item['product_id'] == checkout_product.id)
+        self.assertEqual((checkout_movement['before'], checkout_movement['after'], checkout_movement['delta']), (3, 2, -1))
+
+    def test_inventory_report_requires_authorized_product_access(self):
+        self.client.force_login(self.user)
+        response = self.client.get('/api/v1/admin/inventory/report/?threshold=5')
+        self.assertIn(response.status_code, (401, 403))
+
+    def test_inventory_report_summary_uses_all_records_across_pages(self):
+        admin = self.create_role_user('admin-inventory-report-pagination', AccessRole.Code.ADMIN)
+        Product.objects.bulk_create([
+            Product(
+                sku=f'REPORT-PAGE-{index:02d}', name=f'Producto paginado {index}',
+                category=self.category, price=Decimal('1000'), stock=index,
+            )
+            for index in range(1, 22)
+        ])
+        self.client.force_login(admin)
+
+        first = self.client.get('/api/v1/admin/inventory/report/?threshold=2&page=1')
+        second = self.client.get('/api/v1/admin/inventory/report/?threshold=2&page=2')
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(first.json()['products']['count'], 22)
+        self.assertEqual(len(first.json()['products']['results']), 20)
+        self.assertEqual(len(second.json()['products']['results']), 2)
+        self.assertEqual(first.json()['summary']['product_count'], 22)
+        self.assertEqual(first.json()['summary']['total_units'], 235)
+
         self.assertEqual(normal_updated.status_code, 200)
         normal_order.refresh_from_db()
         self.assertEqual(normal_order.status, Order.Status.PREPARING)
