@@ -361,3 +361,33 @@ El hash del commit documental se informa en la entrega de Fase 0 y queda en el h
 - `git diff --check` y `git diff --cached --check` — **OK**.
 - `302a97bcc3085ee15b8d6b349840f2b570969831` — `fix: require explicit specialized RBAC grants`.
 - No se ejecutó la suite Django completa ni frontend; no hubo push, merge, despliegue ni cambios en `main`.
+
+## 2026-11-18 — Sprint de correcciones funcionales prioritarias
+
+### Revisión y cambios
+
+- Se verificó rama `integration/consolidacion-wayuu`, HEAD `a10faec` y estado inicial ya modificado. Se conservaron los cambios locales previos de E2–E5; no se limpiaron ni se incluyeron en un commit.
+- Administración de productos: se completó la edición de descripción, precio, categoría comercial, talla, color, región, tiempo de elaboración, stock, disponibilidad por encargo, tejedora, publicación, URL externa e imagen cargada. Las asignaciones usan perfiles existentes; el modelo solo tiene talla/color, no un modelo independiente de variantes. Un PATCH sin archivo conserva la imagen cargada. Cambiar expresamente la fuente a URL externa desvincula el campo de archivo sin borrar el archivo físico.
+- Imágenes: Pillow ya está declarado como `Pillow==13.0.0` en `backend/requirements.txt`; no se añadió otra dependencia ni se instaló en este sprint. El entorno virtual local no tiene Pillow. Se conservan validación por contenido, formatos JPEG/PNG/WebP, límite de 5 MB y almacenamiento en `MEDIA_ROOT`/`MEDIA_URL` ya presentes en los cambios previos.
+- Navegación RBAC: se añadió edición de nombre, ruta permitida, descripción, posición, visibilidad, roles y permiso adicional; interfaz y serializer backend evitan duplicar rutas nuevas. Los paneles base interpretan las secciones en el contexto del rol autenticado. El menú sigue separado de grants de datos/acciones y APIs mantienen su autorización. Las exportaciones requieren `products.export`, que no se concede automáticamente.
+- Producto–tejedora: se conserva la FK existente y el vínculo de creación al perfil autenticado. El serializer rechaza campos inesperados de propiedad en lugar de ignorarlos; la administración sigue permitiendo asignar perfiles reales.
+- Perfil de tejedora: se reutilizó el endpoint, serializer, interfaz y migración E4 que ya estaban en el árbol pendiente; no se duplicó el flujo.
+- Inventario: se exponen XLSX/PDF con datos reales y filas que respetan búsqueda/estado, además de los indicadores globales completos. Se añadió la ruta `admin.inventory` visible desde la navegación administrativa. La migración aditiva `store.0023_admin_inventory_navigation` crea la capacidad `products.export` y, si no existe ya, agrega la opción de menú para admin/superadmin. La API exige `products.view` y las descargas `products.export`; no se concede el permiso de exportación.
+- Categorías: al activar/desactivar se vuelve a consultar el catálogo, se reinicia un filtro de categoría que dejó de estar disponible y se cierra el detalle abierto de productos de la categoría desactivada.
+
+### Pruebas y verificaciones
+
+- `npm run build` — **OK**, TypeScript y Vite (1948 módulos transformados).
+- `python -m compileall -q store` — **OK**.
+- `makemigrations --check --dry-run --skip-checks` — **OK**, `No changes detected`.
+- `git diff --check` — **OK**.
+- Verificación aislada de exportadores — **OK**: XLSX abre como ZIP y su XML parsea con datos de producto; PDF tiene cabecera/cierre y contiene la fila de producto de muestra. Esto no equivale a probar el endpoint ni abrir el archivo en aplicaciones de usuario.
+- Pruebas dirigidas Django — **bloqueadas**, 7 casos detectados, pero el chequeo del modelo detiene la ejecución con `store.Product.image (fields.E210): Cannot use ImageField because Pillow is not installed`. Se usó una `DJANGO_SECRET_KEY` temporal de prueba y SQLite; no se instaló Pillow ni se modificó una base local. `manage.py test` no acepta `--skip-checks`.
+- No existe suite frontend configurada. No se verificó manualmente en navegador ni se probaron XLSX/PDF en Excel/lector PDF.
+
+### Migraciones, decisiones y estado
+
+- Migración nueva: `backend/store/migrations/0023_admin_inventory_navigation.py`; registra `products.export` y la entrada administrativa del reporte de inventario sin alterar datos de productos.
+- Las migraciones locales anteriores `0021_product_image.py` y `0022_craftswoman_self_profile_permissions.py` siguen pendientes en el árbol. Pillow debe instalarse en un entorno habilitado antes de que Django pase los checks y puedan ejecutarse las pruebas del sprint.
+- No se inventaron datos de tejedoras ni relaciones; productos históricos sin perfil continúan permitiendo `craftswoman = NULL`. No hay decisiones comerciales nuevas.
+- No se crearon commits: el árbol ya contenía cambios sin validar de tareas anteriores y el bloqueo E210 impidió validar conjuntamente este sprint. No hubo push, merge, despliegue ni cambios en `main`.

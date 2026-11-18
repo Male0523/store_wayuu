@@ -2054,7 +2054,7 @@ class AdminOrderStatusView(APIView):
                 details={'from': previous_status, 'to': order.status},
                 instance=order,
             )
-        return Response(OrderSerializer(order, context={'status_actor': 'admin'}).data)
+        return Response(OrderSerializer(order, context={'request': request, 'status_actor': 'admin'}).data)
 
 
 class CustomerRegistrationView(APIView):

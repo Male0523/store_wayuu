@@ -76,6 +76,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
   const { user, login: loginUser, register: registerUser, logout: logoutUser } = useUserSession()
   const [screen, setScreen] = useState<Screen>(initialScreen)
   const [products, setProducts] = useState<Product[]>([])
+  const [catalogRevision, setCatalogRevision] = useState(0)
   const [categories, setCategories] = useState<Category[]>([])
   const [cart, setCart] = useState<Cart | null>(null)
   const [orders, setOrders] = useState<Order[]>([])
@@ -252,7 +253,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
       setLoading(false)
     })
     return () => { active = false }
-  }, [deferredQuery, categoryId, colorFilter, sort])
+  }, [deferredQuery, categoryId, colorFilter, sort, catalogRevision])
 
   useEffect(() => {
     if (!notice) return
@@ -549,6 +550,11 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
       setCategories((current) => active && !updated.is_internal
         ? [...current.filter((category) => category.id !== categoryId), updated].sort((first, second) => first.name.localeCompare(second.name))
         : current.filter((category) => category.id !== categoryId))
+      setCatalogRevision((revision) => revision + 1)
+      if (!active) {
+        if (selectedProduct?.category.id === categoryId) setSelectedProduct(null)
+        setCategoryId((current) => current === String(categoryId) ? 'all' : current)
+      }
       setNotice(`Categoría ${active ? 'activada' : 'desactivada'}.`)
     } catch (error) { setNotice(errorMessage(error)) } finally { setBusy(false) }
   }
