@@ -46,6 +46,7 @@ urlpatterns = [
     path('auth/me/', api.CurrentUserView.as_view(), name='me'),
     path('profile/', api.CustomerProfileView.as_view(), name='profile'),
     path('cart/', api.CartView.as_view(), name='cart'),
+    path('cart/legacy-items/remove/', api.LegacyCartItemRemovalView.as_view(), name='cart-legacy-item-remove'),
     path('cart/items/', api.CartItemListView.as_view(), name='cart-items'),
     path('cart/items/<int:product_id>/', api.CartItemDetailView.as_view(), name='cart-item-detail'),
     path('favorites/', api.FavoritesView.as_view(), name='favorites'),

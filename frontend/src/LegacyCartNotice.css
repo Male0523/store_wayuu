@@ -1,0 +1,6 @@
+.legacy-cart-notice { margin: 14px 0; padding: 12px 14px; border-left: 3px solid #a65e57; background: #f7ecea; color: #5c1d24; font-size: 11px; }
+.legacy-cart-notice p { margin: 0 0 8px; line-height: 1.5; }
+.legacy-cart-notice ul { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.legacy-cart-notice li { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.legacy-cart-notice button { padding: 5px 9px; border: 1px solid #cda7a2; background: #fffaf8; color: #5c1d24; font: inherit; cursor: pointer; }
+.legacy-cart-notice button:disabled { opacity: .55; cursor: wait; }

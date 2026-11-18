@@ -437,6 +437,90 @@ class StoreAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.client.session['cart'], {'invalid-id': 'broken', '99999999': 1})
         self.assertEqual(response.json()['count'], 0)
+        self.assertEqual(
+            response.json()['legacy_items'],
+            [
+                {'key': 'invalid-id', 'label': 'Elemento anterior 1'},
+                {'key': '99999999', 'label': 'Producto anterior #99999999'},
+            ],
+        )
+
+        removed = self.client.post(
+            '/api/v1/cart/legacy-items/remove/', {'key': 'invalid-id'},
+            content_type='application/json',
+        )
+        refreshed = self.client.get('/api/v1/cart/')
+        self.assertEqual(removed.status_code, 200)
+        self.assertEqual(self.client.session['cart'], {'99999999': 1})
+        self.assertEqual(refreshed.json()['legacy_items'], [
+            {'key': '99999999', 'label': 'Producto anterior #99999999'},
+        ])
+        self.assertFalse(CustomerCartItem.objects.filter(customer=self.customer).exists())
+
+    def test_discarding_legacy_entry_keeps_valid_persistent_cart_item_unchanged(self):
+        CustomerCartItem.objects.create(customer=self.customer, product=self.product, quantity=2)
+        self.client.force_login(self.user)
+        session = self.client.session
+        session['cart'] = {'invalid-id': 'broken'}
+        session.save()
+
+        before = self.client.get('/api/v1/cart/')
+        removed = self.client.post(
+            '/api/v1/cart/legacy-items/remove/', {'key': 'invalid-id'},
+            content_type='application/json',
+        )
+        after = self.client.get('/api/v1/cart/')
+
+        self.assertEqual(before.json()['count'], 2)
+        self.assertEqual(len(before.json()['items']), 1)
+        self.assertEqual(removed.status_code, 200)
+        self.assertEqual(after.json()['count'], 2)
+        self.assertEqual(len(after.json()['items']), 1)
+        self.assertEqual(after.json()['legacy_items'], [])
+        self.assertEqual(
+            CustomerCartItem.objects.get(customer=self.customer, product=self.product).quantity,
+            2,
+        )
+
+    def test_empty_cart_can_clear_last_unrecoverable_legacy_entry(self):
+        self.client.force_login(self.user)
+        session = self.client.session
+        session['cart'] = {'99999999': 1}
+        session.save()
+
+        before = self.client.get('/api/v1/cart/')
+        removed = self.client.post(
+            '/api/v1/cart/legacy-items/remove/', {'key': '99999999'},
+            content_type='application/json',
+        )
+        after = self.client.get('/api/v1/cart/')
+
+        self.assertEqual(before.json()['items'], [])
+        self.assertEqual(before.json()['count'], 0)
+        self.assertEqual(len(before.json()['legacy_items']), 1)
+        self.assertEqual(removed.status_code, 200)
+        self.assertEqual(after.json()['items'], [])
+        self.assertEqual(after.json()['count'], 0)
+        self.assertEqual(after.json()['legacy_items'], [])
+        self.assertNotIn('cart', self.client.session)
+
+    def test_removal_rechecks_and_recovers_a_now_valid_legacy_product(self):
+        self.client.force_login(self.user)
+        session = self.client.session
+        session['cart'] = {str(self.product.id): 2}
+        session.save()
+
+        response = self.client.post(
+            '/api/v1/cart/legacy-items/remove/', {'key': str(self.product.id)},
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['recovered'])
+        self.assertTrue(CustomerCartItem.objects.filter(
+            customer=self.customer, product=self.product, quantity=2,
+        ).exists())
+        self.assertNotIn('cart', self.client.session)
 
     def test_favorites_reject_inactive_and_missing_products(self):
         self.client.force_login(self.user)
@@ -1547,6 +1631,7 @@ class StoreAPITests(TestCase):
             ('patch', '/api/v1/profile/', {'customer'}),
             ('get', '/api/v1/cart/', {'customer'}),
             ('post', '/api/v1/cart/items/', {'customer'}),
+            ('post', '/api/v1/cart/legacy-items/remove/', {'customer'}),
             ('patch', '/api/v1/cart/items/999999/', {'customer'}),
             ('delete', '/api/v1/cart/items/999999/', {'customer'}),
             ('post', '/api/v1/checkout/', {'customer'}),

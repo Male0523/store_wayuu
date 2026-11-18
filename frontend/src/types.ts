@@ -60,10 +60,16 @@ export interface CartItem {
   available?: boolean
 }
 
+export interface UnresolvedLegacyCartItem {
+  key: string
+  label: string
+}
+
 export interface Cart {
   items: CartItem[]
   total: string
   count: number
+  legacy_items?: UnresolvedLegacyCartItem[]
 }
 
 export interface UserProfile {

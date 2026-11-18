@@ -6,6 +6,37 @@ from .models import Customer, CustomerCartItem, Product
 MAX_CART_QUANTITY = 100
 
 
+def unresolved_legacy_cart_items(request):
+    """Expose safe references for legacy session items that could not migrate."""
+    legacy_cart = request.session.get('cart')
+    if not isinstance(legacy_cart, dict):
+        return []
+    items = []
+    for index, raw_key in enumerate(legacy_cart, start=1):
+        key = str(raw_key)
+        label = f'Producto anterior #{key}' if key.isdigit() else f'Elemento anterior {index}'
+        items.append({'key': key, 'label': label})
+    return items
+
+
+def discard_unresolved_legacy_cart_item(request, key):
+    """Remove only the selected leftover session entry, never a persisted row."""
+    legacy_cart = request.session.get('cart')
+    if not isinstance(legacy_cart, dict):
+        return False
+    missing = object()
+    raw_key = next((item_key for item_key in legacy_cart if str(item_key) == key), missing)
+    if raw_key is missing:
+        return False
+    del legacy_cart[raw_key]
+    if legacy_cart:
+        request.session['cart'] = legacy_cart
+    else:
+        request.session.pop('cart', None)
+    request.session.modified = True
+    return True
+
+
 def merge_legacy_session_cart(request, customer):
     """Merge a pre-persistence session cart once into its authenticated owner."""
     legacy_cart = request.session.get('cart')

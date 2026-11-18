@@ -111,6 +111,8 @@ export const api = {
     request(`/cart/items/${productId}/`, { method: 'PATCH', body: json({ quantity }) }),
   removeFromCart: (productId: number) =>
     request<void>(`/cart/items/${productId}/`, { method: 'DELETE' }),
+  removeLegacyCartItem: (key: string) =>
+    request<{ detail: string; recovered: boolean }>('/cart/legacy-items/remove/', { method: 'POST', body: json({ key }) }),
   favorites: () => request<{ product_ids: number[] }>('/favorites/'),
   addFavorite: (productId: number) =>
     request<{ product_id: number; saved: boolean }>('/favorites/', { method: 'POST', body: json({ product_id: productId }) }),

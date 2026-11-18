@@ -3,6 +3,7 @@ import { ArrowLeft, Heart, Home, LogOut, Minus, Plus, Search, ShoppingBag, Shopp
 import { api, ApiError } from './lib/api'
 import { useUserSession } from './context/user-context'
 import type { Cart, Category, CustomDesign, Order, Product, RBACNavigationItem, UserProfile } from './types'
+import LegacyCartNotice from './LegacyCartNotice'
 import './CustomerPanel.css'
 
 type View = 'catalog' | 'favorites' | 'cart' | 'account' | 'detail'
@@ -148,6 +149,17 @@ export default function CustomerPanel() {
     } catch (error) { setNotice(messageOf(error)) } finally { setBusy(false) }
   }
 
+  async function removeLegacyCartItem(key: string) {
+    setBusy(true)
+    try {
+      const result = await api.removeLegacyCartItem(key)
+      await refreshCart()
+      setNotice(result.recovered
+        ? result.detail
+        : 'Elemento antiguo retirado. Tus productos guardados siguen en el carrito.')
+    } catch (error) { setNotice(messageOf(error)) } finally { setBusy(false) }
+  }
+
   async function openAccount() {
     setBusy(true)
     try {
@@ -253,7 +265,7 @@ export default function CustomerPanel() {
 
       {view === 'detail' && selected && <section className="customer-detail"><button className="customer-back" onClick={() => setView(previousView)}><ArrowLeft size={16}/>Volver</button><div className="customer-detail-card"><div className="customer-detail-image"><img src={selected.image_url || ''} alt={selected.name}/></div><div className="customer-detail-copy"><span className="customer-kicker">{selected.category?.name || 'Artesanía Wayúu'}</span><h2>{selected.name}</h2><strong>{money(selected.price)}</strong><p>{selected.description || 'Pieza artesanal elaborada en La Guajira.'}</p><dl><div><dt>Origen</dt><dd>{selected.region || 'La Guajira'}</dd></div><div><dt>Color</dt><dd>{selected.color || 'Consultar disponibilidad'}</dd></div><div><dt>Talla</dt><dd>{selected.size || 'Consultar'}</dd></div><div><dt>Disponibles</dt><dd>{selected.stock}</dd></div></dl><button className="customer-primary" disabled={busy || selected.stock < 1} onClick={() => void addItem(selected)}><ShoppingBag size={17}/>Agregar al carrito</button><button className="customer-text-button" disabled={busy} onClick={() => void toggleFavorite(selected.id)}><Heart size={17} fill={favorites.includes(selected.id) ? 'currentColor' : 'none'}/>{favorites.includes(selected.id) ? 'Quitar de favoritos' : 'Guardar en favoritos'}</button></div></div></section>}
 
-      {view === 'cart' && <section className="customer-account-section"><div className="customer-section-heading"><div><span className="customer-kicker">RESUMEN DE COMPRA</span><h2>Tu carrito</h2></div><span>{cart.count} unidades</span></div>{!cart.items.length ? <p className="customer-empty">Tu carrito está vacío. Explora el catálogo para encontrar una pieza.</p> : <><div className="customer-cart-list">{cart.items.map((item) => <article className="customer-cart-row" key={item.product.id}><img src={item.product.image_url || ''} alt={item.product.name}/><div><h3>{item.product.name}</h3><p>{money(item.product.price)}</p>{item.available === false && <small role="status">No disponible en la cantidad actual. Ajusta o retira esta pieza.</small>}{item.product.is_custom_design ? <small>Cantidad incluida en el diseño</small> : <div className="customer-quantity"><button onClick={() => void changeQuantity(item.product.id, item.quantity - 1)} disabled={busy}><Minus size={14}/></button><span>{item.quantity}</span><button onClick={() => void changeQuantity(item.product.id, item.quantity + 1)} disabled={busy}><Plus size={14}/></button></div>}</div><strong>{money(item.subtotal)}</strong><button className="customer-remove" onClick={() => void changeQuantity(item.product.id, 0)} aria-label="Retirar producto" disabled={busy}><X size={17}/></button></article>)}</div><div className="customer-cart-total"><span>Total de productos</span><strong>{money(cart.total)}</strong></div><button className="customer-primary" disabled={busy || cart.items.some((item) => item.available === false)} onClick={() => setCheckoutOpen(true)}>Continuar con la compra</button></>}</section>}
+      {view === 'cart' && <section className="customer-account-section"><div className="customer-section-heading"><div><span className="customer-kicker">RESUMEN DE COMPRA</span><h2>Tu carrito</h2></div><span>{cart.count} unidades</span></div><LegacyCartNotice items={cart.legacy_items} busy={busy} onRemove={(key) => void removeLegacyCartItem(key)}/>{!cart.items.length ? <p className="customer-empty">Tu carrito está vacío. Explora el catálogo para encontrar una pieza.</p> : <><div className="customer-cart-list">{cart.items.map((item) => <article className="customer-cart-row" key={item.product.id}><img src={item.product.image_url || ''} alt={item.product.name}/><div><h3>{item.product.name}</h3><p>{money(item.product.price)}</p>{item.available === false && <small role="status">No disponible en la cantidad actual. Ajusta o retira esta pieza.</small>}{item.product.is_custom_design ? <small>Cantidad incluida en el diseño</small> : <div className="customer-quantity"><button onClick={() => void changeQuantity(item.product.id, item.quantity - 1)} disabled={busy}><Minus size={14}/></button><span>{item.quantity}</span><button onClick={() => void changeQuantity(item.product.id, item.quantity + 1)} disabled={busy}><Plus size={14}/></button></div>}</div><strong>{money(item.subtotal)}</strong><button className="customer-remove" onClick={() => void changeQuantity(item.product.id, 0)} aria-label="Retirar producto" disabled={busy}><X size={17}/></button></article>)}</div><div className="customer-cart-total"><span>Total de productos</span><strong>{money(cart.total)}</strong></div><button className="customer-primary" disabled={busy || cart.items.some((item) => item.available === false)} onClick={() => setCheckoutOpen(true)}>Continuar con la compra</button></>}</section>}
 
       {view === 'account' && <section className="customer-account-section">
         <div className="customer-section-heading"><div><span className="customer-kicker">TU ACTIVIDAD</span><h2>Mi cuenta</h2></div><span>{accountNavigation.length} secciones habilitadas</span></div>

@@ -42,7 +42,12 @@ from .models import (
     UserRole,
 )
 from .permissions import AdminOrSuperadmin, CraftswomanOnly, CustomerOnly, HasAssignedRole, OrderAccess, SuperadminOnly, category_visibility_action, order_admin_action, product_publish_action
-from .cart_services import MAX_CART_QUANTITY, merge_legacy_session_cart
+from .cart_services import (
+    MAX_CART_QUANTITY,
+    discard_unresolved_legacy_cart_item,
+    merge_legacy_session_cart,
+    unresolved_legacy_cart_items,
+)
 from .order_workflow import (
     ADMIN_ACTIVE_ORDER_STATUSES,
     allowed_order_transitions,
@@ -386,6 +391,10 @@ class CartItemInputSerializer(serializers.Serializer):
 
 class CartQuantitySerializer(serializers.Serializer):
     quantity = serializers.IntegerField(min_value=1, max_value=100)
+
+
+class LegacyCartItemRemovalSerializer(serializers.Serializer):
+    key = serializers.CharField(allow_blank=True, trim_whitespace=False)
 
 
 class FavoriteInputSerializer(serializers.Serializer):
@@ -1746,7 +1755,41 @@ class CartView(APIView):
     def get(self, request):
         customer = _customer_for(request.user)
         items, total = _cart_items(request, customer)
-        return Response({'items': items, 'total': str(total), 'count': sum(item['quantity'] for item in items)})
+        return Response({
+            'items': items,
+            'total': str(total),
+            'count': sum(item['quantity'] for item in items),
+            'legacy_items': unresolved_legacy_cart_items(request),
+        })
+
+
+class LegacyCartItemRemovalView(APIView):
+    permission_classes = (CustomerOnly,)
+    rbac_resource = 'cart'
+
+    def post(self, request):
+        customer = _customer_for(request.user)
+        serializer = LegacyCartItemRemovalSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        key = serializer.validated_data['key']
+        session_cart = request.session.get('cart')
+        was_pending = isinstance(session_cart, dict) and any(
+            str(item_key) == key for item_key in session_cart
+        )
+        # Recheck migration first: if an entry became recoverable, preserve it
+        # as a persistent cart row instead of discarding it from the session.
+        _sync_legacy_session_cart(request, customer)
+        if not discard_unresolved_legacy_cart_item(request, key):
+            if was_pending and key not in {item['key'] for item in unresolved_legacy_cart_items(request)}:
+                return Response({
+                    'detail': 'La pieza anterior se recuperó y quedó guardada en tu carrito.',
+                    'recovered': True,
+                })
+            return Response(
+                {'detail': 'Ese elemento ya no está pendiente de recuperación.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response({'detail': 'Elemento antiguo retirado.', 'recovered': False})
 
 
 class CartItemListView(APIView):
