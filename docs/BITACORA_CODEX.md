@@ -339,5 +339,5 @@ El hash del commit documental se informa en la entrega de Fase 0 y queda en el h
 ### Commits y estado
 
 - `1782b6648eadd4c7530c1e9659c188caa8aae94c` — `test: verify custom order integration flow`.
-- Commit documental: pendiente de cierre.
+- `27c718c3f38c0b28e4a7db1b4c9012e3976f91e0` — `docs: record cross-module integration verification` (cierre documental de Sprint 7).
 - No hubo push, merge, despliegue, cambios en `main` ni cambios de esquema.
