@@ -1631,8 +1631,8 @@ class AdminOrderStatusView(APIView):
                 )
             items = list(order.items.select_related('product__custom_design'))
             designs = [item.product.custom_design for item in items if item.product.custom_design_id]
-            if designs and not has_rbac_permission(request.user, 'designs', 'change'):
-                raise PermissionDenied('Este pedido incluye un diseño personalizado y necesitas permiso para gestionarlo.')
+            if designs and not has_rbac_permission(request.user, 'orders', 'manage_design_status'):
+                raise PermissionDenied('Este pedido incluye un diseño personalizado y necesitas permiso para cambiar su estado desde el pedido.')
             order.status = next_status
             order.save(update_fields=('status', 'updated_at'))
             for design in designs:

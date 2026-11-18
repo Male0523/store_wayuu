@@ -4,7 +4,7 @@ from django.contrib.admin import SimpleListFilter
 from django.contrib.admin.actions import delete_selected
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 
 from .models import (
     AccessRole,
@@ -30,6 +30,7 @@ from .rbac import (
     revoke_admin_delegations,
     role_for_user,
 )
+from .order_workflow import has_custom_design_items
 
 
 @admin.action(description='Eliminar seleccionados')
@@ -592,6 +593,36 @@ class OrderAdmin(ScopedRBACModelAdmin):
     search_fields = ('customer__name', 'customer__email')
     readonly_fields = ('created_at', 'updated_at', 'order_total')
     inlines = [OrderItemInline]
+
+    def save_model(self, request, obj, form, change):
+        previous_status = None
+        if change:
+            previous = Order.objects.get(pk=obj.pk)
+            previous_status = previous.status
+            if previous_status != obj.status and has_custom_design_items(previous):
+                if not has_rbac_permission(request.user, 'orders', 'manage_design_status'):
+                    raise PermissionDenied(
+                        'Este pedido incluye un diseño personalizado y requiere permiso para cambiar su estado desde el pedido.'
+                    )
+        obj._status_before_admin_save = previous_status
+        super().save_model(request, obj, form, change)
+
+    def save_related(self, request, form, formsets, change):
+        super().save_related(request, form, formsets, change)
+        previous_status = getattr(form.instance, '_status_before_admin_save', None)
+        if previous_status is None or previous_status == form.instance.status:
+            return
+        order = form.instance
+        if not has_custom_design_items(order):
+            return
+        if not has_rbac_permission(request.user, 'orders', 'manage_design_status'):
+            raise PermissionDenied(
+                'Este pedido incluye un diseño personalizado y requiere permiso para cambiar su estado desde el pedido.'
+            )
+        design_ids = order.items.filter(
+            product__custom_design__isnull=False,
+        ).values_list('product__custom_design_id', flat=True)
+        CustomDesign.objects.filter(pk__in=design_ids).update(status=order.status)
 
     @admin.display(description='Total (COP)')
     def order_total(self, obj):

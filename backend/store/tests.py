@@ -1304,7 +1304,7 @@ class StoreAPITests(TestCase):
             action='change_order_status', object_id=str(order.id),
         ).exists())
 
-    def test_admin_order_status_updates_linked_design_and_requires_design_permission(self):
+    def test_admin_order_status_uses_specific_permission_without_full_design_edit(self):
         admin = self.create_role_user('admin-custom-order-status', AccessRole.Code.ADMIN)
         design = CustomDesign.objects.create(
             customer=self.customer, pattern='rombos', base_color='#111111',
@@ -1319,7 +1319,23 @@ class StoreAPITests(TestCase):
         OrderItem.objects.create(order=order, product=product, quantity=1, unit_price=product.price)
         role = AccessRole.objects.get(code=AccessRole.Code.ADMIN)
         RolePermission.objects.filter(role=role, permission=permission_for('designs', 'change')).delete()
+        capability = RBACCapability.objects.get(
+            resource__code='orders', action__code='manage_design_status',
+        )
+        RBACGrant.objects.filter(role=role, capability=capability).delete()
         self.client.force_login(admin)
+
+        normal_order = Order.objects.create(customer=self.customer, shipping_address='Riohacha')
+        OrderItem.objects.create(
+            order=normal_order, product=self.product, quantity=1, unit_price=self.product.price,
+        )
+        normal_updated = self.client.patch(
+            f'/api/v1/admin/orders/{normal_order.id}/status/',
+            {'status': Order.Status.PREPARING}, content_type='application/json',
+        )
+        self.assertEqual(normal_updated.status_code, 200)
+        normal_order.refresh_from_db()
+        self.assertEqual(normal_order.status, Order.Status.PREPARING)
 
         denied = self.client.patch(
             f'/api/v1/admin/orders/{order.id}/status/',
@@ -1330,9 +1346,10 @@ class StoreAPITests(TestCase):
         self.assertEqual(denied.status_code, 403)
         self.assertEqual(order.status, Order.Status.PENDING)
         self.assertEqual(design.status, Order.Status.PENDING)
+        self.assertFalse(has_permission(admin, 'designs', 'change'))
 
-        RolePermission.objects.get_or_create(
-            role=role, permission=permission_for('designs', 'change'),
+        RBACGrant.objects.create(
+            role=role, capability=capability, effect=RBACGrant.Effect.ALLOW,
         )
         updated = self.client.patch(
             f'/api/v1/admin/orders/{order.id}/status/',
@@ -1341,6 +1358,52 @@ class StoreAPITests(TestCase):
         order.refresh_from_db()
         design.refresh_from_db()
         self.assertEqual(updated.status_code, 200)
+        self.assertEqual(order.status, Order.Status.PREPARING)
+        self.assertEqual(design.status, Order.Status.PREPARING)
+
+    def test_django_order_admin_requires_specific_permission_and_syncs_design_status(self):
+        admin = self.create_role_user('django-admin-custom-order-status', AccessRole.Code.ADMIN)
+        design = CustomDesign.objects.create(
+            customer=self.customer, pattern='olas', base_color='#111111',
+            accent_color_one='#222222', accent_color_two='#333333', size='M',
+            estimated_price=Decimal('120000'), status=Order.Status.PENDING,
+        )
+        product = Product.objects.create(
+            sku='DJANGO-ADMIN-CUSTOM-STATUS', name='Diseño Django', category=self.category,
+            custom_design=design, price=design.estimated_price, stock=1, active=False,
+        )
+        order = Order.objects.create(customer=self.customer, shipping_address='Maicao')
+        OrderItem.objects.create(order=order, product=product, quantity=1, unit_price=product.price)
+        model_admin = OrderAdmin(Order, django_admin.site)
+        request = RequestFactory().post(f'/admin/store/order/{order.id}/change/')
+        request.user = admin
+        role = AccessRole.objects.get(code=AccessRole.Code.ADMIN)
+        capability = RBACCapability.objects.get(
+            resource__code='orders', action__code='manage_design_status',
+        )
+        RBACGrant.objects.filter(role=role, capability=capability).delete()
+        order.status = Order.Status.PREPARING
+
+        with self.assertRaises(DjangoPermissionDenied):
+            model_admin.save_model(request, order, form=None, change=True)
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.PENDING)
+
+        RBACGrant.objects.create(
+            role=role, capability=capability, effect=RBACGrant.Effect.ALLOW,
+        )
+        order.status = Order.Status.PREPARING
+
+        model_admin.save_model(request, order, form=None, change=True)
+        form = type('SavedOrderForm', (), {
+            'instance': order,
+            'save_m2m': lambda _self: None,
+        })()
+        model_admin.save_related(request, form, formsets=[], change=True)
+
+        self.assertFalse(has_permission(admin, 'designs', 'change'))
+        order.refresh_from_db()
+        design.refresh_from_db()
         self.assertEqual(order.status, Order.Status.PREPARING)
         self.assertEqual(design.status, Order.Status.PREPARING)
 

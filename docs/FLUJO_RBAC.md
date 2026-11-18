@@ -32,6 +32,8 @@ El catálogo inicial contiene `view`, `create`, `edit`, `delete`, `approve`, `re
 
 Durante la transición, las capacidades `approve`, `publish`, `unpublish`, `assign` y `cancel` pueden heredar el permiso Django `edit` de un rol histórico cuando no exista un grant dinámico específico. Un grant dinámico explícito sobre la capacidad especializada reemplaza esa compatibilidad. Este puente puede mantener permisos más amplios que la matriz nueva y requiere aprobación o un plan de retiro antes de eliminarlo.
 
+Los cambios administrativos de estado de pedidos que contienen diseños requieren además `orders.manage_design_status`. Esta capacidad solo autoriza sincronizar el estado del diseño ligado al pedido; no concede `designs.change` ni acceso para editar el resto de sus campos. El rol base de administración recibe esta concesión explícita.
+
 Los nombres `add`/`change` se aceptan como alias de `create`/`edit` para conservar clientes y grants existentes.
 
 ## Alcance de registros

@@ -36,7 +36,7 @@ PERMISSION_RESOURCES = {
     'navigation': ('store', 'navigationitem'),
     'audit': ('store', 'auditevent'),
 }
-PERMISSION_ACTIONS = ('view', 'create', 'edit', 'delete', 'approve', 'reject', 'publish', 'unpublish', 'assign', 'cancel', 'export', 'manage')
+PERMISSION_ACTIONS = ('view', 'create', 'edit', 'delete', 'approve', 'reject', 'publish', 'unpublish', 'assign', 'cancel', 'export', 'manage', 'manage_design_status')
 
 
 def _permission_codename(resource, action, model):
