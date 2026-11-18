@@ -2368,6 +2368,7 @@ class StoreAPITests(TestCase):
         expected_pairs = {(resource, action) for resource in PERMISSION_RESOURCES if resource != 'favorites' for action in ('view', 'create', 'edit', 'delete')}
         expected_pairs.update({('favorites', action) for action in ('view', 'create', 'delete')})
         expected_pairs.update({('orders', action) for action in ('approve', 'assign', 'cancel')})
+        expected_pairs.add(('orders', 'manage_design_status'))
         expected_pairs.update({(resource, action) for resource in ('products', 'categories') for action in ('publish', 'unpublish')})
         expected_pairs.update({('role_assignments', 'assign'), ('roles', 'manage'), ('permissions', 'manage')})
         expected_superadmin = set(expected_pairs)
@@ -2383,7 +2384,7 @@ class StoreAPITests(TestCase):
             AccessRole.Code.ADMIN: {
                 ('products', 'view'), ('products', 'create'), ('products', 'add'), ('products', 'edit'), ('products', 'change'), ('products', 'publish'), ('products', 'unpublish'),
                 ('categories', 'view'), ('categories', 'create'), ('categories', 'add'), ('categories', 'edit'), ('categories', 'change'), ('categories', 'publish'), ('categories', 'unpublish'),
-                ('orders', 'view'), ('orders', 'edit'), ('orders', 'change'), ('orders', 'approve'), ('orders', 'assign'), ('orders', 'cancel'),
+                ('orders', 'view'), ('orders', 'edit'), ('orders', 'change'), ('orders', 'approve'), ('orders', 'cancel'), ('orders', 'manage_design_status'),
             },
             AccessRole.Code.CUSTOMER: {
                 ('customers', 'view'), ('customers', 'edit'), ('customers', 'change'),
@@ -2393,8 +2394,8 @@ class StoreAPITests(TestCase):
                 ('favorites', 'view'), ('favorites', 'create'), ('favorites', 'add'), ('favorites', 'delete'),
             },
             AccessRole.Code.CRAFTSWOMAN: {
-                ('products', 'view'), ('products', 'create'), ('products', 'add'), ('products', 'edit'), ('products', 'change'), ('products', 'publish'), ('products', 'unpublish'),
-                ('orders', 'view'), ('orders', 'edit'), ('orders', 'change'), ('orders', 'approve'), ('orders', 'assign'), ('orders', 'cancel'),
+                ('products', 'view'), ('products', 'create'), ('products', 'add'), ('products', 'edit'), ('products', 'change'),
+                ('orders', 'view'), ('orders', 'edit'), ('orders', 'change'), ('orders', 'assign'),
                 ('designs', 'view'), ('designs', 'edit'), ('designs', 'change'),
             },
         }
@@ -2411,6 +2412,125 @@ class StoreAPITests(TestCase):
                     for entry in effective_permission_keys(user)
                 }
                 self.assertEqual(effective, expected_by_role[role_code])
+
+    def test_specialized_actions_require_explicit_grants_and_preserve_denies(self):
+        admin = self.create_role_user('rbac-explicit-admin', AccessRole.Code.ADMIN)
+        craftswoman = self.create_role_user('rbac-explicit-craft', AccessRole.Code.CRAFTSWOMAN)
+        superadmin = self.create_role_user('rbac-explicit-root', AccessRole.Code.SUPERADMIN)
+
+        expected = {
+            admin: {
+                ('products', 'publish'): True,
+                ('products', 'unpublish'): True,
+                ('categories', 'publish'): True,
+                ('categories', 'unpublish'): True,
+                ('orders', 'approve'): True,
+                ('orders', 'cancel'): True,
+                ('orders', 'assign'): False,
+            },
+            craftswoman: {
+                ('orders', 'assign'): True,
+                ('orders', 'approve'): False,
+                ('orders', 'cancel'): False,
+                ('products', 'publish'): False,
+                ('products', 'unpublish'): False,
+            },
+        }
+        for user, permissions in expected.items():
+            keys = set(effective_permission_keys(user))
+            for (resource, action), allowed in permissions.items():
+                with self.subTest(role=role_for_user(user).code, resource=resource, action=action):
+                    self.assertEqual(has_permission(user, resource, action), allowed)
+                    self.assertEqual(f'{resource}.{action}' in keys, allowed)
+
+        custom = AccessRole.objects.create(code='legacy_editor', name='Editor heredado')
+        target = self.create_role_user('rbac-explicit-custom', custom.code)
+        RolePermission.objects.get_or_create(
+            role=custom,
+            permission=permission_for('orders', 'edit'),
+        )
+        self.assertTrue(has_permission(target, 'orders', 'edit'))
+        for action in ('approve', 'assign', 'cancel'):
+            self.assertFalse(has_permission(target, 'orders', action))
+            self.assertNotIn(f'orders.{action}', effective_permission_keys(target))
+
+        set_role_permission(superadmin, custom.code, 'orders', 'assign', allowed=True)
+        self.assertTrue(has_permission(target, 'orders', 'assign'))
+        self.assertIn('orders.assign', effective_permission_keys(target))
+        set_user_permission(superadmin, target, 'orders', 'assign', UserPermissionGrant.Effect.DENY)
+        self.assertFalse(has_permission(target, 'orders', 'assign'))
+        self.assertNotIn('orders.assign', effective_permission_keys(target))
+
+        # Individual and Django edit grants never imply specialized actions.
+        UserPermissionGrant.objects.create(
+            user=self.user,
+            permission=permission_for('products', 'edit'),
+            effect=UserPermissionGrant.Effect.ALLOW,
+        )
+        self.user.user_permissions.add(permission_for('categories', 'edit'))
+        for resource, action in (
+            ('products', 'publish'), ('products', 'unpublish'),
+            ('categories', 'publish'), ('categories', 'unpublish'),
+        ):
+            self.assertFalse(has_permission(self.user, resource, action))
+            self.assertNotIn(f'{resource}.{action}', effective_permission_keys(self.user))
+
+    def test_approved_specialized_actions_protect_sensitive_api_operations(self):
+        admin = self.create_role_user('rbac-sensitive-actions-admin', AccessRole.Code.ADMIN)
+        inactive_product = Product.objects.create(
+            sku='RBAC-SENSITIVE-PUBLISH', name='Producto para publicación',
+            category=self.category, price=Decimal('30000'), stock=1, active=False,
+        )
+        pending_order = Order.objects.create(customer=self.customer, shipping_address='Maicao')
+        assignment_order = Order.objects.create(customer=self.customer, shipping_address='Riohacha')
+        completed_order = Order.objects.create(
+            customer=self.customer, shipping_address='Uribia', status=Order.Status.COMPLETED,
+        )
+        self.client.force_login(admin)
+
+        published_product = self.client.patch(
+            f'/api/v1/admin/products/{inactive_product.id}/', {'active': True},
+            content_type='application/json',
+        )
+        unpublished_product = self.client.patch(
+            f'/api/v1/admin/products/{inactive_product.id}/', {'active': False},
+            content_type='application/json',
+        )
+        unpublished_category = self.client.patch(
+            f'/api/v1/admin/categories/{self.category.id}/', {'active': False},
+            content_type='application/json',
+        )
+        published_category = self.client.patch(
+            f'/api/v1/admin/categories/{self.category.id}/', {'active': True},
+            content_type='application/json',
+        )
+        approved_order = self.client.patch(
+            f'/api/v1/admin/orders/{completed_order.id}/status/', {'status': Order.Status.PAID},
+            content_type='application/json',
+        )
+        cancelled_order = self.client.patch(
+            f'/api/v1/admin/orders/{pending_order.id}/status/', {'status': Order.Status.CANCELLED},
+            content_type='application/json',
+        )
+        self.assertEqual(
+            [published_product.status_code, unpublished_product.status_code,
+             unpublished_category.status_code, published_category.status_code,
+             approved_order.status_code, cancelled_order.status_code],
+            [200, 200, 200, 200, 200, 200],
+        )
+
+        craft_user = self.create_role_user('rbac-sensitive-actions-craft', AccessRole.Code.CRAFTSWOMAN)
+        craftswoman = Craftswoman.objects.create(user=craft_user, name='Tejedora de asignación', active=True)
+        self.client.force_login(admin)
+        admin_assignment = self.client.post(f'/api/v1/craftswoman/orders/{assignment_order.id}/accept/')
+        self.assertEqual(admin_assignment.status_code, 403)
+        self.assertFalse(has_permission(admin, 'orders', 'assign'))
+
+        self.client.force_login(craft_user)
+        accepted_order = self.client.post(f'/api/v1/craftswoman/orders/{assignment_order.id}/accept/')
+        self.assertEqual(accepted_order.status_code, 200, accepted_order.content)
+        assignment_order.refresh_from_db()
+        self.assertEqual(assignment_order.craftswoman_id, craftswoman.id)
 
     def test_role_matrix_loads_and_saves_for_all_editable_roles(self):
         superadmin = self.create_role_user('rbac-matrix-api-superadmin', AccessRole.Code.SUPERADMIN)

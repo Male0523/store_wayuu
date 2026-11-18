@@ -280,14 +280,6 @@ def effective_permission_keys(user):
                 add_effective_key(resource, action)
         elif django_key in django_permissions:
             add_effective_key(resource, action)
-    for resource in PERMISSION_RESOURCES:
-        edit_permission = permission_for(resource, 'edit')
-        if not edit_permission or not _legacy_permission_allowed(user, role, edit_permission):
-            continue
-        for specialized in ('approve', 'publish', 'unpublish', 'assign', 'cancel'):
-            capability = capability_for(resource, specialized)
-            if capability and capability.pk not in configured_capabilities:
-                effective.append(f'{resource}.{specialized}')
     return effective
 
 
@@ -322,11 +314,6 @@ def has_permission(user, resource, action, obj=None):
     if role_grant:
         return role_grant.effect == RBACGrant.Effect.ALLOW
     if permission is None:
-        # Preserve the deployed behavior of legacy edit grants while allowing a
-        # newly configured specialized capability to override this fallback.
-        if action in ('approve', 'publish', 'unpublish', 'assign', 'cancel'):
-            legacy_edit = permission_for(resource, 'edit')
-            return _legacy_permission_allowed(user, role, legacy_edit) if legacy_edit else False
         return False
     if RolePermission.objects.filter(role=role, permission=permission).exists():
         return True
@@ -334,21 +321,6 @@ def has_permission(user, resource, action, obj=None):
         return PermissionDelegation.objects.filter(admin=user, permission=permission).exists() and _has_django_permission(
             user, permission,
         )
-    return _has_django_permission(user, permission)
-
-
-def _legacy_permission_allowed(user, role, permission):
-    individual = UserPermissionGrant.objects.filter(user=user, permission=permission).first()
-    if individual and individual.effect == UserPermissionGrant.Effect.DENY:
-        return False
-    if individual and individual.effect == UserPermissionGrant.Effect.ALLOW:
-        return role.code != AccessRole.Code.ADMIN or PermissionDelegation.objects.filter(
-            admin=user, permission=permission,
-        ).exists()
-    if RolePermission.objects.filter(role=role, permission=permission).exists():
-        return True
-    if role.code == AccessRole.Code.ADMIN:
-        return PermissionDelegation.objects.filter(admin=user, permission=permission).exists() and _has_django_permission(user, permission)
     return _has_django_permission(user, permission)
 
 

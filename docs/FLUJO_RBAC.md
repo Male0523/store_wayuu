@@ -30,7 +30,7 @@ Esta precedencia está implementada y probada, pero es una **política de seguri
 
 El catálogo inicial contiene `view`, `create`, `edit`, `delete`, `approve`, `reject`, `publish`, `unpublish`, `assign`, `cancel`, `export` y `manage`. Se crean capacidades especializadas solo donde hay una operación del proyecto identificada. Las acciones sin endpoint u operación asociada no conceden por sí mismas acceso.
 
-Durante la transición, las capacidades `approve`, `publish`, `unpublish`, `assign` y `cancel` pueden heredar el permiso Django `edit` de un rol histórico cuando no exista un grant dinámico específico. Un grant dinámico explícito sobre la capacidad especializada reemplaza esa compatibilidad. Este puente puede mantener permisos más amplios que la matriz nueva y requiere aprobación o un plan de retiro antes de eliminarlo.
+Las acciones especializadas requieren concesiones explícitas; `edit` no implica `approve`, `publish`, `unpublish`, `assign` ni `cancel`, tanto para grants de rol/usuario como para permisos Django heredados. La migración `0020_explicit_specialized_role_grants` conserva en roles base únicamente los permisos de operación aprobados: admin recibe publicación/retiro de publicación de productos y categorías, aprobación/cancelación de pedidos; tejedora recibe asignación de pedidos. Admin no recibe `orders.assign`; tejedora no recibe publicación, aprobación ni cancelación. Los roles personalizados no reciben acciones especializadas por tener `edit`. Los grants especializados individuales y personalizados explícitos continúan evaluándose, y `DENY` prevalece.
 
 Los cambios administrativos de estado de pedidos que contienen diseños requieren además `orders.manage_design_status`. Esta capacidad solo autoriza sincronizar el estado del diseño ligado al pedido; no concede `designs.change` ni acceso para editar el resto de sus campos. El rol base de administración recibe esta concesión explícita.
 
@@ -48,7 +48,6 @@ El catálogo configurable de ámbitos permite únicamente `none` y `all`; no se 
 - Aprobar al superadministrador como raíz sin posibilidad de auto-denegación ordinaria y la protección del último superadministrador activo.
 - Aprobar qué roles personalizados pueden recibir ámbito `all` por recurso privado y si `all` debe requerir aprobación adicional.
 - Definir y probar ámbitos `own`/`assigned` para roles personalizados antes de ofrecerlos; por ahora solo se admiten `none` y `all`.
-- Decidir cómo retirar el fallback histórico que permite acciones especializadas a partir de `edit`.
 - Asociar `reject` y `export` a operaciones reales antes de concederlas; se mantienen en el catálogo general, pero no hay capacidades iniciales para endpoints que no existen.
 
 No se modificaron las reglas comerciales de pedidos ni los permisos de diseño de mantas.
