@@ -45,6 +45,7 @@ urlpatterns = [
     path('auth/logout/', api.LogoutView.as_view(), name='logout'),
     path('auth/me/', api.CurrentUserView.as_view(), name='me'),
     path('profile/', api.CustomerProfileView.as_view(), name='profile'),
+    path('craftswoman/profile/', api.CraftswomanProfileView.as_view(), name='craftswoman-profile'),
     path('cart/', api.CartView.as_view(), name='cart'),
     path('cart/legacy-items/remove/', api.LegacyCartItemRemovalView.as_view(), name='cart-legacy-item-remove'),
     path('cart/items/', api.CartItemListView.as_view(), name='cart-items'),

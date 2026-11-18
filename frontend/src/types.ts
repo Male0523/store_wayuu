@@ -86,6 +86,17 @@ export interface UserProfile {
   active?: boolean
 }
 
+export interface CraftswomanProfile {
+  id: number
+  name: string
+  community: string
+  region: string
+  phone: string
+  biography: string
+}
+
+export type CraftswomanProfileInput = Pick<CraftswomanProfile, 'name' | 'community' | 'region' | 'phone' | 'biography'>
+
 export interface CustomDesign {
   id: number
   pattern: string

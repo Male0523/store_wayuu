@@ -456,6 +456,39 @@ class ProfileSerializer(serializers.ModelSerializer):
         read_only_fields = ('email',)
 
 
+class CraftswomanProfileSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(max_length=150, trim_whitespace=True)
+    community = serializers.CharField(max_length=150, required=False, allow_blank=True, trim_whitespace=True)
+    region = serializers.CharField(max_length=100, required=False, allow_blank=True, trim_whitespace=True)
+    phone = serializers.CharField(max_length=30, required=False, allow_blank=True, trim_whitespace=True)
+    biography = serializers.CharField(max_length=3000, required=False, allow_blank=True, trim_whitespace=True)
+
+    class Meta:
+        model = Craftswoman
+        fields = ('id', 'name', 'community', 'region', 'phone', 'biography')
+        read_only_fields = ('id',)
+
+    def to_internal_value(self, data):
+        editable = {'name', 'community', 'region', 'phone', 'biography'}
+        protected = set(data.keys()) - editable
+        if protected:
+            raise serializers.ValidationError({
+                field: 'Este campo no se puede modificar desde el perfil propio.'
+                for field in sorted(protected)
+            })
+        return super().to_internal_value(data)
+
+    def validate_name(self, value):
+        if not value.strip():
+            raise serializers.ValidationError('El nombre no puede estar vacío.')
+        return value.strip()
+
+    def validate(self, attrs):
+        if not attrs:
+            raise serializers.ValidationError('Indica al menos un dato del perfil para actualizar.')
+        return attrs
+
+
 class CraftswomanProductWriteSerializer(serializers.ModelSerializer):
     category = serializers.PrimaryKeyRelatedField(queryset=Category.objects.filter(active=True, is_internal=False))
     description = serializers.CharField(required=True, allow_blank=False, min_length=10, max_length=2000)
@@ -471,6 +504,17 @@ class CraftswomanProductWriteSerializer(serializers.ModelSerializer):
             'sku', 'name', 'category', 'description', 'region', 'color', 'size',
             'production_time', 'price', 'stock', 'image_url', 'made_to_order',
         )
+
+    def to_internal_value(self, data):
+        # Never silently ignore an attempted ownership or publication change.
+        allowed = set(self.fields)
+        unexpected = set(data.keys()) - allowed
+        if unexpected:
+            raise serializers.ValidationError({
+                field: 'Este campo no se puede enviar desde el flujo de productos de tejedora.'
+                for field in sorted(unexpected)
+            })
+        return super().to_internal_value(data)
 
 
 class CartItemInputSerializer(serializers.Serializer):
@@ -1865,6 +1909,35 @@ class CustomerProfileView(APIView):
             request.user.first_name = customer.name
             request.user.save(update_fields=('first_name',))
         return Response(serializer.data)
+
+
+class CraftswomanProfileView(APIView):
+    permission_classes = (CraftswomanOnly,)
+    rbac_resource = 'craftswomen'
+    rbac_actions = {'GET': 'view', 'PATCH': 'edit'}
+
+    def get(self, request):
+        profile = get_object_or_404(Craftswoman, user=request.user, active=True)
+        return Response(CraftswomanProfileSerializer(profile).data)
+
+    def patch(self, request):
+        profile = get_object_or_404(Craftswoman, user=request.user, active=True)
+        serializer = CraftswomanProfileSerializer(profile, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            profile = serializer.save()
+            if 'name' in serializer.validated_data:
+                request.user.first_name = profile.name
+                request.user.save(update_fields=('first_name',))
+            record_audit(
+                request.user,
+                'update_own_craftswoman_profile',
+                'craftswomen',
+                affected_user=request.user,
+                details={'changed_fields': sorted(serializer.validated_data)},
+                instance=profile,
+            )
+        return Response(CraftswomanProfileSerializer(profile).data)
 
 
 class CartView(APIView):

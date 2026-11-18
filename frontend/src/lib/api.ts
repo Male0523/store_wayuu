@@ -148,12 +148,21 @@ function adminProductBody(values: AdminProductInput): BodyInit {
   updateCraftswomanProduct: (id: number, values: Record<string, string | number | boolean>) =>
     request<Product>(`/craftswoman/products/${id}/`, { method: 'PATCH', body: json(values) }),
   craftswomanDashboard: () => request<CraftswomanDashboard>('/craftswoman/dashboard/'),
+  craftswomanProfile: () => request<CraftswomanProfile>('/craftswoman/profile/'),
+  updateCraftswomanProfile: (values: CraftswomanProfileInput) =>
+    request<CraftswomanProfile>('/craftswoman/profile/', { method: 'PATCH', body: json(values) }),
   acceptOrder: (id: number) => request<Order>(`/craftswoman/orders/${id}/accept/`, { method: 'POST' }),
   updateOrderStatus: (id: number, value: string) =>
     request<Order>(`/craftswoman/orders/${id}/status/`, { method: 'PATCH', body: json({ status: value }) }),
   updateDesignStatus: (id: number, value: string) =>
     request<Pick<CustomDesign, 'id' | 'status'>>(`/craftswoman/designs/${id}/status/`, { method: 'PATCH', body: json({ status: value }) }),
   adminProducts: () => request<AdminProduct[]>('/admin/products/'),
+  adminInventoryReport: (params: URLSearchParams) => request<InventoryReport>(`/admin/inventory/report/?${params}`),
+  adminInventoryExportUrl: (params: URLSearchParams, format: 'pdf' | 'xlsx') => {
+    const exportParams = new URLSearchParams(params)
+    exportParams.set('export', format)
+    return `${API_BASE}/admin/inventory/report/?${exportParams}`
+  },
   adminProductOptions: () => request<{ categories: AdminCategory[]; craftswomen: AdminCraftswomanOption[] }>('/admin/products/options/'),
   superadminUsers: (params: URLSearchParams) => request<SuperadminUser[]>(`/admin/users/?${params}`),
   createSuperadminUser: (values: SuperadminUserInput) =>

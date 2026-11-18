@@ -87,6 +87,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
   const [profileDraft, setProfileDraft] = useState<UserProfile | null>(null)
   const [accountSection, setAccountSection] = useState<AccountSection>('orders')
   const [dashboard, setDashboard] = useState<CraftswomanDashboard | null>(null)
+  const [craftswomanProfile, setCraftswomanProfile] = useState<CraftswomanProfile | null>(null)
   const [craftswomanProducts, setCraftswomanProducts] = useState<Product[]>([])
   const [roleNavigation, setRoleNavigation] = useState<RBACNavigationItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -586,6 +587,16 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
     } catch (error) { setNotice(errorMessage(error)) } finally { setBusy(false) }
   }
 
+  async function saveCraftswomanProfile(values: CraftswomanProfileInput) {
+    setBusy(true)
+    try {
+      const updated = await api.updateCraftswomanProfile(values)
+      setCraftswomanProfile(updated)
+      window.dispatchEvent(new Event('wayuu:session-change'))
+      setNotice('Tu perfil quedó actualizado.')
+    } catch (error) { setNotice(errorMessage(error)) } finally { setBusy(false) }
+  }
+
   return <div className="app-shell">
     {screen !== 'craftswoman' && screen !== 'admin' && <header className="site-header">
       <button className="wordmark" onClick={() => setScreen('shop')} aria-label="Ir al inicio"><span className="wordmark-symbol" aria-hidden="true"><span /><span /><span /></span><span>wayuuwaa<small>TEJIDO CON ORIGEN</small></span></button>
@@ -609,7 +620,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
 
     {screen === 'orders' && user && <CustomerAccountView user={user} navigationItems={roleNavigation} orders={orders} designs={designs} profile={profileDraft} section={accountSection} busy={busy} onSection={setAccountSection} onProfileSubmit={saveProfile} onSignOut={signOut} onShop={() => setScreen('shop')} />}
 
-    {screen === 'craftswoman' && user && <CraftswomanAccountView user={user} navigationItems={roleNavigation} dashboard={dashboard} products={craftswomanProducts} categories={categories} busy={busy} onCreateProduct={createCraftswomanProduct} onSignOut={signOut} onAcceptOrder={acceptOrder} onOrderStatus={updateOrder} onDesignStatus={updateDesignStatus} />}
+    {screen === 'craftswoman' && user && <CraftswomanAccountView user={user} navigationItems={roleNavigation} dashboard={dashboard} profile={craftswomanProfile} products={craftswomanProducts} categories={categories} busy={busy} onCreateProduct={createCraftswomanProduct} onSaveProfile={saveCraftswomanProfile} onSignOut={signOut} onAcceptOrder={acceptOrder} onOrderStatus={updateOrder} onDesignStatus={updateDesignStatus} />}
 
     {screen === 'admin' && user && <AdminAccountView user={user} isSuperadmin={user.role === 'superadmin'} navigationItems={roleNavigation} orderSummary={adminOrderSummary} products={adminProducts} categories={adminCategories} productCraftswomen={adminCraftswomen} busy={busy} onSignOut={signOut} onSaveProduct={saveAdminProduct} onCreateProduct={createAdminProduct} onCreateCategory={createAdminCategory} onSaveCategory={saveAdminCategory} onCategoryActive={updateAdminCategory} onOrderStatus={saveAdminOrderStatus} onNotice={setNotice} />}
 
@@ -685,12 +696,13 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, products, ca
     color?: string; size?: string; production_time?: string; price: string | number;
     stock: number; image_url?: string; made_to_order?: boolean;
   }) => void
+  onSaveProfile: (values: CraftswomanProfileInput) => Promise<void>
   onSignOut: () => void
   onAcceptOrder: (orderId: number) => Promise<void>
   onOrderStatus: (orderId: number, status: string) => void
   onDesignStatus: (designId: number, status: string) => void
 }) {
-  const [activeSection, setActiveSection] = useState<'dashboard' | 'products' | 'inventory' | 'orders'>('dashboard')
+  const [activeSection, setActiveSection] = useState<'dashboard' | 'products' | 'inventory' | 'orders' | 'profile'>('dashboard')
   const [showProductForm, setShowProductForm] = useState(false)
   const [acceptingOrderId, setAcceptingOrderId] = useState<number | null>(null)
   const canChangeOrders = Boolean(user && hasEffectivePermission(user, 'orders.edit'))
@@ -732,6 +744,14 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, products, ca
     event.currentTarget.reset()
     setShowProductForm(false)
   }
+  function submitProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const values = Object.fromEntries(new FormData(event.currentTarget).entries()) as Record<string, string>
+    void onSaveProfile({
+      name: values.name.trim(), community: values.community.trim(), region: values.region.trim(),
+      phone: values.phone.trim(), biography: values.biography.trim(),
+    })
+  }
   return <div className="craftswoman-workspace">
     <aside className="craftswoman-sidebar">
       <div className="craftswoman-brand"><span className="craftswoman-brand-mark"><Layers size={22} /></span><span><strong>Wayúu</strong><small>PORTAL DE TEJEDORA</small></span></div>
@@ -760,6 +780,7 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, products, ca
               <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>TU TALLER</small><h2>Mis productos recientes</h2></div>{canOpenSection('products') && <button onClick={() => setActiveSection('products')}>Ver todos <ArrowRight size={14} /></button>}</div>{products.slice(0,4).map((product) => <div className="craftswoman-product-mini" key={product.id}><span><strong>{product.name}</strong><small>{product.category.name} · Stock {product.stock}</small></span><em className={product.active ? 'published' : ''}>{product.active ? 'Publicado' : 'En revisión'}</em></div>)}{!products.length && <p className="muted-copy">Registra tu primera pieza para comenzar.</p>}</section>
             </div>
           </div>}
+        {canOpenSection('profile') && activeSection === 'profile' && profile && <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>INFORMACIÓN PERSONAL</small><h1>Mi perfil</h1><p>Actualiza los datos de tu taller que se muestran en Wayúu Store.</p></div></div><form className="profile-form" onSubmit={submitProfile}><label className="form-label">Nombre público *<input name="name" required maxLength={150} defaultValue={profile.name} autoComplete="name" disabled={!canEditProfile} /></label><label className="form-label">Teléfono<input name="phone" type="tel" maxLength={30} defaultValue={profile.phone} autoComplete="tel" disabled={!canEditProfile} /></label><label className="form-label">Comunidad<input name="community" maxLength={150} defaultValue={profile.community} autoComplete="address-level3" disabled={!canEditProfile} /></label><label className="form-label">Región<input name="region" maxLength={100} defaultValue={profile.region} disabled={!canEditProfile} /></label><label className="form-label craftswoman-description-field">Biografía<textarea name="biography" rows={4} maxLength={3000} defaultValue={profile.biography} disabled={!canEditProfile} /></label>{canEditProfile && <button className="button button-dark" disabled={busy}>{busy ? <LoaderCircle className="spin" size={16} /> : <Check size={15} />} Guardar perfil</button>}</form></section>}
         {canOpenSection('products') && activeSection === 'products' && <section className="craftswoman-panel craftswoman-products-section"><div className="craftswoman-panel-heading"><div><small>CATÁLOGO DE TU TALLER</small><h1>Mis tejidos y productos</h1><p>Registra tus piezas. Antes de aparecer en la tienda, cada producto debe ser aprobado por administración.</p></div>{canAddProducts && <button className="craftswoman-primary-action" onClick={() => setShowProductForm((value) => !value)}><Plus size={16} /> {showProductForm ? 'Cerrar formulario' : 'Registrar tejido'}</button>}</div>
             {showProductForm && canAddProducts && <form className="craftswoman-product-form" onSubmit={submitProduct}>
               <label className="form-label">Referencia<input name="sku" required maxLength={50} placeholder="Ej. WAY-TEJ-001" /></label><label className="form-label">Nombre de la pieza<input name="name" required maxLength={180} /></label><label className="form-label">Categoría<select name="category" required defaultValue=""><option value="" disabled>Selecciona una categoría</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label><label className="form-label">Precio sugerido (COP)<input name="price" type="number" min="0" step="1" required /></label><label className="form-label">Stock inicial<input name="stock" type="number" min="0" step="1" defaultValue="1" required /></label><label className="form-label">Talla *<input name="size" maxLength={30} defaultValue="M" required /></label><label className="form-label">Región de elaboración *<input name="region" maxLength={100} placeholder="La Guajira" required /></label><label className="form-label">Colores principales *<input name="color" maxLength={150} placeholder="Ej. vino tinto, beige y negro" required /></label><label className="form-label">Tiempo de elaboración *<input name="production_time" maxLength={100} placeholder="Ej. 10 a 15 días" required /></label><label className="form-label">Imagen del tejido (URL) *<input name="image_url" type="url" placeholder="https://..." required /></label><label className="form-label craftswoman-description-field">Descripción del tejido *<textarea name="description" rows={2} minLength={10} maxLength={2000} placeholder="Describe el diseño, la técnica y los detalles de la pieza..." required /></label><label className="admin-check"><input name="made_to_order" type="checkbox" /> Elaborar por pedido</label><button className="button button-dark craftswoman-submit-review" disabled={busy || !categories.length}>{busy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} Enviar a revisión</button>

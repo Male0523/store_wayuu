@@ -226,6 +226,149 @@ class StoreAPITests(TestCase):
             self.assertEqual(value['craftswoman']['community'], 'Comunidad real')
             self.assertEqual(value['craftswoman']['region'], 'La Guajira')
 
+    def test_craftswoman_can_read_and_update_only_personal_profile_fields(self):
+        craft_user = self.create_role_user('self-profile-craftswoman', AccessRole.Code.CRAFTSWOMAN)
+        profile = Craftswoman.objects.create(
+            user=craft_user, name='Nombre inicial', community='Comunidad inicial',
+            region='Región inicial', phone='3000000000', biography='Biografía inicial', active=True,
+        )
+        foreign_user = self.create_role_user('other-profile-craftswoman', AccessRole.Code.CRAFTSWOMAN)
+        foreign_profile = Craftswoman.objects.create(
+            user=foreign_user, name='Otra tejedora', community='Otra comunidad', active=True,
+        )
+        self.client.force_login(craft_user)
+
+        fetched = self.client.get('/api/v1/craftswoman/profile/')
+        updated = self.client.patch('/api/v1/craftswoman/profile/', {
+            'name': 'Nombre actualizado', 'community': 'Comunidad Wayúu', 'region': 'La Guajira',
+            'phone': '3012345678', 'biography': 'Perfil público actualizado.',
+        }, content_type='application/json')
+
+        self.assertEqual(fetched.status_code, 200)
+        self.assertEqual(fetched.json()['id'], profile.id)
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()['name'], 'Nombre actualizado')
+        profile.refresh_from_db()
+        foreign_profile.refresh_from_db()
+        craft_user.refresh_from_db()
+        self.assertEqual(profile.phone, '3012345678')
+        self.assertEqual(craft_user.first_name, 'Nombre actualizado')
+        self.assertEqual(foreign_profile.name, 'Otra tejedora')
+
+    def test_craftswoman_profile_rejects_other_records_and_protected_fields(self):
+        craft_user = self.create_role_user('self-profile-protection', AccessRole.Code.CRAFTSWOMAN)
+        profile = Craftswoman.objects.create(user=craft_user, name='Perfil protegido', active=True)
+        other_user = self.create_role_user('other-profile-protected', AccessRole.Code.CRAFTSWOMAN)
+        other_profile = Craftswoman.objects.create(user=other_user, name='Perfil ajeno', active=True)
+        self.client.force_login(craft_user)
+
+        response = self.client.patch('/api/v1/craftswoman/profile/', {
+            'id': other_profile.id, 'user': other_user.id, 'active': False,
+            'name': 'Intento no autorizado', 'role': 'admin', 'email': 'attacker@example.com',
+        }, content_type='application/json')
+
+        self.assertEqual(response.status_code, 400)
+        profile.refresh_from_db()
+        other_profile.refresh_from_db()
+        self.assertEqual(profile.name, 'Perfil protegido')
+        self.assertTrue(profile.active)
+        self.assertEqual(other_profile.name, 'Perfil ajeno')
+
+    def test_craftswoman_profile_validates_personal_fields_and_rejects_other_roles(self):
+        craft_user = self.create_role_user('self-profile-validation', AccessRole.Code.CRAFTSWOMAN)
+        Craftswoman.objects.create(user=craft_user, name='Perfil válido', active=True)
+        self.client.force_login(craft_user)
+        blank_name = self.client.patch(
+            '/api/v1/craftswoman/profile/', {'name': '   '}, content_type='application/json',
+        )
+        long_phone = self.client.patch(
+            '/api/v1/craftswoman/profile/', {'phone': '1' * 31}, content_type='application/json',
+        )
+        self.assertEqual(blank_name.status_code, 400)
+        self.assertEqual(long_phone.status_code, 400)
+
+        self.client.force_login(self.user)
+        customer_response = self.client.patch(
+            '/api/v1/craftswoman/profile/', {'name': 'No autorizado'}, content_type='application/json',
+        )
+        self.assertIn(customer_response.status_code, (401, 403))
+
+    def test_admin_product_image_upload_persists_and_appears_in_catalog_and_detail(self):
+        admin = self.create_role_user('admin-product-image-upload', AccessRole.Code.ADMIN)
+        self.client.force_login(admin)
+        with TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            upload = SimpleUploadedFile('manta.notpng', self.make_test_image(), content_type='image/png')
+            response = self.client.post('/api/v1/admin/products/', {
+                'sku': 'API-IMAGE-VALID', 'name': 'Manta con imagen', 'category': self.category.id,
+                'price': '45000', 'stock': '2', 'image': upload,
+            })
+            self.assertEqual(response.status_code, 201, response.content)
+            product = Product.objects.get(sku='API-IMAGE-VALID')
+            self.assertTrue(product.image.name.startswith('products/'))
+            self.assertTrue(Path(media_root, product.image.name).is_file())
+            self.assertEqual(Path(product.image.name).suffix, '.png')
+            expected_url = f'http://testserver/media/{product.image.name}'
+            self.assertEqual(response.json()['image_url'], expected_url)
+            original_path = Path(media_root, product.image.name)
+            replacement = SimpleUploadedFile('replacement.jpeg', self.make_test_image('JPEG'), content_type='image/jpeg')
+            updated = self.client.patch(
+                f'/api/v1/admin/products/{product.id}/', {'image': replacement},
+            )
+            self.assertEqual(updated.status_code, 200, updated.content)
+            product.refresh_from_db()
+            self.assertEqual(Path(product.image.name).suffix, '.jpg')
+            self.assertTrue(original_path.is_file())
+            listed = self.client.get('/api/v1/products/').json()['results']
+            detail = self.client.get(f'/api/v1/products/{product.id}/').json()
+            expected_url = f'http://testserver/media/{product.image.name}'
+            self.assertEqual(updated.json()['image_url'], expected_url)
+            self.assertEqual(next(item for item in listed if item['id'] == product.id)['image_url'], expected_url)
+            self.assertEqual(detail['image_url'], expected_url)
+
+    def test_admin_product_image_rejects_corrupt_and_unsupported_images(self):
+        admin = self.create_role_user('admin-invalid-product-image', AccessRole.Code.ADMIN)
+        self.client.force_login(admin)
+        base = {'sku': 'API-IMAGE-INVALID', 'name': 'Imagen inválida', 'category': self.category.id, 'price': '1', 'stock': '1'}
+        corrupt = self.client.post('/api/v1/admin/products/', {
+            **base, 'image': SimpleUploadedFile('fake.png', b'not an image', content_type='image/png'),
+        })
+        self.assertEqual(corrupt.status_code, 400)
+        unsupported = self.client.post('/api/v1/admin/products/', {
+            **base, 'sku': 'API-IMAGE-GIF',
+            'image': SimpleUploadedFile('animated.gif', self.make_test_image('GIF'), content_type='image/gif'),
+        })
+        self.assertEqual(unsupported.status_code, 400)
+        self.assertFalse(Product.objects.filter(sku__in=('API-IMAGE-INVALID', 'API-IMAGE-GIF')).exists())
+
+    def test_admin_product_image_rejects_oversized_file(self):
+        admin = self.create_role_user('admin-large-product-image', AccessRole.Code.ADMIN)
+        self.client.force_login(admin)
+        response = self.client.post('/api/v1/admin/products/', {
+            'sku': 'API-IMAGE-LARGE', 'name': 'Imagen grande', 'category': self.category.id,
+            'price': '1', 'stock': '1',
+            'image': SimpleUploadedFile('large.png', b'x' * (5 * 1024 * 1024 + 1), content_type='image/png'),
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Product.objects.filter(sku='API-IMAGE-LARGE').exists())
+
+    def test_existing_and_empty_product_images_remain_compatible(self):
+        legacy = 'https://example.test/legacy-manta.jpg'
+        self.product.image_url = legacy
+        self.product.save(update_fields=('image_url',))
+        admin = self.create_role_user('admin-legacy-product-images', AccessRole.Code.ADMIN)
+        self.client.force_login(admin)
+        response = self.client.get('/api/v1/admin/products/')
+        by_id = {item['id']: item for item in response.json()}
+        self.assertEqual(by_id[self.product.id]['image_url'], legacy)
+        self.assertFalse(self.product.image)
+        no_image = Product.objects.create(
+            sku='API-IMAGE-EMPTY', name='Producto sin imagen', category=self.category,
+            price=Decimal('1000'), stock=1,
+        )
+        refreshed = {item['id']: item for item in self.client.get('/api/v1/admin/products/').json()}
+        self.assertEqual(refreshed[no_image.id]['image_url'], '')
+        self.assertFalse(no_image.image)
+
     def test_admin_category_crud_and_rbac_visibility(self):
         admin = self.create_role_user('admin-catalog-categories', AccessRole.Code.ADMIN)
         self.client.force_login(admin)
@@ -1179,6 +1322,36 @@ class StoreAPITests(TestCase):
             self.client.get('/api/v1/craftswoman/products/').json()[0]['id'],
             product.id,
         )
+
+    def test_craftswoman_product_api_rejects_manipulated_ownership_on_create_and_edit(self):
+        own_user = self.create_role_user('craft-owner-tamper', AccessRole.Code.CRAFTSWOMAN)
+        own_profile = Craftswoman.objects.create(user=own_user, name='Tejedora propia', active=True)
+        other_user = self.create_role_user('craft-other-tamper', AccessRole.Code.CRAFTSWOMAN)
+        other_profile = Craftswoman.objects.create(user=other_user, name='Tejedora ajena', active=True)
+        own_product = Product.objects.create(
+            sku='CRAFT-OWNERSHIP-TAMPER', name='Pieza propia', category=self.category,
+            craftswoman=own_profile, price=Decimal('30000'), stock=2,
+        )
+        self.client.force_login(own_user)
+
+        created = self.client.post('/api/v1/craftswoman/products/', {
+            'sku': 'CRAFT-OWNERSHIP-INJECT', 'name': 'Pieza manipulada', 'category': self.category.id,
+            'description': 'Descripción suficiente para validar.', 'region': 'La Guajira',
+            'color': 'Rojo', 'size': 'M', 'production_time': '20 días',
+            'image_url': 'https://example.test/manta.jpg', 'price': '30000', 'stock': 1,
+            'craftswoman': other_profile.id,
+        }, content_type='application/json')
+        edited = self.client.patch(
+            f'/api/v1/craftswoman/products/{own_product.id}/',
+            {'craftswoman': other_profile.id}, content_type='application/json',
+        )
+
+        self.assertEqual(created.status_code, 400)
+        self.assertIn('craftswoman', created.json())
+        self.assertEqual(edited.status_code, 400)
+        own_product.refresh_from_db()
+        self.assertEqual(own_product.craftswoman_id, own_profile.id)
+        self.assertFalse(Product.objects.filter(sku='CRAFT-OWNERSHIP-INJECT').exists())
 
     def test_craftswoman_products_and_edits_are_limited_to_her_real_profile(self):
         own_user = self.create_role_user('craft-inventory-owner', AccessRole.Code.CRAFTSWOMAN)
