@@ -6,7 +6,10 @@ import type {
   Cart,
   Category,
   CustomDesign,
+  InventoryReport,
   CraftswomanDashboard,
+  CraftswomanProfile,
+  CraftswomanProfileInput,
   AuditEvent,
   AdminOrderSummary,
   Order,
@@ -88,9 +91,6 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 const json = (value: unknown): string => JSON.stringify(value)
 
-export const api = {
-  health: () => request<{ status: string }>('/'),
-  categories: () => request<Category[]>('/categories/'),
 function adminProductBody(values: AdminProductInput): BodyInit {
   if (!values.image) return json(values)
   const body = new FormData()
@@ -102,6 +102,9 @@ function adminProductBody(values: AdminProductInput): BodyInit {
   return body
 }
 
+export const api = {
+  health: () => request<{ status: string }>('/'),
+  categories: () => request<Category[]>('/categories/'),
   products: (params: URLSearchParams) => request<Page<Product>>(`/products/?${params}`),
   product: (id: number) => request<Product>(`/products/${id}/`),
   me: () => request<{ user: SessionUser }>('/auth/me/'),

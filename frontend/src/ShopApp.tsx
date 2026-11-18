@@ -199,14 +199,16 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
         const configuredNavigation = await api.roleNavigation()
         if (cancelled) return
         setRoleNavigation(configuredNavigation)
-        const routes = configuredNavigation.map((item) => item.route_name)
-        const [data, ownProducts] = await Promise.all([
-          routes.includes('craftswoman.dashboard') || routes.includes('craftswoman.orders') ? api.craftswomanDashboard() : Promise.resolve(null),
-          routes.some((route) => ['craftswoman.dashboard', 'craftswoman.products', 'craftswoman.inventory'].includes(route)) ? api.craftswomanProducts() : Promise.resolve([]),
+        const sections = configuredNavigation.map((item) => item.route_name.split('.')[1])
+        const [data, ownProducts, ownProfile] = await Promise.all([
+          sections.some((section) => ['dashboard', 'orders'].includes(section)) ? api.craftswomanDashboard() : Promise.resolve(null),
+          sections.some((section) => ['dashboard', 'products', 'inventory'].includes(section)) ? api.craftswomanProducts() : Promise.resolve([]),
+          hasEffectivePermission(user, 'craftswomen.view') ? api.craftswomanProfile() : Promise.resolve(null),
         ])
         if (cancelled) return
         setDashboard(data)
         setCraftswomanProducts(ownProducts)
+        setCraftswomanProfile(ownProfile)
         setScreen('craftswoman')
       } catch (error) {
         if (!cancelled) setNotice(errorMessage(error))
@@ -392,30 +394,33 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
     try {
       const configuredNavigation = await api.roleNavigation()
       setRoleNavigation(configuredNavigation)
-      if (user.role === 'admin' || user.role === 'superadmin' || configuredNavigation.some((item) => item.route_name.startsWith('admin.'))) {
+      if (user.role === 'admin' || user.role === 'superadmin') {
         await loadAdminData()
         setScreen('admin')
       } else if (user.role === 'craftswoman') {
-        const visibleRoutes = configuredNavigation.map((item) => item.route_name)
-        const [craftswomanDashboard, ownProducts] = await Promise.all([
-          visibleRoutes.includes('craftswoman.dashboard') || visibleRoutes.includes('craftswoman.orders') ? api.craftswomanDashboard() : Promise.resolve(null),
-          visibleRoutes.some((route) => ['craftswoman.dashboard', 'craftswoman.products', 'craftswoman.inventory'].includes(route)) ? api.craftswomanProducts() : Promise.resolve([]),
+        setCraftswomanProfile(null)
+        const visibleSections = configuredNavigation.map((item) => item.route_name.split('.')[1])
+        const [craftswomanDashboard, ownProducts, ownProfile] = await Promise.all([
+          visibleSections.some((section) => ['dashboard', 'orders'].includes(section)) ? api.craftswomanDashboard() : Promise.resolve(null),
+          visibleSections.some((section) => ['dashboard', 'products', 'inventory'].includes(section)) ? api.craftswomanProducts() : Promise.resolve([]),
+          hasEffectivePermission(user, 'craftswomen.view') ? api.craftswomanProfile() : Promise.resolve(null),
         ])
         setDashboard(craftswomanDashboard)
         setCraftswomanProducts(ownProducts)
+        setCraftswomanProfile(ownProfile)
         setScreen('craftswoman')
       } else if (user.role === 'customer') {
-        const visibleRoutes = configuredNavigation.map((item) => item.route_name)
+        const visibleSections = configuredNavigation.map((item) => item.route_name.split('.')[1])
         const requests = await Promise.all([
-          visibleRoutes.includes('customer.orders') ? api.orders() : Promise.resolve({ results: [] as Order[] }),
-          visibleRoutes.includes('customer.designs') ? api.designs() : Promise.resolve([] as CustomDesign[]),
-          visibleRoutes.includes('customer.profile') ? api.profile() : Promise.resolve(null),
+          visibleSections.includes('orders') ? api.orders() : Promise.resolve({ results: [] as Order[] }),
+          visibleSections.includes('designs') ? api.designs() : Promise.resolve([] as CustomDesign[]),
+          visibleSections.includes('profile') ? api.profile() : Promise.resolve(null),
         ])
         const [orderPage, customerDesigns, customerProfile] = requests
         setOrders(orderPage.results)
         setDesigns(customerDesigns)
         setProfileDraft(customerProfile)
-        const firstSection = configuredNavigation.find((item) => item.route_name.startsWith('customer.'))?.route_name.split('.')[1] as AccountSection | undefined
+        const firstSection = configuredNavigation.find((item) => ['orders', 'designs', 'profile'].includes(item.route_name.split('.')[1]))?.route_name.split('.')[1] as AccountSection | undefined
         setAccountSection(firstSection ?? 'orders')
         setScreen('orders')
       } else {
@@ -676,18 +681,19 @@ function CustomerAccountView({ user, navigationItems, orders, designs, profile, 
   const canChangeProfile = hasEffectivePermission(user, 'customers.change')
   return <main className="inner-page account-page">
     <div className="account-heading"><div><p className="eyebrow"><span className="eyebrow-line" /> MI CUENTA</p><h1>Hola, <em>{accountName}.</em></h1><p>Pedidos, diseños y datos de entrega en un mismo lugar.</p></div><button className="text-button" onClick={onSignOut}>Cerrar sesión <ArrowUpRight size={15} /></button></div>
-    <div className="account-tabs"><div className="account-tab-buttons">{navigationItems.filter((item) => item.route_name.startsWith('customer.')).map((item) => { const target = item.route_name.split('.')[1] as AccountSection; return <button key={item.id} className={section === target ? 'active' : ''} onClick={() => onSection(target)}>{item.label}{target === 'orders' && <span>{orders.length}</span>}{target === 'designs' && <span>{designs.length}</span>}</button> })}</div><span>{user.email}</span></div>
-    {section === 'orders' && navigationItems.some((item) => item.route_name === 'customer.orders') && (orders.length ? <div className="orders-list">{orders.map((order) => <OrderCard key={order.id} order={order} />)}</div> : <div className="empty-account"><ShoppingBag size={30} strokeWidth={1.4} /><h2>Aún no tienes pedidos.</h2><p>Cuando encuentres la pieza indicada, la guardaremos aquí.</p><button className="button button-dark" onClick={onShop}>Explorar la colección <ArrowRight size={15} /></button></div>)}
-    {section === 'designs' && navigationItems.some((item) => item.route_name === 'customer.designs') && (designs.length ? <div className="design-list">{designs.map((design) => <DesignSummary key={design.id} design={design} />)}</div> : <div className="empty-account"><Heart size={29} strokeWidth={1.4} /><h2>Aún no has creado diseños.</h2><p>Combina patrón y colores para imaginar una manta propia.</p><button className="button button-dark" onClick={onShop}>Diseñar una manta <ArrowRight size={15} /></button></div>)}
-    {navigationItems.filter((item) => item.route_name.startsWith('customer.')).length === 0 && <div className="empty-account"><LockKeyhole size={28} /><h2>No tienes secciones habilitadas</h2><p>El superadministrador debe asignarte las opciones y permisos correspondientes.</p></div>}
-    {section === 'profile' && navigationItems.some((item) => item.route_name === 'customer.profile') && <form className="profile-form" onSubmit={onProfileSubmit}><div className="profile-form-heading"><div><p className="eyebrow">DATOS DE ENTREGA</p><h2>Tu información</h2></div><p>La usaremos para preparar tus pedidos.</p></div><label className="form-label">Nombre completo<input name="name" required maxLength={150} defaultValue={resolveUserDisplayName(user, profile)} autoComplete="name" disabled={!canChangeProfile} /></label><label className="form-label">Correo electrónico<input value={user.email} readOnly /></label><label className="form-label">Teléfono<input name="phone" maxLength={30} defaultValue={profile?.phone ?? ''} autoComplete="tel" disabled={!canChangeProfile} /></label><div className="profile-address-row"><label className="form-label">Dirección<input name="address" defaultValue={profile?.address ?? ''} autoComplete="street-address" disabled={!canChangeProfile} /></label><label className="form-label">Ciudad<input name="city" maxLength={100} defaultValue={profile?.city ?? ''} autoComplete="address-level2" disabled={!canChangeProfile} /></label></div>{canChangeProfile && <button className="button button-dark" disabled={busy}>{busy ? <LoaderCircle className="spin" size={16} /> : <Check size={15} />} Guardar datos</button>}</form>}
+    <div className="account-tabs"><div className="account-tab-buttons">{navigationItems.filter((item) => ['orders', 'designs', 'profile'].includes(item.route_name.split('.')[1])).map((item) => { const target = item.route_name.split('.')[1] as AccountSection; return <button key={item.id} className={section === target ? 'active' : ''} onClick={() => onSection(target)}>{item.label}{target === 'orders' && <span>{orders.length}</span>}{target === 'designs' && <span>{designs.length}</span>}</button> })}</div><span>{user.email}</span></div>
+    {section === 'orders' && navigationItems.some((item) => item.route_name.split('.')[1] === 'orders') && (orders.length ? <div className="orders-list">{orders.map((order) => <OrderCard key={order.id} order={order} />)}</div> : <div className="empty-account"><ShoppingBag size={30} strokeWidth={1.4} /><h2>Aún no tienes pedidos.</h2><p>Cuando encuentres la pieza indicada, la guardaremos aquí.</p><button className="button button-dark" onClick={onShop}>Explorar la colección <ArrowRight size={15} /></button></div>)}
+    {section === 'designs' && navigationItems.some((item) => item.route_name.split('.')[1] === 'designs') && (designs.length ? <div className="design-list">{designs.map((design) => <DesignSummary key={design.id} design={design} />)}</div> : <div className="empty-account"><Heart size={29} strokeWidth={1.4} /><h2>Aún no has creado diseños.</h2><p>Combina patrón y colores para imaginar una manta propia.</p><button className="button button-dark" onClick={onShop}>Diseñar una manta <ArrowRight size={15} /></button></div>)}
+    {navigationItems.filter((item) => ['orders', 'designs', 'profile'].includes(item.route_name.split('.')[1])).length === 0 && <div className="empty-account"><LockKeyhole size={28} /><h2>No tienes secciones habilitadas</h2><p>El superadministrador debe asignarte las opciones y permisos correspondientes.</p></div>}
+    {section === 'profile' && navigationItems.some((item) => item.route_name.split('.')[1] === 'profile') && <form className="profile-form" onSubmit={onProfileSubmit}><div className="profile-form-heading"><div><p className="eyebrow">DATOS DE ENTREGA</p><h2>Tu información</h2></div><p>La usaremos para preparar tus pedidos.</p></div><label className="form-label">Nombre completo<input name="name" required maxLength={150} defaultValue={resolveUserDisplayName(user, profile)} autoComplete="name" disabled={!canChangeProfile} /></label><label className="form-label">Correo electrónico<input value={user.email} readOnly /></label><label className="form-label">Teléfono<input name="phone" maxLength={30} defaultValue={profile?.phone ?? ''} autoComplete="tel" disabled={!canChangeProfile} /></label><div className="profile-address-row"><label className="form-label">Dirección<input name="address" defaultValue={profile?.address ?? ''} autoComplete="street-address" disabled={!canChangeProfile} /></label><label className="form-label">Ciudad<input name="city" maxLength={100} defaultValue={profile?.city ?? ''} autoComplete="address-level2" disabled={!canChangeProfile} /></label></div>{canChangeProfile && <button className="button button-dark" disabled={busy}>{busy ? <LoaderCircle className="spin" size={16} /> : <Check size={15} />} Guardar datos</button>}</form>}
   </main>
 }
 
-function CraftswomanAccountView({ user, navigationItems, dashboard, products, categories, busy, onCreateProduct, onSignOut, onAcceptOrder, onOrderStatus, onDesignStatus }: {
+function CraftswomanAccountView({ user, navigationItems, dashboard, profile, products, categories, busy, onCreateProduct, onSaveProfile, onSignOut, onAcceptOrder, onOrderStatus, onDesignStatus }: {
   user: SessionUser | null
   navigationItems: RBACNavigationItem[]
   dashboard: CraftswomanDashboard | null
+  profile: CraftswomanProfile | null
   products: Product[]
   categories: Category[]
   busy: boolean
@@ -713,12 +719,16 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, products, ca
   const pending = products.length - published
   const stock = products.reduce((total, product) => total + product.stock, 0)
   const initials = accountName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()
-  const navItems = navigationItems.filter((item) => item.route_name.startsWith('craftswoman.')).map((item) => {
-    const id = item.route_name.split('.')[1] as 'dashboard' | 'products' | 'inventory' | 'orders'
-    const icon = id === 'dashboard' ? <LayoutDashboard size={17} /> : id === 'products' ? <ShoppingBag size={17} /> : id === 'inventory' ? <Boxes size={17} /> : <ShoppingCart size={17} />
+  const navItems: { id: 'dashboard' | 'products' | 'inventory' | 'orders' | 'profile'; label: string; icon: ReactNode }[] = navigationItems.map((item) => {
+    const id = item.route_name.split('.')[1] as 'dashboard' | 'products' | 'inventory' | 'orders' | 'profile'
+    const icon = id === 'dashboard' ? <LayoutDashboard size={17} /> : id === 'products' ? <ShoppingBag size={17} /> : id === 'inventory' ? <Boxes size={17} /> : id === 'profile' ? <CircleUserRound size={17} /> : <ShoppingCart size={17} />
     return { id, label: item.label, icon }
-  })
+  }).filter((item) => ['dashboard', 'products', 'inventory', 'orders', 'profile'].includes(item.id))
+  if (user && hasEffectivePermission(user, 'craftswomen.view') && !navItems.some((item) => item.id === 'profile')) {
+    navItems.push({ id: 'profile', label: 'Mi perfil', icon: <CircleUserRound size={17} /> })
+  }
   const canOpenSection = (section: string) => navItems.some((item) => item.id === section)
+  const canEditProfile = Boolean(user && hasEffectivePermission(user, 'craftswomen.edit'))
   useEffect(() => {
     if (!canOpenSection(activeSection) && navItems[0]) setActiveSection(navItems[0].id)
   }, [navigationItems, activeSection])
@@ -807,15 +817,15 @@ function AdminAccountView({ user, isSuperadmin, navigationItems, orderSummary, p
   productCraftswomen: AdminCraftswomanOption[]
   busy: boolean
   onSignOut: () => void
-  onSaveProduct: (productId: number, values: Partial<AdminProduct>) => void
-  onCreateProduct: (values: Partial<AdminProduct>) => void
+  onSaveProduct: (productId: number, values: AdminProductInput) => void
+  onCreateProduct: (values: AdminProductInput) => void
   onCreateCategory: (values: Pick<AdminCategory, 'name' | 'description' | 'active'>) => void
   onSaveCategory: (categoryId: number, values: Pick<AdminCategory, 'name' | 'description'>) => void
   onCategoryActive: (categoryId: number, active: boolean) => void
   onOrderStatus: (orderId: number, status: string) => void
   onNotice: (message: string) => void
 }) {
-  const [activeSection, setActiveSection] = useState<'dashboard' | 'products' | 'orders' | 'categories' | 'access'>('dashboard')
+  const [activeSection, setActiveSection] = useState<'dashboard' | 'products' | 'inventory' | 'orders' | 'categories' | 'access'>('dashboard')
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [orderSearch, setOrderSearch] = useState('')
   const deferredOrderSearch = useDeferredValue(orderSearch)
@@ -914,11 +924,11 @@ function AdminAccountView({ user, isSuperadmin, navigationItems, orderSummary, p
   }
 
   const navItems = [
-    ...navigationItems.filter((item) => item.route_name.startsWith('admin.') && item.route_name !== 'admin.access').map((item) => {
-      const id = item.route_name.split('.')[1] as 'dashboard' | 'products' | 'orders' | 'categories'
+    ...navigationItems.filter((item) => item.route_name !== 'admin.access').map((item) => {
+      const id = item.route_name.split('.')[1] as 'dashboard' | 'products' | 'inventory' | 'orders' | 'categories'
       const icon = id === 'dashboard' ? <LayoutDashboard size={17} /> : id === 'products' ? <ShoppingBag size={17} /> : id === 'orders' ? <ShoppingCart size={17} /> : <Boxes size={17} />
       return { id, label: item.label, icon }
-    }),
+    }).filter((item) => ['dashboard', 'products', 'inventory', 'orders', 'categories'].includes(item.id)),
     ...(isSuperadmin ? [{ id: 'access' as const, label: 'Roles y permisos', icon: <LockKeyhole size={17} /> }] : []),
   ]
   const canOpenSection = (section: string) => navItems.some((item) => item.id === section)
@@ -956,10 +966,11 @@ function AdminAccountView({ user, isSuperadmin, navigationItems, orderSummary, p
         </div>}
         {canOpenSection('products') && activeSection === 'products' && <section className="craftswoman-panel craftswoman-products-section">
           <div className="craftswoman-panel-heading"><div><small>CATÁLOGO Y CONTROL DE PUBLICACIÓN</small><h1>Productos y tejidos</h1><p>Los tejidos enviados por las artesanas llegan aquí como pendientes. Aprueba su publicación cuando la información esté completa.</p></div>{canAddProducts && <button className="craftswoman-primary-action" onClick={() => setShowCreateForm((visible) => !visible)}><Plus size={16} /> {showCreateForm ? 'Cerrar formulario' : 'Agregar producto'}</button>}</div>
-          {showCreateForm && <form className="craftswoman-product-form" onSubmit={submitNewProduct}><label className="form-label">Referencia *<input name="sku" required maxLength={50} /></label><label className="form-label">Nombre de la pieza *<input name="name" required maxLength={180} /></label><label className="form-label">Categoría *<select name="category" required defaultValue=""><option value="" disabled>Selecciona una categoría</option>{categories.filter((category) => category.active && !category.is_internal).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label><label className="form-label">Tejedora<select name="craftswoman" defaultValue=""><option value="">Sin asignar</option>{productCraftswomen.filter((craftswoman) => craftswoman.active).map((craftswoman) => <option key={craftswoman.id} value={craftswoman.id}>{craftswoman.name}{craftswoman.community ? ` · ${craftswoman.community}` : craftswoman.region ? ` · ${craftswoman.region}` : ""}</option>)}</select></label><label className="form-label">Precio COP *<input name="price" type="number" min="0" step="1" required /></label><label className="form-label">Stock inicial *<input name="stock" type="number" min="0" step="1" defaultValue="0" required /></label><label className="form-label">Talla<input name="size" maxLength={30} defaultValue="M" /></label><label className="form-label">Región<input name="region" maxLength={100} /></label><label className="form-label">Imagen (URL)<input name="image_url" type="url" placeholder="https://…" /></label><label className="admin-check"><input name="active" type="checkbox" /> Publicar directamente</label><label className="admin-check"><input name="made_to_order" type="checkbox" /> Elaborar por pedido</label><button className="button button-dark craftswoman-submit-review" disabled={busy || !categories.some((category) => category.active && !category.is_internal)}>{busy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} Guardar producto</button></form>}
+          {showCreateForm && <form className="craftswoman-product-form" onSubmit={submitNewProduct}><label className="form-label">Referencia *<input name="sku" required maxLength={50} /></label><label className="form-label">Nombre de la pieza *<input name="name" required maxLength={180} /></label><label className="form-label">Descripción<textarea name="description" rows={3} maxLength={4000} /></label><label className="form-label">Categoría *<select name="category" required defaultValue=""><option value="" disabled>Selecciona una categoría</option>{categories.filter((category) => category.active && !category.is_internal).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label><label className="form-label">Tejedora<select name="craftswoman" defaultValue=""><option value="">Sin asignar</option>{productCraftswomen.filter((craftswoman) => craftswoman.active).map((craftswoman) => <option key={craftswoman.id} value={craftswoman.id}>{craftswoman.name}{craftswoman.community ? ` · ${craftswoman.community}` : craftswoman.region ? ` · ${craftswoman.region}` : ""}</option>)}</select></label><label className="form-label">Precio COP *<input name="price" type="number" min="0" step="1" required /></label><label className="form-label">Stock inicial *<input name="stock" type="number" min="0" step="1" defaultValue="0" required /></label><label className="form-label">Talla<input name="size" maxLength={30} defaultValue="M" /></label><label className="form-label">Color<input name="color" maxLength={150} /></label><label className="form-label">Región<input name="region" maxLength={100} /></label><label className="form-label">Tiempo de elaboración<input name="production_time" maxLength={100} /></label><label className="form-label">Imagen (URL)<input name="image_url" type="url" placeholder="https://…" /></label><label className="form-label">Cargar imagen JPEG, PNG o WebP<input name="image" type="file" accept="image/jpeg,image/png,image/webp" /></label><label className="admin-check"><input name="active" type="checkbox" /> Publicar directamente</label><label className="admin-check"><input name="made_to_order" type="checkbox" /> Elaborar por pedido</label><button className="button button-dark craftswoman-submit-review" disabled={busy || !categories.some((category) => category.active && !category.is_internal)}>{busy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} Guardar producto</button></form>}
           {canViewProducts && <><div className="admin-section-subheading"><h2>Pendientes de aprobación</h2><span>{pendingProducts.length}</span></div>{pendingProducts.length ? <div className="admin-review-list">{pendingProducts.map((product) => <article className="admin-review-card" key={product.id}><div className="admin-review-card-main">{product.image_url ? <ProductPhoto src={product.image_url} alt={product.name} className="admin-review-image" /> : <span className="admin-review-placeholder"><ShoppingBag size={22} /></span>}<div><strong>{product.name}</strong><small>{product.sku} · {categories.find((category) => category.id === product.category)?.name ?? 'Categoría'}</small><small>Tejedora: {product.craftswoman_name || 'Sin asignar'} · Stock: {product.stock}</small><p>{product.description || 'Sin descripción registrada.'}</p></div></div><div className="admin-review-actions"><span className="admin-review-pending">Pendiente de revisión</span>{canPublishProducts && <button className="craftswoman-submit-review" disabled={busy} onClick={() => onSaveProduct(product.id, { active: true })}><Check size={15} /> Aprobar y publicar</button>}</div></article>)}</div> : <p className="muted-copy">No hay tejidos pendientes. Cuando una tejedora envíe una pieza, aparecerá en esta sección.</p>}</>}
           {canViewProducts && <><div className="admin-section-subheading"><h2>Productos publicados y catálogo</h2><span>{publishedProducts.length}</span></div><div className="admin-product-list">{publishedProducts.map((product) => <AdminProductRow key={product.id} product={product} categories={categories} craftswomen={productCraftswomen} busy={busy} canEdit={canChangeProducts} canPublish={canPublishProducts} canUnpublish={canUnpublishProducts} onSave={onSaveProduct} />)}</div></>}
         </section>}
+        {canOpenSection('inventory') && activeSection === 'inventory' && <section className="craftswoman-panel"><AdminInventoryReport canExport={hasEffectivePermission(user, 'products.export')} /></section>}
         {canOpenSection('orders') && activeSection === 'orders' && <section className="craftswoman-panel"><div className="craftswoman-panel-heading admin-orders-heading"><div><small>SEGUIMIENTO COMERCIAL</small><h1>Pedidos de clientes</h1><p>Busca por pedido, cliente, producto o tejedora; limita los resultados por estado y asignación.</p></div><span>{adminOrderPage.count} pedidos</span></div>{canViewOrders ? <>
           <div className="admin-order-filters">
             <label className="admin-orders-filter">Buscar<input aria-label="Buscar pedidos" value={orderSearch} onChange={(event) => { setOrderSearch(event.target.value); setOrderPageNumber(1) }} placeholder="Número, cliente, producto o tejedora" /></label>
@@ -1692,11 +1703,3 @@ function OrderSuccess({ order, onClose, onOrders }: { order: Order; onClose: () 
 function Footer({ onInstagram }: { onInstagram: () => void }) {
   return <footer className="site-footer"><div className="footer-main"><div className="footer-brand"><span className="wordmark-symbol" aria-hidden="true"><span /><span /><span /></span><div><strong>wayuuwaa</strong><p>Tejido con origen.</p></div></div><p className="footer-note">Cada pieza lleva consigo el tiempo y la mirada de quien la teje.</p><button className="social-button" onClick={onInstagram} aria-label="Instagram"><Camera size={18} /></button></div><div className="footer-bottom"><span>© WAYUUWAA · LA GUAJIRA, COLOMBIA</span><span>HECHO A MANO, CON RESPETO</span><a href="#coleccion">VOLVER ARRIBA <ArrowUpRight size={12} /></a></div></footer>
 }
-  const [description, setDescription] = useState(product.description)
-  const [region, setRegion] = useState(product.region)
-  const [color, setColor] = useState(product.color)
-  const [size, setSize] = useState(product.size)
-  const [productionTime, setProductionTime] = useState(product.production_time)
-  const [madeToOrder, setMadeToOrder] = useState(product.made_to_order)
-  const [imageUrl, setImageUrl] = useState(product.image_url)
-  const [imageFile, setImageFile] = useState<File | undefined>()

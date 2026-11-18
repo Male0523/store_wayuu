@@ -560,6 +560,25 @@ class ProductAdmin(ScopedRBACModelAdmin):
     list_filter = ('active', 'category', 'craftswoman')
     search_fields = ('sku', 'name', 'description')
 
+    def save_model(self, request, obj, form, change):
+        previous_stock = Product.objects.get(pk=obj.pk).stock if change else None
+        super().save_model(request, obj, form, change)
+        if change and previous_stock != obj.stock:
+            record_audit(
+                request.user,
+                'stock_adjustment',
+                'products',
+                details={'stock_movement': {
+                    'sku': obj.sku,
+                    'product_name': obj.name,
+                    'before': previous_stock,
+                    'after': obj.stock,
+                    'delta': obj.stock - previous_stock,
+                    'reason': 'admin_adjustment',
+                }},
+                instance=obj,
+            )
+
 
 @admin.register(Customer)
 class CustomerAdmin(ScopedRBACModelAdmin):

@@ -55,6 +55,42 @@ export interface AdminCraftswomanOption {
   active: boolean
 }
 
+export interface InventoryReportProduct {
+  id: number
+  sku: string
+  name: string
+  category: string
+  craftswoman_name: string | null
+  stock: number
+  active: boolean
+}
+
+export interface InventoryMovement {
+  id: number
+  created_at: string
+  product_id: number | null
+  sku: string
+  product_name: string
+  before: number
+  after: number
+  delta: number
+  reason: 'admin_adjustment' | 'craftswoman_adjustment' | 'checkout' | string
+  order_id: number | null
+}
+
+export interface InventoryReport {
+  threshold: number
+  summary: {
+    product_count: number
+    total_units: number
+    out_of_stock_count: number
+    low_stock_count: number
+  }
+  products: Page<InventoryReportProduct>
+  movement_count: number
+  movements: InventoryMovement[]
+}
+
 export interface CartItem {
   product: Pick<Product, 'id' | 'name' | 'image_url' | 'price'> & Partial<Product>
   quantity: number

@@ -316,6 +316,151 @@ class ProductSummarySerializer(serializers.ModelSerializer):
         fields = ('id', 'name', 'image_url', 'price')
 
 
+class InventoryProductSerializer(serializers.ModelSerializer):
+    category = serializers.CharField(source='category.name', read_only=True)
+    craftswoman_name = serializers.CharField(source='craftswoman.name', read_only=True, allow_null=True)
+
+    class Meta:
+        model = Product
+        fields = ('id', 'sku', 'name', 'category', 'craftswoman_name', 'stock', 'active')
+
+
+class InventoryMovementSerializer(serializers.ModelSerializer):
+    def to_representation(self, event):
+        movement = event.details.get('stock_movement', {})
+        return {
+            'id': event.id,
+            'created_at': event.created_at,
+            'product_id': int(event.object_id) if event.object_id.isdecimal() else None,
+            'sku': movement.get('sku', ''),
+            'product_name': movement.get('product_name', ''),
+            'before': movement.get('before'),
+            'after': movement.get('after'),
+            'delta': movement.get('delta'),
+            'reason': movement.get('reason', ''),
+            'order_id': movement.get('order_id'),
+        }
+
+
+INVENTORY_EXPORT_HEADERS = ('Referencia', 'Producto', 'Categoría', 'Tejedora', 'Stock', 'Estado', 'Publicado', 'Por encargo')
+
+
+def _inventory_export_rows(products, threshold):
+    rows = []
+    for product in products:
+        state = 'Agotado' if product.stock == 0 else 'Stock bajo' if product.stock <= threshold else 'Disponible'
+        rows.append((
+            product.sku, product.name, product.category.name,
+            product.craftswoman.name if product.craftswoman else '', product.stock, state,
+            'Sí' if product.active else 'No', 'Sí' if product.made_to_order else 'No',
+        ))
+    return rows
+
+
+def _xlsx_inventory_export(rows, summary, threshold):
+    sheet_rows = [
+        ('Reporte de inventario Wayúu Store',),
+        (f'Umbral de stock bajo: {threshold}',),
+        (f"Productos: {summary['product_count']} · Unidades: {summary['total_units']} · Agotados: {summary['out_of_stock_count']} · Stock bajo: {summary['low_stock_count']}",),
+        (), INVENTORY_EXPORT_HEADERS, *rows,
+    ]
+    sheet_xml_rows = []
+    for row_number, row in enumerate(sheet_rows, 1):
+        cells = []
+        for column_number, value in enumerate(row, 1):
+            column = ''
+            number = column_number
+            while number:
+                number, remainder = divmod(number - 1, 26)
+                column = chr(65 + remainder) + column
+            reference = f'{column}{row_number}'
+            if isinstance(value, int):
+                cells.append(f'<c r="{reference}" t="n"><v>{value}</v></c>')
+            else:
+                cells.append(f'<c r="{reference}" t="inlineStr"><is><t xml:space="preserve">{html_escape(str(value), {chr(34): "&quot;"})}</t></is></c>')
+        sheet_xml_rows.append(f'<row r="{row_number}">{"".join(cells)}</row>')
+    worksheet = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
+        + ''.join(sheet_xml_rows) + '</sheetData></worksheet>')
+    files = {
+        '[Content_Types].xml': ('<?xml version="1.0" encoding="UTF-8"?>'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+            '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+            '</Types>'),
+        '_rels/.rels': ('<?xml version="1.0" encoding="UTF-8"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+            '</Relationships>'),
+        'xl/workbook.xml': ('<?xml version="1.0" encoding="UTF-8"?>'
+            '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'
+            '<sheet name="Inventario" sheetId="1" r:id="rId1"/></sheets></workbook>'),
+        'xl/_rels/workbook.xml.rels': ('<?xml version="1.0" encoding="UTF-8"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+            '</Relationships>'),
+        'xl/worksheets/sheet1.xml': worksheet,
+    }
+    output = BytesIO()
+    with ZipFile(output, 'w', ZIP_DEFLATED) as archive:
+        for name, content in files.items():
+            archive.writestr(name, content.encode('utf-8'))
+    return output.getvalue()
+
+
+def _pdf_text(value):
+    encoded = str(value).encode('cp1252', errors='replace')
+    escaped = bytearray()
+    for byte in encoded:
+        if byte in (40, 41, 92):
+            escaped.extend(b'\\' + bytes((byte,)))
+        elif byte < 32 or byte > 126:
+            escaped.extend(f'\\{byte:03o}'.encode('ascii'))
+        else:
+            escaped.append(byte)
+    return b'(' + bytes(escaped) + b')'
+
+
+def _pdf_inventory_export(rows, summary, threshold):
+    lines = [
+        'Reporte de inventario Wayuu Store',
+        f"Umbral bajo: {threshold} | Productos: {summary['product_count']} | Unidades: {summary['total_units']} | Agotados: {summary['out_of_stock_count']} | Stock bajo: {summary['low_stock_count']}",
+        'Referencia | Producto | Categoria | Tejedora | Stock | Estado | Publicado | Por encargo',
+    ]
+    lines.extend(' | '.join(str(value) for value in row)[:130] for row in rows)
+    pages = [lines[index:index + 54] for index in range(0, len(lines), 54)] or [[]]
+    objects = [b''] * (3 + 2 * len(pages))
+    objects[0] = b'<< /Type /Catalog /Pages 2 0 R >>'
+    objects[2] = b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>'
+    page_refs = []
+    for index, page_lines in enumerate(pages):
+        page_id = 4 + index * 2
+        content_id = page_id + 1
+        page_refs.append(f'{page_id} 0 R')
+        commands = [b'BT /F1 8 Tf 40 750 Td 12 TL']
+        commands.extend(_pdf_text(line) + b' Tj T*' for line in page_lines)
+        commands.append(b'ET')
+        stream = b'\n'.join(commands)
+        objects[page_id - 1] = f'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents {content_id} 0 R >>'.encode('ascii')
+        objects[content_id - 1] = f'<< /Length {len(stream)} >>\nstream\n'.encode('ascii') + stream + b'\nendstream'
+    objects[1] = f'<< /Type /Pages /Kids [{" ".join(page_refs)}] /Count {len(pages)} >>'.encode('ascii')
+    output = BytesIO()
+    output.write(b'%PDF-1.4\n%\xe2\xe3\xcf\xd3\n')
+    offsets = [0]
+    for object_id, body in enumerate(objects, 1):
+        offsets.append(output.tell())
+        output.write(f'{object_id} 0 obj\n'.encode('ascii') + body + b'\nendobj\n')
+    xref = output.tell()
+    output.write(f'xref\n0 {len(objects) + 1}\n0000000000 65535 f \n'.encode('ascii'))
+    for offset in offsets[1:]:
+        output.write(f'{offset:010d} 00000 n \n'.encode('ascii'))
+    output.write(f'trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF'.encode('ascii'))
+    return output.getvalue()
+
+
 class OrderItemSerializer(serializers.ModelSerializer):
     product = ProductSummarySerializer(read_only=True)
     subtotal = serializers.DecimalField(max_digits=14, decimal_places=0, read_only=True)
@@ -995,7 +1140,98 @@ class AdminProductListView(APIView):
         serializer.is_valid(raise_exception=True)
         product = serializer.save()
         record_audit(request.user, 'create_product', 'products', instance=product)
-        return Response(AdminProductSerializer(product).data, status=status.HTTP_201_CREATED)
+        return Response(AdminProductSerializer(product, context={'request': request}).data, status=status.HTTP_201_CREATED)
+
+
+class AdminInventoryReportView(PaginatedAPIView):
+    permission_classes = (AdminOrSuperadmin,)
+    rbac_resource = 'products'
+
+    def get(self, request):
+        threshold_value = request.query_params.get('threshold', '')
+        if not threshold_value.isdecimal() or int(threshold_value) < 1:
+            raise serializers.ValidationError({'threshold': 'Indica un umbral entero mayor que cero para definir stock bajo.'})
+        threshold = int(threshold_value)
+        status_filter = request.query_params.get('status', 'all').strip()
+        if status_filter not in {'all', 'low', 'out', 'in_stock'}:
+            raise serializers.ValidationError({'status': 'Selecciona un filtro de inventario válido.'})
+
+        inventory = Product.objects.select_related('category', 'craftswoman').all()
+        summary = inventory.aggregate(
+            product_count=Count('id'),
+            total_units=Sum('stock'),
+            out_of_stock_count=Count('id', filter=Q(stock=0)),
+            low_stock_count=Count('id', filter=Q(stock__gt=0, stock__lte=threshold)),
+        )
+        products = inventory
+        search = request.query_params.get('search', '').strip()
+        if search:
+            products = products.filter(
+                Q(name__icontains=search) | Q(sku__icontains=search)
+                | Q(category__name__icontains=search)
+                | Q(craftswoman__name__icontains=search)
+            )
+        category_id = request.query_params.get('category', '').strip()
+        if category_id:
+            if not category_id.isdecimal():
+                raise serializers.ValidationError({'category': 'La categoría debe ser un identificador numérico.'})
+            products = products.filter(category_id=int(category_id))
+        if status_filter == 'low':
+            products = products.filter(stock__gt=0, stock__lte=threshold)
+        elif status_filter == 'out':
+            products = products.filter(stock=0)
+        elif status_filter == 'in_stock':
+            products = products.filter(stock__gt=0)
+
+        export_format = request.query_params.get('export', '').strip().lower()
+        if export_format and export_format not in {'xlsx', 'pdf'}:
+            raise serializers.ValidationError({'export': 'Formato de exportación no permitido.'})
+        if export_format:
+            if not has_rbac_permission(request.user, 'products', 'export'):
+                raise PermissionDenied('No tienes permiso para exportar el inventario.')
+            export_rows = _inventory_export_rows(products.order_by('name', 'id'), threshold)
+            if export_format == 'xlsx':
+                response = HttpResponse(
+                    _xlsx_inventory_export(export_rows, {
+                        'product_count': summary['product_count'],
+                        'total_units': summary['total_units'] or 0,
+                        'out_of_stock_count': summary['out_of_stock_count'],
+                        'low_stock_count': summary['low_stock_count'],
+                    }, threshold),
+                    content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                )
+                response['Content-Disposition'] = 'attachment; filename="reporte-inventario.xlsx"'
+                return response
+            response = HttpResponse(
+                _pdf_inventory_export(export_rows, {
+                    'product_count': summary['product_count'],
+                    'total_units': summary['total_units'] or 0,
+                    'out_of_stock_count': summary['out_of_stock_count'],
+                    'low_stock_count': summary['low_stock_count'],
+                }, threshold), content_type='application/pdf',
+            )
+            response['Content-Disposition'] = 'attachment; filename="reporte-inventario.pdf"'
+            return response
+
+        page = self.paginate_queryset(products.order_by('name', 'id'))
+        product_page = self.get_paginated_response(InventoryProductSerializer(page, many=True).data).data
+        movements = AuditEvent.objects.filter(
+            resource='products',
+            action__in=('stock_adjustment', 'craftswoman_stock_adjustment', 'stock_checkout_decrement'),
+        ).order_by('-created_at', '-id')
+        movement_count = movements.count()
+        return Response({
+            'threshold': threshold,
+            'summary': {
+                'product_count': summary['product_count'],
+                'total_units': summary['total_units'] or 0,
+                'out_of_stock_count': summary['out_of_stock_count'],
+                'low_stock_count': summary['low_stock_count'],
+            },
+            'products': product_page,
+            'movement_count': movement_count,
+            'movements': InventoryMovementSerializer(movements[:25], many=True).data,
+        })
 
 
 class AdminProductOptionsView(APIView):
@@ -2164,8 +2400,25 @@ class CheckoutView(APIView):
                     quantity=row.quantity,
                     unit_price=product.price,
                 )
+                previous_stock = product.stock
                 product.stock -= row.quantity
                 product.save(update_fields=('stock', 'updated_at'))
+                record_audit(
+                    request.user,
+                    'stock_checkout_decrement',
+                    'products',
+                    affected_user=request.user,
+                    details={'stock_movement': {
+                        'sku': product.sku,
+                        'product_name': product.name,
+                        'before': previous_stock,
+                        'after': product.stock,
+                        'delta': -row.quantity,
+                        'reason': 'checkout',
+                        'order_id': order.id,
+                    }},
+                    instance=product,
+                )
             customer.address = data['address'].strip()
             customer.city = data['city'].strip()
             customer.save(update_fields=('address', 'city'))
@@ -2408,16 +2661,33 @@ class CraftswomanProductDetailView(APIView):
             raise PermissionDenied('No tienes permiso para corregir tus productos.')
         craftswoman = get_object_or_404(Craftswoman, user=request.user, active=True)
         product = get_object_or_404(Product, id=product_id, craftswoman=craftswoman)
+        previous_stock = product.stock
         serializer = CraftswomanProductWriteSerializer(product, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        product = serializer.save(active=False)
-        record_audit(
-            request.user,
-            'craftswoman_resubmit_product',
-            'products',
-            details={'product_name': product.name, 'publication_status': 'pending_review'},
-            instance=product,
-        )
+        with transaction.atomic():
+            product = serializer.save(active=False)
+            if product.stock != previous_stock:
+                record_audit(
+                    request.user,
+                    'craftswoman_stock_adjustment',
+                    'products',
+                    details={'stock_movement': {
+                        'sku': product.sku,
+                        'product_name': product.name,
+                        'before': previous_stock,
+                        'after': product.stock,
+                        'delta': product.stock - previous_stock,
+                        'reason': 'craftswoman_adjustment',
+                    }},
+                    instance=product,
+                )
+            record_audit(
+                request.user,
+                'craftswoman_resubmit_product',
+                'products',
+                details={'product_name': product.name, 'publication_status': 'pending_review'},
+                instance=product,
+            )
         return Response(ProductSerializer(product).data)
 
 
