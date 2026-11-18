@@ -310,3 +310,34 @@ El hash del commit documental se informa en la entrega de Fase 0 y queda en el h
 - `cde22ca0199b50a5746c11b07ae7df934bb5d2a3` — `test: cover inventory profile isolation and reporting`.
 - `65c0c8367f87d03ea29ca21fc24757c2ff27da75` — `docs: record inventory profiles and reports review`.
 - No hubo push, merge, despliegue ni cambios en `main`.
+
+## 2026-11-17 — Sprint 7: verificación de integración entre módulos
+
+### Preparación e integración verificada
+
+- Se comprobó que `feature/inventario-perfiles-reportes` estaba limpia en `36ff246ae17758a6c4f5e93103f70ac8a09c94ca` y que `origin` apunta a `https://github.com/Male0523/store_wayuu.git`; se creó `feature/verificacion-integracion` desde ese commit. Se revisó la bitácora existente.
+- La prueba nueva `test_custom_design_survives_cart_checkout_assignment_weaving_and_delivery` recorre API desde crear diseño → carrito persistente → checkout → `OrderItem` → asignar tejedora → tejido → finalización → pago → preparación → envío → entrega. Verifica propiedad de cliente, patrón/indicaciones/cantidad, producto y diseño enlazados y existencia al agotarse la única unidad del producto de diseño.
+- La primera ejecución integrada llegó hasta entrega y recibió `403` al cambiar el pedido administrativo porque el rol `admin` base no incluye `designs.change`. La prueba quedó ajustada para que un superadmin conceda dinámicamente ese permiso al rol admin antes del flujo administrativo; el recorrido completo pasó. Esta comprobación demuestra que la protección RBAC opera y que la configuración de ese permiso es requisito operativo para tramitar pedidos con diseños personalizados.
+- La matriz de permisos/navigation, filtros de datos por cliente/tejedora, carrito/checkout API y HTML, stock, pedidos, auditoría y el resumen agregado se contrastaron con las pruebas de integración ya existentes; no se repitió una auditoría integral ni se modificó lógica funcional.
+- Se aplicó el grafo de migraciones completo sobre un archivo SQLite nuevo y temporal, se comprobó `migrate --check` sin pendientes y se cerraron conexiones antes de retirar el archivo temporal. La base `backend/db.sqlite3` local no fue usada ni alterada.
+- `backend/requirements.txt` incluye las dependencias Django/DRF y backends PostgreSQL/MySQL; `frontend/package-lock.json` existe y los scripts disponibles son `dev`, `build`, `lint`, `preview`. No existe script de test frontend. La compilación valida TypeScript y Vite; no se hizo instalación de dependencias.
+
+### Clasificación y verificaciones
+
+- **Errores críticos que impiden integrar:** ninguno demostrado por las comprobaciones locales.
+- **Errores importantes que deben corregirse antes de integrar:** confirmar/configurar por superadmin `designs.change` para el rol admin que tramitará pedidos personalizados. Sin ello, la API deniega cambios de estado administrativo de esos pedidos con `403`. No se concedió el privilegio mediante migración ni código porque ampliaría el acceso global del rol.
+- **Limitaciones conocidas/decisiones pendientes:** concurrencia real debe probarse con el motor de producción PostgreSQL; SQLite de la suite no reproduce los bloqueos de fila. El self-service de perfil de tejedora y reportes de inventario siguen sin existir (Sprint 6); no son parte de esta verificación ni se inventaron. ESLint mantiene su referencia conocida.
+- **Mejoras posteriores no bloqueantes:** agregar tests frontend automatizados y resolver el lint preexistente, sin relación directa con los módulos funcionales verificados.
+- Prueba de integración enfocada — **OK**, 1 flujo completo con el permiso RBAC requerido configurado dinámicamente.
+- Suite Django completa — **OK**, `manage.py test`: 116 pruebas, 0 fallos, 0 errores; `System check identified no issues`. Se conserva warning conocido por `backend/staticfiles/` ausente y salida informativa de auditoría de roles.
+- Migración desde base temporal limpia — **OK**, migraciones admin/auth/contenttypes/sessions/store aplicadas, incluyendo store.0018; luego `migrate --check`, sin pendientes. Archivo temporal retirado.
+- `makemigrations --check --dry-run` — **OK**, `No changes detected`.
+- `npm run build` — **OK**, TypeScript/Vite, 1946 módulos transformados.
+- `npm run lint` — **falló** con 6 errores y 5 warnings, igual a Sprint 6/Sprint 5, en `CustomerPanel.tsx` y `ShopApp.tsx`; no se modificó frontend. `npm run` confirma que no hay pruebas frontend disponibles.
+- `git diff --check` — **OK**, sin errores de whitespace.
+
+### Commits y estado
+
+- `1782b6648eadd4c7530c1e9659c188caa8aae94c` — `test: verify custom order integration flow`.
+- Commit documental: pendiente de cierre.
+- No hubo push, merge, despliegue, cambios en `main` ni cambios de esquema.
