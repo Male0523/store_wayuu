@@ -114,7 +114,7 @@ def product_image_url(product, request=None):
     return url or ''
 
 
-class ProductImageUploadField(serializers.ImageField):
+class ProductImageUploadField(serializers.FileField):
     def to_internal_value(self, data):
         if getattr(data, 'size', 0) > MAX_PRODUCT_IMAGE_BYTES:
             raise serializers.ValidationError('La imagen supera el tamaño máximo de 5 MB.')
@@ -179,6 +179,7 @@ class ProductSerializer(serializers.ModelSerializer):
 class AdminProductSerializer(serializers.ModelSerializer):
     category = serializers.PrimaryKeyRelatedField(queryset=Category.objects.filter(active=True, is_internal=False))
     craftswoman_name = serializers.CharField(source='craftswoman.name', read_only=True, allow_null=True, default=None)
+    active = serializers.BooleanField(required=False, default=True)
     craftswoman = NullableProductCraftswomanField(
         queryset=Craftswoman.objects.all(), required=False, allow_null=True,
     )

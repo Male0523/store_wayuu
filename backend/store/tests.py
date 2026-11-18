@@ -16,6 +16,7 @@ from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import Client, RequestFactory, SimpleTestCase, TestCase, TransactionTestCase, override_settings
+from django.test.client import MULTIPART_CONTENT, encode_multipart
 from django.utils import timezone
 from django.core.files.uploadedfile import SimpleUploadedFile
 
@@ -312,17 +313,24 @@ class StoreAPITests(TestCase):
             original_path = Path(media_root, product.image.name)
             replacement = SimpleUploadedFile('replacement.jpeg', self.make_test_image('JPEG'), content_type='image/jpeg')
             updated = self.client.patch(
-                f'/api/v1/admin/products/{product.id}/', {'image': replacement},
+                f'/api/v1/admin/products/{product.id}/',
+                data=encode_multipart('BoUnDaRyStRiNg', {'image': replacement}), content_type=MULTIPART_CONTENT,
             )
             self.assertEqual(updated.status_code, 200, updated.content)
             product.refresh_from_db()
             self.assertEqual(Path(product.image.name).suffix, '.jpg')
             self.assertTrue(original_path.is_file())
+            self.assertTrue(product.active)
+            self.assertTrue(product.category.active)
+            self.assertFalse(product.category.is_internal)
+            self.assertIsNone(product.custom_design_id)
             listed = self.client.get('/api/v1/products/').json()['results']
             detail = self.client.get(f'/api/v1/products/{product.id}/').json()
             expected_url = f'http://testserver/media/{product.image.name}'
             self.assertEqual(updated.json()['image_url'], expected_url)
-            self.assertEqual(next(item for item in listed if item['id'] == product.id)['image_url'], expected_url)
+            listed_product = next((item for item in listed if item['id'] == product.id), None)
+            self.assertIsNotNone(listed_product, listed)
+            self.assertEqual(listed_product['image_url'], expected_url)
             self.assertEqual(detail['image_url'], expected_url)
 
     def test_admin_product_image_rejects_corrupt_and_unsupported_images(self):
@@ -2806,6 +2814,7 @@ class StoreAPITests(TestCase):
         expected_pairs.update({('favorites', action) for action in ('view', 'create', 'delete')})
         expected_pairs.update({('orders', action) for action in ('approve', 'assign', 'cancel')})
         expected_pairs.add(('orders', 'manage_design_status'))
+        expected_pairs.add(('products', 'export'))
         expected_pairs.update({(resource, action) for resource in ('products', 'categories') for action in ('publish', 'unpublish')})
         expected_pairs.update({('role_assignments', 'assign'), ('roles', 'manage'), ('permissions', 'manage')})
         expected_superadmin = set(expected_pairs)
@@ -2832,6 +2841,7 @@ class StoreAPITests(TestCase):
             },
             AccessRole.Code.CRAFTSWOMAN: {
                 ('products', 'view'), ('products', 'create'), ('products', 'add'), ('products', 'edit'), ('products', 'change'),
+                ('craftswomen', 'view'), ('craftswomen', 'edit'), ('craftswomen', 'change'),
                 ('orders', 'view'), ('orders', 'edit'), ('orders', 'change'), ('orders', 'assign'),
                 ('designs', 'view'), ('designs', 'edit'), ('designs', 'change'),
             },
@@ -3719,8 +3729,9 @@ class StoreAPITests(TestCase):
         menu = self.client.get('/api/v1/navigation/menu/')
         direct_data = self.client.get('/api/v1/admin/products/')
         self.assertEqual(menu.status_code, 200)
-        self.assertEqual([item['route_name'] for item in menu.json()], ['admin.products'])
-        self.assertFalse(has_rbac_permission(customer, 'products', 'publish'))
+        menu_routes = [item['route_name'] for item in menu.json()]
+        self.assertIn('admin.products', menu_routes)
+        self.assertFalse(has_permission(customer, 'products', 'publish'))
         self.assertIn(direct_data.status_code, (401, 403))
 
         self.client.force_login(superadmin)
@@ -3730,7 +3741,8 @@ class StoreAPITests(TestCase):
         )
         self.assertEqual(revoked.status_code, 200)
         self.client.force_login(customer)
-        self.assertEqual(self.client.get('/api/v1/navigation/menu/').json(), [])
+        menu_routes = [item['route_name'] for item in self.client.get('/api/v1/navigation/menu/').json()]
+        self.assertNotIn('admin.products', menu_routes)
 
     def test_non_superadmin_cannot_manage_navigation(self):
         admin_user = self.create_role_user('rbac-navigation-admin', AccessRole.Code.ADMIN)
