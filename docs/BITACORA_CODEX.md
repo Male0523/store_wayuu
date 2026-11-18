@@ -350,3 +350,14 @@ El hash del commit documental se informa en la entrega de Fase 0 y queda en el h
 - `makemigrations --check --dry-run`: **OK**, `No changes detected` (la migración es de datos RBAC). `git diff --check`: **OK**.
 - `c5c6518535331b8a440bcc3b9d95697a5318e476` — `feat: add scoped design status permission for orders`.
 - No se ejecutaron pruebas completas ni frontend; no hubo push, merge, despliegue ni cambios en `main`.
+
+## 2026-11-17 — Fase D2: retirada del fallback RBAC
+
+- `has_permission()` y `effective_permission_keys()` ya no infieren `approve`, `publish`, `unpublish`, `assign` ni `cancel` desde `edit`. Se retiró el helper legado usado solo por ese fallback; los grants especializados explícitos siguen sujetos a precedencia `DENY` y el superadmin conserva el acceso global.
+- La migración de datos `store.0020_explicit_specialized_role_grants` configura para admin `products.publish/unpublish`, `categories.publish/unpublish`, `orders.approve/cancel`; para tejedora configura `orders.assign`. También retira grants `ALLOW` de rol base incompatibles con esa política. No convierte grants `edit`, ni modifica grants explícitos individuales o de roles personalizados.
+- `docs/FLUJO_RBAC.md` documenta la política final. Se actualizó la matriz de roles y se añadieron pruebas de roles base/personalizados, grants `edit` heredados e individuales, permisos Django, grants especializados explícitos, `DENY` y rutas API de las cinco acciones sensibles.
+- Pruebas RBAC dirigidas — **OK**, 5 pruebas: matriz efectiva, grants explícitos y denegaciones, publicación/despublicación/aprobación/cancelación/asignación por API, catálogo dinámico con precedencia `DENY` y superadmin global. Django informó `System check identified no issues`; queda el warning conocido de directorio `backend/staticfiles/` ausente.
+- `makemigrations --check --dry-run` — **OK**, `No changes detected`; `0020` es una migración de datos.
+- `git diff --check` y `git diff --cached --check` — **OK**.
+- `302a97bcc3085ee15b8d6b349840f2b570969831` — `fix: require explicit specialized RBAC grants`.
+- No se ejecutó la suite Django completa ni frontend; no hubo push, merge, despliegue ni cambios en `main`.
