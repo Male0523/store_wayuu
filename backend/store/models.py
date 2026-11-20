@@ -489,8 +489,23 @@ class Order(models.Model):
 
 
 class OrderItem(models.Model):
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pendiente'
+        ACCEPTED = 'accepted', 'Aceptado por tejedora'
+        WEAVING = 'weaving', 'En tejido'
+        COMPLETED = 'completed', 'Tejido terminado'
+        PAID = 'paid', 'Pagado'
+        PREPARING = 'preparing', 'En preparación'
+        SHIPPED = 'shipped', 'Enviado'
+        DELIVERED = 'delivered', 'Entregado'
+        CANCELLED = 'cancelled', 'Cancelado'
+
     order = models.ForeignKey(Order, verbose_name='pedido', on_delete=models.CASCADE, related_name='items')
     product = models.ForeignKey(Product, verbose_name='producto', on_delete=models.PROTECT)
+    craftswoman = models.ForeignKey(Craftswoman, verbose_name='tejedora responsable', on_delete=models.SET_NULL, null=True, blank=True, related_name='order_items')
+    assigned_at = models.DateTimeField('asignado el', null=True, blank=True)
+    assigned_by = models.ForeignKey(User, verbose_name='asignado por', on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_order_items')
+    status = models.CharField('estado del trabajo', max_length=15, choices=Status.choices, default=Status.PENDING)
     quantity = models.PositiveIntegerField('cantidad', validators=[MinValueValidator(1)])
     unit_price = models.DecimalField('precio unitario (COP)', max_digits=12, decimal_places=0, validators=[MinValueValidator(Decimal('0'))])
 
@@ -499,12 +514,37 @@ class OrderItem(models.Model):
         verbose_name_plural = 'productos del pedido'
         constraints = [models.UniqueConstraint(fields=['order', 'product'], name='unique_product_per_order')]
 
+    def save(self, *args, **kwargs):
+        if self._state.adding:
+            order = self.order
+            product = self.product
+            if not self.craftswoman_id:
+                self.craftswoman_id = product.craftswoman_id or order.craftswoman_id
+            if self.status == self.Status.PENDING and order.status != Order.Status.PENDING:
+                self.status = order.status
+        return super().save(*args, **kwargs)
+
     @property
     def subtotal(self):
         return self.quantity * self.unit_price
 
     def __str__(self):
         return f'{self.product} × {self.quantity}'
+
+
+class InAppNotification(models.Model):
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='wayuu_notifications')
+    title = models.CharField(max_length=120)
+    message = models.CharField(max_length=240)
+    order_item = models.ForeignKey(OrderItem, on_delete=models.CASCADE, related_name='notifications')
+    created_at = models.DateTimeField(auto_now_add=True)
+    read_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ('-created_at', '-id')
+
+    def __str__(self):
+        return self.title
 
 
 class CustomDesign(models.Model):

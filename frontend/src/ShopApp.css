@@ -283,9 +283,15 @@
 .admin-order-row { display: grid; grid-template-columns: minmax(0, 1fr) 155px; align-items: center; gap: 16px; }
 .admin-order-row .order-card { width: 100%; }
 .admin-categories { padding-bottom: 5px; border-bottom: 1px solid var(--line); }
-.admin-category-form { display: grid; grid-template-columns: 1fr 1.5fr auto; align-items: end; gap: 13px; margin: 15px 0 4px; }
+.admin-category-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) auto; align-items: end; gap: 13px; margin: 15px 0 4px; }
+.admin-category-form textarea, .admin-category-edit-fields textarea { width: 100%; min-height: 38px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 0; background: var(--white); color: var(--ink); font: 11px var(--sans); resize: vertical; }
 .admin-category-list { display: grid; }
 .admin-category-row { display: grid; grid-template-columns: minmax(0, 1fr) 75px auto; align-items: center; gap: 14px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.admin-category-edit-fields { display: grid; grid-template-columns: minmax(150px, .75fr) minmax(220px, 1.5fr); align-items: start; gap: 12px; min-width: 0; }
+.admin-category-row.editing { grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+.admin-category-row.editing > .admin-category-edit-fields { grid-column: 1 / -1; }
+.admin-category-row.editing > .category-state { grid-column: 1; }
+.admin-category-row.editing > .text-button { grid-column: 2; }
 .admin-category-row > div { display: grid; gap: 3px; }
 .admin-category-row strong { color: var(--ink); font: 15px var(--serif); }
 .admin-category-row small { color: var(--muted); font-size: 9px; }
@@ -468,6 +474,9 @@
   .admin-category-form { grid-template-columns: 1fr; gap: 10px; }
   .admin-category-form .button { justify-self: start; }
   .admin-category-row { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; }
+  .admin-category-edit-fields { grid-template-columns: 1fr; }
+  .admin-category-row.editing { grid-template-columns: minmax(0, 1fr) auto; }
+  .admin-category-row.editing > .text-button { grid-row: auto; }
   .admin-category-row > .category-state { grid-column: 1; }
   .admin-category-row > .text-button { grid-column: 2; grid-row: 1/3; }
   .admin-product-row { grid-template-columns: minmax(0, 1fr) 90px 80px; gap: 10px; }

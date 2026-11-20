@@ -404,3 +404,29 @@ El hash del commit documental se informa en la entrega de Fase 0 y queda en el h
 - `python -m compileall .`: **OK**. `npm run build`: **OK**, 1948 módulos transformados. `git diff --check`: **OK**.
 - Las migraciones forman la cadena `0021_product_image` → `0022_craftswoman_self_profile_permissions` → `0023_admin_inventory_navigation`; no se encontraron nombres duplicados. `DEPLOY.md`, los archivos `.env.example`, `docs/API.md` y `frontend/README.md` documentan despliegue y arranque desde cero. El arranque local usa SQLite por defecto e instala Pillow mediante `pip install -r requirements.txt`.
 - El diff de los commits de consolidación no incluye `.env`, `db.sqlite3`, credenciales, archivos de base de datos, fixtures, temporales, entornos virtuales ni artefactos de build. El árbol de trabajo quedó limpio después del commit documental de cierre.
+
+## 2026-11-20 — Corrección de defectos funcionales y visuales prioritarios
+
+### Cambios
+
+- Navegación RBAC: el selector de vistas configurables consume el catálogo autorizado del backend, muestra estados de carga/error/sin resultados y evita duplicar rutas. La vista de administración de roles queda disponible únicamente para superadmin. La visibilidad de navegación sigue separada de los permisos efectivos sobre endpoints y datos; `admin.access` queda reservado y protegido.
+- Pedidos con varios productos: la asignación y el trabajo de tejedora se gestionan por `OrderItem`, con estado, tejedora, fecha y actor de asignación. El checkout asigna cada línea a la tejedora real del producto y genera notificación interna al usuario de esa tejedora cuando está disponible. La vista del cliente conserva un único pedido y resume el avance de sus líneas. Los flujos heredados de pedido completo permanecen para pedidos de una sola línea; se rechazan para pedidos con varias líneas.
+- La API y las vistas HTML aplican autenticación, RBAC, pertenencia de la tejedora al producto/línea, transiciones permitidas y bloqueo del pedido durante cambios de asignación/estado. Se registran cambios por línea y se calcula el estado agregado del pedido con el avance más conservador de sus líneas.
+- Productos/imágenes: se revisó el flujo ya existente de carga y almacenamiento Pillow/MEDIA. Se conserva la validación de contenido, los formatos JPEG/PNG/WebP, el límite configurado y la compatibilidad de productos antiguos sin imagen; no fue necesario cambiar este pipeline.
+- Categorías: el formulario de creación/edición separa los campos de texto y el estado en una disposición adaptable, conserva la recarga de catálogo tras guardar y permite editar descripción.
+
+### Pruebas y verificaciones
+
+- Pruebas dirigidas de navegación RBAC, pedidos de varias líneas, carga/validación de imágenes, CRUD y desactivación de categorías, y flujo de diseños personalizados — **OK**, 9 pruebas.
+- Suite completa `manage.py test store` — **OK**, 139 pruebas ejecutadas, 0 fallidas. El entorno de pruebas creó su base temporal y ejecutó las migraciones en esa base. No se aplicaron migraciones a la base local de desarrollo.
+- `manage.py check` — **OK**, `System check identified no issues (0 silenced)`.
+- `makemigrations --check --dry-run` — **OK**, `No changes detected`.
+- `python -m compileall -q store config` — **OK**.
+- `npm run build` — **OK**, TypeScript/Vite; 1948 módulos transformados. No hay una suite frontend automatizada configurada; no se hizo inspección manual de consola del navegador.
+- `git diff --check` — **OK**.
+- `migrate --plan` fue de solo lectura y muestra `store.0024` pendiente en la base configurada. La migración no se aplicó; la validación PostgreSQL/concurrencia real y la inspección visual manual quedan pendientes.
+
+### Migración y estado
+
+- `backend/store/migrations/0024_orderitem_assigned_at_orderitem_assigned_by_and_more.py` agrega asignación y estado por línea y notificaciones internas, preservando datos existentes mediante backfill sin inventar fechas históricas.
+- Rama de trabajo: `feature/consolidacion-correcciones-funcionales`, HEAD base `cab054e4d408bd0dc9f9b5e899171168fceeeb93`. No se cambió de rama ni se creó commit. Los cambios quedan locales para revisión. No hubo push, merge, despliegue ni alteración de `main`.

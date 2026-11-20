@@ -39,6 +39,8 @@ urlpatterns = [
     path('admin/rbac/audit/', api.SuperadminAuditView.as_view(), name='rbac-audit'),
     path('navigation/menu/', api.RoleNavigationMenuView.as_view(), name='role-navigation-menu'),
     path('admin/rbac/navigation/', api.SuperadminNavigationView.as_view(), name='rbac-navigation'),
+    path('admin/rbac/navigation/routes/', api.SuperadminNavigationRouteCatalogView.as_view(), name='rbac-navigation-routes'),
+    path('admin/rbac/navigation/routes/', api.SuperadminNavigationRouteCatalogView.as_view(), name='rbac-navigation-routes'),
     path('admin/rbac/navigation/<int:item_id>/', api.SuperadminNavigationDetailView.as_view(), name='rbac-navigation-detail'),
     path('auth/register/', api.CustomerRegistrationView.as_view(), name='register'),
     path('auth/register/craftswoman/', api.CraftswomanRegistrationView.as_view(), name='register-craftswoman'),
@@ -61,6 +63,8 @@ urlpatterns = [
     path('craftswoman/products/<int:product_id>/', api.CraftswomanProductDetailView.as_view(), name='craftswoman-product-detail'),
     path('craftswoman/dashboard/', api.CraftswomanDashboardView.as_view(), name='craftswoman-dashboard'),
     path('craftswoman/orders/<int:order_id>/accept/', api.AcceptOrderView.as_view(), name='accept-order'),
+    path('craftswoman/work-items/<int:item_id>/accept/', api.AcceptWorkItemView.as_view(), name='accept-work-item'),
+    path('craftswoman/work-items/<int:item_id>/status/', api.CraftswomanWorkItemStatusView.as_view(), name='work-item-status'),
     path('craftswoman/orders/<int:order_id>/status/', api.CraftswomanOrderStatusView.as_view(), name='order-status'),
     path('craftswoman/designs/<int:design_id>/status/', api.CraftswomanDesignStatusView.as_view(), name='design-status'),
 ]

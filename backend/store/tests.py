@@ -43,6 +43,7 @@ from .models import (
     Customer,
     CustomerCartItem,
     CustomerFavorite,
+    InAppNotification,
     NavigationItem,
     Order,
     OrderItem,
@@ -2930,6 +2931,7 @@ class StoreAPITests(TestCase):
         )
         pending_order = Order.objects.create(customer=self.customer, shipping_address='Maicao')
         assignment_order = Order.objects.create(customer=self.customer, shipping_address='Riohacha')
+        OrderItem.objects.create(order=assignment_order, product=self.product, quantity=1, unit_price=self.product.price)
         completed_order = Order.objects.create(
             customer=self.customer, shipping_address='Uribia', status=Order.Status.COMPLETED,
         )
@@ -3372,11 +3374,8 @@ class StoreAPITests(TestCase):
         craft_user = self.create_role_user('rbac-html-craft-deny', AccessRole.Code.CRAFTSWOMAN)
         craftswoman = Craftswoman.objects.create(user=craft_user, name='Tejedora con denegación')
         order = Order.objects.create(customer=self.customer, shipping_address='Maicao, La Guajira')
-        UserPermissionGrant.objects.create(
-            user=craft_user,
-            permission=permission_for('orders', 'change'),
-            effect=UserPermissionGrant.Effect.DENY,
-        )
+        superadmin = self.create_role_user('rbac-html-craft-deny-root', AccessRole.Code.SUPERADMIN)
+        set_user_permission(superadmin, craft_user, 'orders', 'assign', UserPermissionGrant.Effect.DENY)
         self.client.force_login(craft_user)
 
         response = self.client.post(f'/panel-tejedora/pedido/{order.id}/aceptar/')
@@ -3865,6 +3864,98 @@ class StoreAPITests(TestCase):
         self.client.force_login(target)
         self.assertEqual(self.client.get('/api/v1/admin/orders/').status_code, 403)
 
+
+    def test_dynamic_navigation_catalog_includes_superadmin_screen_and_rejects_other_roles(self):
+        root = self.create_role_user('navigation-catalog-root', AccessRole.Code.SUPERADMIN)
+        admin_user = self.create_role_user('navigation-catalog-admin', AccessRole.Code.ADMIN)
+        self.client.force_login(root)
+        response = self.client.get('/api/v1/admin/rbac/navigation/routes/')
+        self.assertEqual(response.status_code, 200)
+        root_route = next(route for route in response.json() if route['value'] == 'admin.access')
+        self.assertEqual(root_route['role_codes'], ['superadmin'])
+        self.assertIn('admin.products', [route['value'] for route in response.json()])
+        access_item = NavigationItem.objects.get(route_name='admin.access')
+        self.assertIn('admin.access', [entry['route_name'] for entry in self.client.get('/api/v1/navigation/menu/').json()])
+        self.assertEqual(access_item.roles.values_list('code', flat=True).get(), AccessRole.Code.SUPERADMIN)
+        disabled = self.client.patch(f'/api/v1/admin/rbac/navigation/{access_item.id}/', {'active': False}, content_type='application/json')
+        self.assertEqual(disabled.status_code, 400)
+        deleted = self.client.delete(f'/api/v1/admin/rbac/navigation/{access_item.id}/')
+        self.assertEqual(deleted.status_code, 400)
+        forbidden = self.client.post('/api/v1/admin/rbac/navigation/', {
+            'label': 'Acceso RBAC para tienda', 'route_name': 'admin.access', 'role_codes': ['admin'],
+        }, content_type='application/json')
+        self.assertEqual(forbidden.status_code, 400)
+        self.client.force_login(admin_user)
+        self.assertEqual(self.client.get('/api/v1/admin/rbac/navigation/routes/').status_code, 403)
+
+    def test_checkout_assigns_each_order_item_and_notifies_product_craftswoman(self):
+        assigned_user = self.create_role_user('line-assigned-craftswoman', AccessRole.Code.CRAFTSWOMAN)
+        assigned_worker = Craftswoman.objects.create(user=assigned_user, name='Tejedora asignada', active=True)
+        other_user = self.create_role_user('line-other-craftswoman', AccessRole.Code.CRAFTSWOMAN)
+        other_worker = Craftswoman.objects.create(user=other_user, name='Otra tejedora', active=True)
+        assigned_product = Product.objects.create(
+            sku='LINE-ASSIGNED-001', name='Manta asignada', category=self.category,
+            craftswoman=assigned_worker, price=Decimal('50000'), stock=2, active=True,
+        )
+        open_product = Product.objects.create(
+            sku='LINE-OPEN-001', name='Manta disponible', category=self.category,
+            price=Decimal('60000'), stock=2, active=True,
+        )
+        CustomerCartItem.objects.create(customer=self.customer, product=assigned_product, quantity=1)
+        CustomerCartItem.objects.create(customer=self.customer, product=open_product, quantity=1)
+
+        self.client.force_login(self.user)
+        checkout = self.client.post('/api/v1/checkout/', {
+            'address': 'Calle 1', 'city': 'Maicao', 'payment_method': 'contact',
+        }, content_type='application/json')
+        self.assertEqual(checkout.status_code, 201, checkout.content)
+        order = Order.objects.get(pk=checkout.json()['id'])
+        assigned_item = order.items.get(product=assigned_product)
+        open_item = order.items.get(product=open_product)
+        self.assertEqual(assigned_item.craftswoman_id, assigned_worker.id)
+        self.assertIsNone(open_item.craftswoman_id)
+        self.assertIsNone(order.craftswoman_id, 'Un pedido mixto no debe asignarse como un bloque a una sola tejedora.')
+        self.assertTrue(InAppNotification.objects.filter(recipient=assigned_user, order_item=assigned_item).exists())
+
+        self.client.force_login(other_user)
+        dashboard = self.client.get('/api/v1/craftswoman/dashboard/').json()
+        self.assertNotIn(assigned_item.id, [item['id'] for item in dashboard['available_items']])
+        self.assertNotIn(assigned_item.id, [item['id'] for item in dashboard['assigned_items']])
+        self.assertIn(open_item.id, [item['id'] for item in dashboard['available_items']])
+        denied = self.client.post(f'/api/v1/craftswoman/work-items/{assigned_item.id}/accept/')
+        self.assertEqual(denied.status_code, 403)
+
+        self.client.force_login(assigned_user)
+        accepted_assigned = self.client.post(f'/api/v1/craftswoman/work-items/{assigned_item.id}/accept/')
+        self.assertEqual(accepted_assigned.status_code, 200, accepted_assigned.content)
+        self.client.force_login(other_user)
+        accepted_open = self.client.post(f'/api/v1/craftswoman/work-items/{open_item.id}/accept/')
+        self.assertEqual(accepted_open.status_code, 200, accepted_open.content)
+        order.refresh_from_db()
+        self.assertIsNone(order.craftswoman_id)
+        self.assertEqual(order.status, Order.Status.ACCEPTED)
+
+        foreign_update = self.client.patch(
+            f'/api/v1/craftswoman/work-items/{assigned_item.id}/status/',
+            {'status': Order.Status.WEAVING}, content_type='application/json',
+        )
+        self.assertEqual(foreign_update.status_code, 404)
+        traditional_foreign_claim = self.client.post(f'/panel-tejedora/trabajo/{assigned_item.id}/aceptar/')
+        self.assertEqual(traditional_foreign_claim.status_code, 403)
+        own_update = self.client.patch(
+            f'/api/v1/craftswoman/work-items/{open_item.id}/status/',
+            {'status': Order.Status.WEAVING}, content_type='application/json',
+        )
+        self.assertEqual(own_update.status_code, 200, own_update.content)
+        self.assertEqual(order.items.get(pk=open_item.id).status, Order.Status.WEAVING)
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.ACCEPTED, 'El seguimiento general queda en la etapa menos avanzada de sus partidas.')
+
+        admin_user = self.create_role_user('mixed-order-supervisor', AccessRole.Code.ADMIN)
+        self.client.force_login(admin_user)
+        supervised = self.client.get('/api/v1/admin/orders/')
+        self.assertEqual(supervised.status_code, 200, supervised.content)
+        self.assertIn(order.id, [entry['id'] for entry in supervised.json()['results']])
 
 class RBACProtectionTransactionTests(TransactionTestCase):
     def create_superadmin(self, username):

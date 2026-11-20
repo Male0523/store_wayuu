@@ -166,6 +166,14 @@ export interface OrderItem {
   quantity: number
   unit_price: string
   subtotal: string
+  craftswoman: number | null
+  craftswoman_name: string | null
+  status: string
+  status_label: string
+  allowed_statuses: string[]
+  order_id?: number
+  customer_name?: string
+  order_created_at?: string
 }
 
 export interface Order {
@@ -202,9 +210,18 @@ export interface Page<T> {
 
 export interface CraftswomanDashboard {
   active: boolean
+  available_items: OrderItem[]
+  assigned_items: OrderItem[]
+  notifications: { id: number; title: string; message: string; order_id: number; created_at: string; read: boolean }[]
   available_orders: Order[]
   orders: Order[]
   designs: CustomDesign[]
+}
+
+export interface RBACNavigationRoute {
+  value: string
+  label: string
+  role_codes: string[]
 }
 
 export interface SuperadminUser {

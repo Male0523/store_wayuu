@@ -21,6 +21,7 @@ import type {
   RBACPermission,
   RBACNavigationItem,
   RBACNavigationInput,
+  RBACNavigationRoute,
   RBACRolePermissions,
   RBACRoleScopes,
   RBACRole,
@@ -155,6 +156,8 @@ export const api = {
   updateCraftswomanProfile: (values: CraftswomanProfileInput) =>
     request<CraftswomanProfile>('/craftswoman/profile/', { method: 'PATCH', body: json(values) }),
   acceptOrder: (id: number) => request<Order>(`/craftswoman/orders/${id}/accept/`, { method: 'POST' }),
+  acceptWorkItem: (id: number) => request(`/craftswoman/work-items/${id}/accept/`, { method: 'POST' }),
+  updateWorkItemStatus: (id: number, value: string) => request(`/craftswoman/work-items/${id}/status/`, { method: 'PATCH', body: json({ status: value }) }),
   updateOrderStatus: (id: number, value: string) =>
     request<Order>(`/craftswoman/orders/${id}/status/`, { method: 'PATCH', body: json({ status: value }) }),
   updateDesignStatus: (id: number, value: string) =>
@@ -221,6 +224,7 @@ export const api = {
   updateAction: (code: string, values: Partial<Pick<RBACCatalogEntry, 'name' | 'description' | 'active'>>) =>
     request<RBACCatalogEntry>(`/admin/rbac/actions/${code}/`, { method: 'PATCH', body: json(values) }),
   navigationItems: () => request<RBACNavigationItem[]>('/admin/rbac/navigation/'),
+  navigationRoutes: () => request<RBACNavigationRoute[]>('/admin/rbac/navigation/routes/'),
   createNavigationItem: (values: RBACNavigationInput) =>
     request<RBACNavigationItem>('/admin/rbac/navigation/', { method: 'POST', body: json(values) }),
   updateNavigationItem: (id: number, values: Partial<RBACNavigationInput>) =>
