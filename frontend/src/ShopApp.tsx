@@ -13,7 +13,7 @@ import LegacyCartNotice from './LegacyCartNotice'
 import type { AdminCategory, AdminCraftswomanOption, AdminOrderSummary, AdminProduct, AdminProductInput, AuditEvent, Cart, Category, CustomDesign, CraftswomanDashboard, CraftswomanProfile, CraftswomanProfileInput, InventoryReport, Order, OrderItem, Page, Product, RBACCatalogEntry, RBACNavigationInput, RBACNavigationItem, RBACNavigationRoute, RBACPermission, RBACRole, RBACRolePermissions, RBACRoleScopes, RBACUserPermissions, RBACUserScopes, SessionUser, SuperadminUser, SuperadminUserInput, UserProfile } from './types'
 import './ShopApp.css'
 
-type Screen = 'shop' | 'orders' | 'craftswoman' | 'design' | 'admin'
+type Screen = 'shop' | 'orders' | 'craftswoman' | 'design' | 'admin' | 'account'
 type AuthMode = 'login' | 'register' | 'craftswoman'
 type AccountSection = 'orders' | 'designs' | 'profile'
 
@@ -77,6 +77,7 @@ function resolveUserDisplayName(user: SessionUser | null | undefined, profile: U
 function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
   const { user, login: loginUser, register: registerUser, logout: logoutUser } = useUserSession()
   const [screen, setScreen] = useState<Screen>(initialScreen)
+  const dynamicPanelOpened = useRef(false)
   const [products, setProducts] = useState<Product[]>([])
   const [catalogRevision, setCatalogRevision] = useState(0)
   const [categories, setCategories] = useState<Category[]>([])
@@ -406,7 +407,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
     setNotice('Sesión cerrada.')
   }
 
-  async function openAccount() {
+  const openAccount = useCallback(async () => {
     if (!user) {
       setAuthMode('login')
       setAuthOpen(true)
@@ -419,7 +420,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
       if (user.role === 'admin' || user.role === 'superadmin') {
         await loadAdminData()
         setScreen('admin')
-      } else if (user.role === 'craftswoman') {
+      } else if (user.role === 'craftswoman' || configuredNavigation.some((item) => item.route_name.startsWith('craftswoman.'))) {
         setCraftswomanProfile(null)
         const visibleSections = configuredNavigation.map((item) => item.route_name.split('.')[1])
         const [craftswomanDashboard, ownProducts, ownProfile] = await Promise.all([
@@ -434,7 +435,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
       } else if (configuredNavigation.some((item) => item.route_name.startsWith('admin.'))) {
         await loadAdminData()
         setScreen('admin')
-      } else if (user.role === 'customer') {
+      } else if (user.role === 'customer' || configuredNavigation.some((item) => item.route_name.startsWith('customer.'))) {
         const visibleSections = configuredNavigation.map((item) => item.route_name.split('.')[1])
         const requests = await Promise.all([
           visibleSections.includes('orders') ? api.orders() : Promise.resolve({ results: [] as Order[] }),
@@ -463,7 +464,13 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
         setScreen('orders')
       }
     } catch (error) { setNotice(errorMessage(error)) } finally { setBusy(false) }
-  }
+  }, [user, refreshRoleNavigation, loadAdminData])
+
+  useEffect(() => {
+    if (initialScreen !== 'account' || !user || dynamicPanelOpened.current) return
+    dynamicPanelOpened.current = true
+    void openAccount()
+  }, [initialScreen, openAccount, user])
 
   async function submitCheckout(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -761,9 +768,6 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, profile, pro
     const icon = id === 'dashboard' ? <LayoutDashboard size={17} /> : id === 'products' ? <ShoppingBag size={17} /> : id === 'inventory' ? <Boxes size={17} /> : id === 'profile' ? <CircleUserRound size={17} /> : <ShoppingCart size={17} />
     return { id, label: item.label, icon }
   }).filter((item) => ['dashboard', 'products', 'inventory', 'orders', 'profile'].includes(item.id))
-  if (user && hasEffectivePermission(user, 'craftswomen.view') && !navItems.some((item) => item.id === 'profile')) {
-    navItems.push({ id: 'profile', label: 'Mi perfil', icon: <CircleUserRound size={17} /> })
-  }
   const canOpenSection = (section: string) => navItems.some((item) => item.id === section)
   const canEditProfile = Boolean(user && hasEffectivePermission(user, 'craftswomen.edit'))
   useEffect(() => {
@@ -1626,6 +1630,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
           <label className="form-label">Orden de aparición<input name="order" type="number" min="0" max="32767" defaultValue="10" /><small>Define la posición de esta opción dentro del menú de cada rol: 10 aparece antes que 20 y 30. Usa saltos de 10 para poder insertar nuevas opciones después. Si dos opciones tienen el mismo número, se ordenan alfabéticamente. No concede ni quita permisos.</small></label>
           <div className="rbac-form-section-title"><span>3</span><div><strong>¿Quién verá esta opción?</strong><small>Selecciona todos los roles activos que correspondan; puede quedar sin asignaciones.</small></div></div>
           <NavigationRolePicker legend="Roles permitidos" roles={roles} route={navigationRoutes.find((route) => route.value === newNavigationRoute)} selectedRoleCodes={newNavigationRoles} onSelectionChange={setNewNavigationRoles} />
+          {navigationRoutes.find((route) => route.value === newNavigationRoute)?.required_permissions.length ? <p className="muted-copy">Permiso mínimo de consulta requerido: {navigationRoutes.find((route) => route.value === newNavigationRoute)?.required_permissions.map((permission) => permission.resource_name).join(', ')}. La asignación no concede permisos de acción ni acceso a registros.</p> : null}
           {!newNavigationRoles.length && <p className="rbac-warning">Sin roles asignados, esta opción quedará guardada y no aparecerá en ningún menú.</p>}
           <button className="button button-dark" disabled={saving || navigationRoutesLoading || Boolean(navigationRoutesError) || Boolean(navigationRolesError) || !newNavigationRoute || navigationItems.some((item) => item.route_name === newNavigationRoute)}>{saving ? 'Guardando…' : 'Añadir opción al menú'}</button>
         </form>}
@@ -1732,9 +1737,16 @@ function NavigationRolePicker({ legend, roles, route, selectedRoleCodes, onSelec
       {filteredRoles.map((role) => {
         const checked = selectedRoleCodes.includes(role.code)
         const protectedSuperadmin = route?.value === 'admin.access' && role.code === 'superadmin'
+        const missingRequirements = route?.missing_permissions[role.code] ?? []
+        const blockedForMissingView = missingRequirements.length > 0
+        const missingScopes = route?.missing_scopes[role.code] ?? []
+        const missingPermissionMessages = missingRequirements.map((permission) => {
+          const viewName = route?.label.split(' · ').pop() ?? route?.label ?? 'esta pantalla'
+          return `Para habilitar esta pantalla por favor conceda el permiso de la vista ${viewName} de consultar (recurso requerido: ${permission.resource_name}).`
+        })
         return <label className={`rbac-role-option${checked ? ' is-selected' : ''}`} key={role.code}>
-          <input type="checkbox" checked={checked} disabled={protectedSuperadmin} onChange={(event) => onSelectionChange(updateNavigationRoleSelection(selectedRoleCodes, role.code, event.target.checked))} />
-          <span><strong>{role.name}</strong><small>{role.active ? 'Activo' : 'Inactivo'} · {role.system ? 'Predeterminado' : 'Dinámico'}{checked ? ' · Seleccionado' : ''}</small></span>
+          <input type="checkbox" checked={checked} disabled={protectedSuperadmin || ((!role.active || blockedForMissingView || missingScopes.length > 0) && !checked)} onChange={(event) => onSelectionChange(updateNavigationRoleSelection(selectedRoleCodes, role.code, event.target.checked))} />
+          <span><strong>{role.name}</strong><small>{role.active ? 'Activo' : 'Inactivo'} · {role.system ? 'Predeterminado' : 'Dinámico'}{checked ? ' · Seleccionado' : ''}</small>{missingPermissionMessages.map((message) => <small className="rbac-warning" role="status" key={message}>{message}</small>)}{missingScopes.map((resource) => <small className="rbac-warning" role="status" key={resource}>Para mostrar esta sección, configura el alcance de registros «Todos los registros» para el recurso {resource} en Roles y permisos.</small>)}</span>
         </label>
       })}
       {filteredRoles.length === 0 && <p className="muted-copy">No hay roles que coincidan con la búsqueda.</p>}

@@ -126,6 +126,23 @@ def capability_for(resource, action):
     ).first()
 
 
+def role_has_permission(role, resource, action):
+    """Check a role-level grant for navigation gating, without user overrides."""
+    if role is None or not role.active:
+        return False
+    if role.code == AccessRole.Code.SUPERADMIN:
+        return True
+    action = canonical_action(action)
+    capability = capability_for(resource, action)
+    if capability is None:
+        return False
+    grant = RBACGrant.objects.filter(role=role, capability=capability).first()
+    if grant:
+        return grant.effect == RBACGrant.Effect.ALLOW
+    permission = permission_for(resource, action)
+    return bool(permission and RolePermission.objects.filter(role=role, permission=permission).exists())
+
+
 def record_scope_for(user, resource):
     """Return the explicit record scope; custom roles default to no records."""
     role = role_for_user(user)

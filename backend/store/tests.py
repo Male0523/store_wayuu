@@ -21,6 +21,7 @@ from django.utils import timezone
 from django.core.files.uploadedfile import SimpleUploadedFile
 
 from .navigation import navigation_menu
+from .api import NAVIGATION_ROUTE_CATALOG
 from .admin import (
     CategoryAdmin,
     CraftswomanAdmin,
@@ -28,6 +29,7 @@ from .admin import (
     CustomDesignAdmin,
     OrderAdmin,
     OrderItemInline,
+    NavigationItemAdminForm,
     PermissionDelegationAdmin,
     ProductAdmin,
     ProtectedUserRoleForm,
@@ -3665,8 +3667,11 @@ class StoreAPITests(TestCase):
     def test_role_navigation_is_independent_from_action_permissions(self):
         NavigationItem.objects.all().delete()
         craftswoman = self.create_role_user('role-menu-craftswoman', AccessRole.Code.CRAFTSWOMAN)
+        Craftswoman.objects.create(user=craftswoman, name='Tejedora del menú', active=True)
+        Customer.objects.create(user=craftswoman, name='Cliente asociado', email=craftswoman.email)
         role = AccessRole.objects.get(code=AccessRole.Code.CRAFTSWOMAN)
         RolePermission.objects.get_or_create(role=role, permission=permission_for('products', 'view'))
+        RolePermission.objects.get_or_create(role=role, permission=permission_for('orders', 'view'))
         visible_item = NavigationItem.objects.create(
             label='Mis tejidos',
             route_name='craftswoman.products',
@@ -3674,6 +3679,10 @@ class StoreAPITests(TestCase):
             permission=permission_for('products', 'view'),
         )
         visible_item.roles.add(role)
+        profile_item = NavigationItem.objects.create(
+            label='Mi perfil', route_name='craftswoman.profile', active=True,
+        )
+        profile_item.roles.add(role)
         inactive_item = NavigationItem.objects.create(
             label='Panel oculto',
             route_name='craftswoman.dashboard',
@@ -3690,11 +3699,13 @@ class StoreAPITests(TestCase):
         self.client.force_login(craftswoman)
         response = self.client.get('/api/v1/navigation/menu/')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
+        self.assertCountEqual(
             [item['route_name'] for item in response.json()],
-            ['craftswoman.products', 'customer.orders'],
+            ['craftswoman.products', 'customer.orders', 'craftswoman.profile'],
         )
-        self.assertEqual(self.client.get('/api/v1/orders/').status_code, 403)
+        own_orders = self.client.get('/api/v1/orders/')
+        self.assertEqual(own_orders.status_code, 200)
+        self.assertEqual(own_orders.json()['results'], [])
 
         UserPermissionGrant.objects.create(
             user=craftswoman,
@@ -3703,12 +3714,13 @@ class StoreAPITests(TestCase):
         )
         denied = self.client.get('/api/v1/navigation/menu/')
         self.assertEqual(denied.status_code, 200)
-        self.assertEqual([item['route_name'] for item in denied.json()], ['customer.orders'])
+        self.assertCountEqual([item['route_name'] for item in denied.json()], ['customer.orders', 'craftswoman.profile'])
         self.assertEqual(self.client.get('/api/v1/craftswoman/products/').status_code, 403)
 
     def test_navigation_route_allowlist_accepts_dynamic_role_assignments(self):
         superadmin = self.create_role_user('role-menu-superadmin', AccessRole.Code.SUPERADMIN)
         dynamic_role = AccessRole.objects.create(code='orders_viewer', name='Consulta de pedidos')
+        set_role_permission(superadmin, dynamic_role.code, 'orders', 'view', allowed=True)
         self.client.force_login(superadmin)
         invalid_route = self.client.post('/api/v1/admin/rbac/navigation/', {
             'label': 'Ruta libre',
@@ -3732,6 +3744,7 @@ class StoreAPITests(TestCase):
                 self.assertIn(dynamic_role.code, route['role_codes'])
         target = self.create_role_user('orders-viewer-menu-target', AccessRole.Code.CUSTOMER)
         assign_role(target, dynamic_role.code, actor=superadmin)
+        Customer.objects.create(user=target, name='Cliente de auditoría', email=target.email)
         self.client.patch(
             f'/api/v1/admin/rbac/navigation/{existing_view.id}/',
             {'role_codes': [dynamic_role.code]}, content_type='application/json',
@@ -3739,7 +3752,9 @@ class StoreAPITests(TestCase):
         self.client.force_login(target)
         menu = self.client.get('/api/v1/navigation/menu/')
         self.assertIn('customer.orders', [item['route_name'] for item in menu.json()])
-        self.assertEqual(self.client.get('/api/v1/orders/').status_code, 403)
+        own_orders = self.client.get('/api/v1/orders/')
+        self.assertEqual(own_orders.status_code, 200)
+        self.assertEqual(own_orders.json()['results'], [])
         self.client.force_login(superadmin)
 
         admin_orders_item = NavigationItem.objects.get(route_name='admin.orders')
@@ -3749,10 +3764,14 @@ class StoreAPITests(TestCase):
         )
         self.assertEqual(cross_role_view.status_code, 200)
         self.assertEqual(cross_role_view.json()['role_codes'], [dynamic_role.code])
+        scope = self.client.put(f'/api/v1/admin/rbac/roles/{dynamic_role.code}/scopes/', {
+            'scopes': [{'resource': 'orders', 'scope': 'all'}],
+        }, content_type='application/json')
+        self.assertEqual(scope.status_code, 200, scope.content)
         self.client.force_login(target)
         assigned_admin_view = self.client.get('/api/v1/navigation/menu/')
         self.assertIn('admin.orders', [item['route_name'] for item in assigned_admin_view.json()])
-        self.assertEqual(self.client.get('/api/v1/admin/orders/').status_code, 403)
+        self.assertEqual(self.client.get('/api/v1/admin/orders/').status_code, 200)
         self.client.force_login(superadmin)
         dynamic_role.active = False
         dynamic_role.save(update_fields=('active',))
@@ -3770,7 +3789,9 @@ class StoreAPITests(TestCase):
     def test_navigation_assignment_supports_empty_set_and_role_removal_without_affecting_other_roles(self):
         superadmin = self.create_role_user('navigation-empty-root', AccessRole.Code.SUPERADMIN)
         dynamic_role = AccessRole.objects.create(code='navigation_editor_dynamic', name='Editor dinámico')
+        set_role_permission(superadmin, dynamic_role.code, 'orders', 'view', allowed=True)
         dynamic_user = self.create_role_user('navigation-empty-dynamic-user', AccessRole.Code.CUSTOMER)
+        Customer.objects.create(user=dynamic_user, name='Cliente dinámico', email=dynamic_user.email)
         customer_user = self.create_role_user('navigation-empty-customer-user', AccessRole.Code.CUSTOMER)
         assign_role(dynamic_user, dynamic_role.code, actor=superadmin)
         NavigationItem.objects.filter(route_name='craftswoman.inventory').delete()
@@ -3821,7 +3842,9 @@ class StoreAPITests(TestCase):
 
     def test_navigation_view_assignment_does_not_grant_action_or_api_access(self):
         customer = self.create_role_user('navigation-view-only-customer', AccessRole.Code.CUSTOMER)
+        Customer.objects.create(user=customer, name='Cliente de navegación', email=customer.email)
         superadmin = self.create_role_user('navigation-view-only-root', AccessRole.Code.SUPERADMIN)
+        set_role_permission(superadmin, AccessRole.Code.CUSTOMER, 'products', 'view', allowed=True)
         self.client.force_login(superadmin)
         existing_view = NavigationItem.objects.filter(route_name='admin.products').order_by('pk').first()
         self.assertIsNotNone(existing_view)
@@ -3831,6 +3854,10 @@ class StoreAPITests(TestCase):
         )
         self.assertEqual(created.status_code, 200)
         self.assertEqual(created.json()['role_codes'], ['customer'])
+        scope = self.client.put('/api/v1/admin/rbac/roles/customer/scopes/', {
+            'scopes': [{'resource': 'products', 'scope': 'all'}],
+        }, content_type='application/json')
+        self.assertEqual(scope.status_code, 200, scope.content)
 
         self.client.force_login(customer)
         menu = self.client.get('/api/v1/navigation/menu/')
@@ -3840,7 +3867,8 @@ class StoreAPITests(TestCase):
         self.assertIn('admin.products', menu_routes)
         self.assertIn('customer.orders', menu_routes)
         self.assertFalse(has_permission(customer, 'products', 'publish'))
-        self.assertIn(direct_data.status_code, (401, 403))
+        self.assertEqual(direct_data.status_code, 200)
+        self.assertEqual(self.client.patch('/api/v1/admin/products/999999/', {'active': True}, content_type='application/json').status_code, 403)
 
 
     def test_non_superadmin_cannot_manage_navigation(self):
@@ -3956,6 +3984,7 @@ class StoreAPITests(TestCase):
     def test_view_grant_does_not_grant_data_access_and_custom_role_keeps_row_isolation(self):
         superadmin = self.create_role_user('dynamic-view-root', AccessRole.Code.SUPERADMIN)
         target = self.create_role_user('dynamic-view-target', AccessRole.Code.CUSTOMER)
+        Customer.objects.create(user=target, name='Cliente auditor', email=target.email)
         role = AccessRole.objects.create(code='order_auditor', name='Auditor')
         assign_role(target, role.code, actor=superadmin)
         set_role_permission(superadmin, role.code, 'orders', 'view', allowed=True)
@@ -4014,6 +4043,8 @@ class StoreAPITests(TestCase):
         access_item = NavigationItem.objects.get(route_name='admin.access')
         self.assertIn('admin.access', [entry['route_name'] for entry in self.client.get('/api/v1/navigation/menu/').json()])
         self.assertEqual(access_item.roles.values_list('code', flat=True).get(), AccessRole.Code.SUPERADMIN)
+        craftswoman_profile_item = NavigationItem.objects.get(route_name='craftswoman.profile')
+        self.assertEqual(list(craftswoman_profile_item.roles.values_list('code', flat=True)), [AccessRole.Code.CRAFTSWOMAN])
         NavigationItem.objects.filter(route_name='customer.profile').delete()
         renamed = self.client.patch(
             f'/api/v1/admin/rbac/navigation/{access_item.id}/',
@@ -4035,6 +4066,109 @@ class StoreAPITests(TestCase):
         self.assertEqual(forbidden.status_code, 400)
         self.client.force_login(admin_user)
         self.assertEqual(self.client.get('/api/v1/admin/rbac/navigation/routes/').status_code, 403)
+
+    def test_navigation_requires_role_view_grants_and_hides_revoked_or_out_of_scope_screens(self):
+        root = self.create_role_user('navigation-requirements-root', AccessRole.Code.SUPERADMIN)
+        target = self.create_role_user('navigation-requirements-user', AccessRole.Code.CUSTOMER)
+        Customer.objects.create(user=target, name='Cliente de requisitos', email=target.email)
+        role = AccessRole.objects.create(code='navigation_limited_auditor', name='Auditor limitado')
+        assign_role(target, role.code, actor=root)
+        NavigationItem.objects.filter(route_name='customer.orders').delete()
+        self.client.force_login(root)
+
+        create_without_view = self.client.post('/api/v1/admin/rbac/navigation/', {
+            'label': 'Pedidos de auditoría', 'route_name': 'customer.orders', 'role_codes': [role.code],
+        }, content_type='application/json')
+        self.assertEqual(create_without_view.status_code, 400)
+        self.assertIn(
+            'Para habilitar esta pantalla por favor conceda el permiso de la vista Mis pedidos de consultar',
+            str(create_without_view.json()),
+        )
+
+        set_role_permission(root, role.code, 'orders', 'view', allowed=True)
+        created = self.client.post('/api/v1/admin/rbac/navigation/', {
+            'label': 'Pedidos de auditoría', 'route_name': 'customer.orders', 'role_codes': [role.code],
+        }, content_type='application/json')
+        self.assertEqual(created.status_code, 201, created.content)
+        self.client.force_login(target)
+        self.assertIn('customer.orders', [row['route_name'] for row in self.client.get('/api/v1/navigation/menu/').json()])
+        self.assertIn('orders.view', effective_permission_keys(target))
+        self.assertNotIn('orders.edit', effective_permission_keys(target))
+
+        self.client.force_login(root)
+        set_role_permission(root, role.code, 'orders', 'view', effect=RBACGrant.Effect.DENY)
+        self.client.force_login(target)
+        self.assertNotIn('customer.orders', [row['route_name'] for row in self.client.get('/api/v1/navigation/menu/').json()])
+        self.assertEqual(self.client.get('/api/v1/orders/').status_code, 403)
+
+        set_role_permission(root, role.code, 'orders', 'view', allowed=True)
+        item = NavigationItem.objects.get(route_name='admin.orders')
+        self.client.force_login(root)
+        assigned_admin_view = self.client.patch(
+            f'/api/v1/admin/rbac/navigation/{item.pk}/', {'role_codes': [role.code]}, content_type='application/json',
+        )
+        self.assertEqual(assigned_admin_view.status_code, 200, assigned_admin_view.content)
+        self.client.force_login(target)
+        self.assertNotIn('admin.orders', [row['route_name'] for row in self.client.get('/api/v1/navigation/menu/').json()])
+        self.assertEqual(self.client.get('/api/v1/admin/orders/').status_code, 403)
+
+        self.client.force_login(root)
+        self.client.put(f'/api/v1/admin/rbac/roles/{role.code}/scopes/', {
+            'scopes': [{'resource': 'orders', 'scope': 'all'}],
+        }, content_type='application/json')
+        self.client.force_login(target)
+        self.assertIn('admin.orders', [row['route_name'] for row in self.client.get('/api/v1/navigation/menu/').json()])
+        self.assertEqual(self.client.get('/api/v1/admin/orders/').status_code, 200)
+
+        self.client.force_login(root)
+        forbidden_access = self.client.patch(
+            f"/api/v1/admin/rbac/navigation/{NavigationItem.objects.get(route_name='admin.access').pk}/",
+            {'role_codes': [role.code]}, content_type='application/json',
+        )
+        self.assertEqual(forbidden_access.status_code, 400)
+        self.client.force_login(target)
+        self.assertNotIn('admin.access', [row['route_name'] for row in self.client.get('/api/v1/navigation/menu/').json()])
+
+    def test_navigation_route_registry_exposes_a_query_requirement_for_every_real_screen(self):
+        root = self.create_role_user('navigation-registry-root', AccessRole.Code.SUPERADMIN)
+        self.client.force_login(root)
+        response = self.client.get('/api/v1/admin/rbac/navigation/routes/')
+        self.assertEqual(response.status_code, 200)
+        routes = response.json()
+        expected_screens = {
+            'store:catalog', 'customer.orders', 'customer.designs', 'customer.profile',
+            'craftswoman.dashboard', 'craftswoman.products', 'craftswoman.inventory', 'craftswoman.orders', 'craftswoman.profile',
+            'admin.dashboard', 'admin.products', 'admin.inventory', 'admin.orders', 'admin.categories', 'admin.access',
+        }
+        self.assertEqual({row['value'] for row in routes}, expected_screens)
+        self.assertEqual(set(NAVIGATION_ROUTE_CATALOG), expected_screens)
+        self.assertTrue(all(row['required_permissions'] for row in routes))
+        self.assertIn('admin.access', {row['value'] for row in routes})
+        self.assertEqual(next(row for row in routes if row['value'] == 'admin.access')['role_codes'], ['superadmin'])
+
+    def test_traditional_navigation_admin_requires_view_and_protects_admin_access(self):
+        NavigationItem.objects.filter(route_name='customer.orders').delete()
+        role = AccessRole.objects.create(code='navigation_admin_form', name='Editor de navegación')
+        data = {
+            'label': 'Mis pedidos', 'route_name': 'customer.orders', 'anchor': '', 'description': '',
+            'roles': [role.pk], 'permission': '', 'order': '10', 'active': 'on',
+        }
+        form = NavigationItemAdminForm(data=data)
+        self.assertFalse(form.is_valid())
+        self.assertIn(
+            'Para habilitar esta pantalla por favor conceda el permiso de la vista Mis pedidos de consultar',
+            ' '.join(form.errors.get('roles', [])),
+        )
+
+        root = self.create_role_user('navigation-admin-form-root', AccessRole.Code.SUPERADMIN)
+        set_role_permission(root, role.code, 'orders', 'view', allowed=True)
+        valid_form = NavigationItemAdminForm(data=data)
+        self.assertTrue(valid_form.is_valid(), valid_form.errors)
+
+        data.update(label='Acceso RBAC', route_name='admin.access', roles=[role.pk])
+        protected_form = NavigationItemAdminForm(data=data)
+        self.assertFalse(protected_form.is_valid())
+        self.assertIn('superadministrador', ' '.join(protected_form.errors.get('roles', [])).lower())
 
     def test_checkout_assigns_each_order_item_and_notifies_product_craftswoman(self):
         assigned_user = self.create_role_user('line-assigned-craftswoman', AccessRole.Code.CRAFTSWOMAN)

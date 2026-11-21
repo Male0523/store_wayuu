@@ -47,6 +47,7 @@ export function ensureSuperadminAccessEntry(
     role_codes: ['superadmin'],
     permission_resource: null,
     permission_action: null,
+    required_permissions: [{ resource: 'roles', action: 'view', resource_name: 'Roles', granted: true }],
     order: 0,
     active: true,
   }]

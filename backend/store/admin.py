@@ -18,10 +18,12 @@ from .models import (
     OrderItem,
     PermissionDelegation,
     Product,
+    RBACResource,
     RolePermission,
     UserPermissionGrant,
     UserRole,
 )
+from .api import NAVIGATION_ROUTE_CATALOG, missing_role_navigation_requirements
 from .rbac import (
     has_permission as has_rbac_permission,
     has_role,
@@ -378,11 +380,55 @@ class UserRoleAdmin(SuperadminOnlyAdmin):
         )
 
 
+class NavigationItemAdminForm(forms.ModelForm):
+    class Meta:
+        model = NavigationItem
+        fields = '__all__'
+
+    def clean(self):
+        cleaned = super().clean()
+        route_name = cleaned.get('route_name')
+        roles = cleaned.get('roles')
+        active = cleaned.get('active', True)
+        if not route_name or route_name not in NAVIGATION_ROUTE_CATALOG or roles is None:
+            return cleaned
+        duplicate_route = NavigationItem.objects.filter(route_name=route_name)
+        if self.instance.pk:
+            duplicate_route = duplicate_route.exclude(pk=self.instance.pk)
+        if duplicate_route.exists():
+            self.add_error('route_name', 'Esa ruta ya está configurada; edita la opción existente y agrega los roles allí.')
+        role_rows = list(roles)
+        if any(not role.active for role in role_rows):
+            self.add_error('roles', 'Las vistas solo pueden asignarse a roles activos.')
+        if active:
+            for role in role_rows:
+                missing = missing_role_navigation_requirements(role, route_name)
+                if missing:
+                    resource, _action = missing[0]
+                    resource_name = RBACResource.objects.filter(code=resource).values_list('name', flat=True).first() or resource
+                    view_name = NAVIGATION_ROUTE_CATALOG[route_name]['label'].split(' · ', 1)[-1]
+                    self.add_error(
+                        'roles',
+                        f'Para habilitar esta pantalla por favor conceda el permiso de la vista {view_name} de consultar (recurso requerido: {resource_name}).',
+                    )
+                    break
+        role_codes = {role.code for role in role_rows}
+        if route_name == 'admin.access' and role_codes != {AccessRole.Code.SUPERADMIN}:
+            self.add_error('roles', 'Roles y permisos solo puede mostrarse al superadministrador.')
+        if self.instance.pk and self.instance.route_name == 'admin.access':
+            if route_name != 'admin.access':
+                self.add_error('route_name', 'La opción Roles y permisos está protegida y no puede cambiar de pantalla.')
+            if not active:
+                self.add_error('active', 'La pantalla de administración RBAC debe permanecer disponible para el superadministrador.')
+        return cleaned
+
+
 @admin.register(NavigationItem)
 class NavigationItemAdmin(SuperadminOnlyAdmin):
+    form = NavigationItemAdminForm
     rbac_resource = 'navigation'
     list_display = ('label', 'route_name', 'roles_visible', 'permission', 'active', 'order')
-    list_editable = ('active', 'order')
+    list_editable = ('order',)
     list_filter = ('active', 'roles')
     search_fields = ('label', 'route_name', 'description')
     filter_horizontal = ('roles',)
@@ -396,6 +442,11 @@ class NavigationItemAdmin(SuperadminOnlyAdmin):
     @admin.display(description='Roles con acceso')
     def roles_visible(self, obj):
         return ', '.join(obj.roles.values_list('name', flat=True)) or 'Sin roles asignados'
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj and obj.route_name == 'admin.access':
+            return (*super().get_readonly_fields(request, obj), 'route_name', 'roles', 'active')
+        return super().get_readonly_fields(request, obj)
 
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)

@@ -61,13 +61,20 @@ class OrderAccess(RolePermission):
 
 
 class CustomerOnly(RolePermission):
-    role_codes = (AccessRole.Code.CUSTOMER,)
-    message = 'Esta operación solo está disponible para clientes.'
+    role_codes = ()
+    message = 'Esta operación requiere un perfil de cliente vinculado y el permiso correspondiente.'
+
+    def has_permission(self, request, view):
+        from .models import Customer
+        role = role_for_user(request.user) if request.user and request.user.is_authenticated else None
+        return super().has_permission(request, view) and bool(
+            role and (role.code == AccessRole.Code.CUSTOMER or Customer.objects.filter(user=request.user).exists())
+        )
 
 
 class CraftswomanOnly(RolePermission):
-    role_codes = (AccessRole.Code.CRAFTSWOMAN,)
-    message = 'Esta operación solo está disponible para tejedoras.'
+    role_codes = ()
+    message = 'Esta operación requiere un perfil de tejedora activo y el permiso correspondiente.'
 
     def has_permission(self, request, view):
         return super().has_permission(request, view) and Craftswoman.objects.filter(
@@ -87,8 +94,6 @@ class AdminOrSuperadmin(RolePermission):
         resource = getattr(view, 'rbac_resource', None)
         # Persona permissions describe their own records; they must never
         # authorize an administrative collection endpoint.
-        if role.code in (AccessRole.Code.CUSTOMER, AccessRole.Code.CRAFTSWOMAN):
-            return False
         # A capability alone never grants cross-account access to private rows.
         # Custom roles must also receive an explicit all-records scope.
         if resource in {'orders', 'designs', 'products', 'customers', 'users', 'craftswomen'} and record_scope_for(

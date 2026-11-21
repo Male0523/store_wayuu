@@ -77,6 +77,7 @@ from .rbac import (
     permission_key,
     record_audit,
     record_scope_for,
+    role_has_permission,
     remove_user_permission,
     revoke_admin_delegations,
     role_for_user,
@@ -798,26 +799,24 @@ class SuperadminUserWriteSerializer(serializers.Serializer):
         return attrs
 
 
-SUPPORTED_NAVIGATION_ROUTES = (
-    'customer.orders', 'customer.designs', 'customer.profile',
-    'craftswoman.dashboard', 'craftswoman.products', 'craftswoman.inventory', 'craftswoman.orders',
-    'admin.dashboard', 'admin.products', 'admin.inventory', 'admin.orders', 'admin.categories', 'admin.access',
-)
-
 NAVIGATION_ROUTE_CATALOG = {
-    'customer.orders': 'Cliente · Mis pedidos',
-    'customer.designs': 'Cliente · Mis diseños',
-    'customer.profile': 'Cliente · Mis datos',
-    'craftswoman.dashboard': 'Tejedora · Panel principal',
-    'craftswoman.products': 'Tejedora · Mis tejidos',
-    'craftswoman.inventory': 'Tejedora · Mi inventario',
-    'craftswoman.orders': 'Tejedora · Mis pedidos',
-    'admin.dashboard': 'Administrador · Panel principal',
-    'admin.products': 'Administrador · Productos',
-    'admin.inventory': 'Administrador · Inventario',
-    'admin.orders': 'Administrador · Pedidos',
-    'admin.categories': 'Administrador · Categorías',
-    'admin.access': 'Superadministrador · Roles y permisos',
+    # Required view capabilities are the minimum data access for each real screen.
+    # Action permissions and row scopes are checked separately by each endpoint.
+    'store:catalog': {'label': 'Catálogo', 'requires': (('products', 'view'),)},
+    'customer.orders': {'label': 'Cliente · Mis pedidos', 'requires': (('orders', 'view'),)},
+    'customer.designs': {'label': 'Cliente · Mis diseños', 'requires': (('designs', 'view'),)},
+    'customer.profile': {'label': 'Cliente · Mis datos', 'requires': (('customers', 'view'),)},
+    'craftswoman.dashboard': {'label': 'Tejedora · Panel principal', 'requires': (('orders', 'view'), ('products', 'view'))},
+    'craftswoman.products': {'label': 'Tejedora · Mis tejidos', 'requires': (('products', 'view'),)},
+    'craftswoman.inventory': {'label': 'Tejedora · Mi inventario', 'requires': (('products', 'view'),)},
+    'craftswoman.orders': {'label': 'Tejedora · Mis pedidos', 'requires': (('orders', 'view'),)},
+    'craftswoman.profile': {'label': 'Tejedora · Mi perfil', 'requires': (('craftswomen', 'view'),)},
+    'admin.dashboard': {'label': 'Administrador · Panel principal', 'requires': (('products', 'view'), ('orders', 'view')), 'all_scope': ('products', 'orders')},
+    'admin.products': {'label': 'Administrador · Productos', 'requires': (('products', 'view'),), 'all_scope': ('products',)},
+    'admin.inventory': {'label': 'Administrador · Inventario', 'requires': (('products', 'view'),), 'all_scope': ('products',)},
+    'admin.orders': {'label': 'Administrador · Pedidos', 'requires': (('orders', 'view'),), 'all_scope': ('orders',)},
+    'admin.categories': {'label': 'Administrador · Categorías', 'requires': (('categories', 'view'),)},
+    'admin.access': {'label': 'Superadministrador · Roles y permisos', 'requires': (('roles', 'view'),)},
 }
 
 def navigation_role_codes(route_name):
@@ -832,9 +831,73 @@ def navigation_role_codes(route_name):
     return list(active_roles.values_list('code', flat=True))
 
 
+def navigation_requirements(route_name):
+    return NAVIGATION_ROUTE_CATALOG.get(route_name, {}).get('requires', ())
+
+
+def missing_role_navigation_requirements(role, route_name):
+    return [
+        (resource, action)
+        for resource, action in navigation_requirements(route_name)
+        if not role_has_permission(role, resource, action)
+    ]
+
+
+def role_has_all_scope(role, resource):
+    if role is None or not role.active:
+        return False
+    if role.code == AccessRole.Code.SUPERADMIN:
+        return True
+    saved_scope = RBACRecordScopeGrant.objects.filter(role=role, resource__code=resource).values_list('scope', flat=True).first()
+    if saved_scope:
+        return saved_scope == RBACRecordScopeGrant.Scope.ALL
+    return role.code == AccessRole.Code.ADMIN
+
+
+def navigation_requirement_payload(route_name, role=None):
+    return [
+        {
+            'resource': resource,
+            'action': action,
+            'resource_name': RBACResource.objects.filter(code=resource).values_list('name', flat=True).first() or resource,
+            'granted': role_has_permission(role, resource, action) if role else None,
+        }
+        for resource, action in navigation_requirements(route_name)
+    ]
+
+
+def navigation_route_payload(route_name):
+    assignable = navigation_role_codes(route_name)
+    return {
+        'value': route_name,
+        'label': NAVIGATION_ROUTE_CATALOG[route_name]['label'],
+        'role_codes': assignable,
+        'required_permissions': [
+            {key: value for key, value in requirement.items() if key != 'granted'}
+            for requirement in navigation_requirement_payload(route_name)
+        ],
+        'missing_permissions': {
+            role.code: [
+                requirement for requirement in navigation_requirement_payload(route_name, role)
+                if not requirement['granted']
+            ]
+            for role in AccessRole.objects.filter(active=True).order_by('priority', 'name')
+            if role.code in assignable
+        },
+        'missing_scopes': {
+            role.code: [
+                resource for resource in NAVIGATION_ROUTE_CATALOG[route_name].get('all_scope', ())
+                if not role_has_all_scope(role, resource)
+            ]
+            for role in AccessRole.objects.filter(active=True).order_by('priority', 'name')
+            if role.code in assignable
+        },
+    }
+
+
 class NavigationItemWriteSerializer(serializers.Serializer):
     label = serializers.CharField(max_length=80)
-    route_name = serializers.ChoiceField(choices=tuple((key, key) for key in SUPPORTED_NAVIGATION_ROUTES))
+    route_name = serializers.ChoiceField(choices=tuple((key, key) for key in NAVIGATION_ROUTE_CATALOG))
     anchor = serializers.CharField(max_length=80, required=False, allow_blank=True)
     description = serializers.CharField(max_length=220, required=False, allow_blank=True)
     role_codes = serializers.ListField(
@@ -878,19 +941,34 @@ class NavigationItemWriteSerializer(serializers.Serializer):
         route_name = attrs.get('route_name', previous_route)
         if previous_route == 'admin.access' and route_name != previous_route:
             raise serializers.ValidationError({'route_name': 'La opción Roles y permisos está protegida y no puede cambiar de pantalla.'})
-        if route_name == 'admin.access':
-            selected_roles = set(role_codes) if role_codes is not None else set(self.instance.roles.values_list('code', flat=True))
-            if selected_roles != {AccessRole.Code.SUPERADMIN}:
-                raise serializers.ValidationError({'role_codes': 'Roles y permisos solo puede mostrarse al superadministrador.'})
         if getattr(self.instance, 'route_name', None) == 'admin.access' and attrs.get('active') is False:
             raise serializers.ValidationError({'active': 'La pantalla de administración RBAC debe permanecer disponible para el superadministrador.'})
         if route_name and (role_codes is not None or 'route_name' in attrs):
             selected_roles = set(role_codes) if role_codes is not None else set(self.instance.roles.values_list('code', flat=True))
             incompatible = selected_roles - set(navigation_role_codes(route_name))
+            if route_name == 'admin.access':
+                incompatible = set()
             if incompatible:
                 raise serializers.ValidationError({
                     'role_codes': f'Estos roles no son compatibles con la pantalla seleccionada: {", ".join(sorted(incompatible))}.',
                 })
+        if route_name and attrs.get('active', getattr(self.instance, 'active', True)):
+            selected_roles = set(role_codes) if role_codes is not None else (
+                set(self.instance.roles.values_list('code', flat=True)) if self.instance else set()
+            )
+            for role in AccessRole.objects.filter(code__in=selected_roles, active=True):
+                missing = missing_role_navigation_requirements(role, route_name)
+                if missing:
+                    resource, _action = missing[0]
+                    resource_name = RBACResource.objects.filter(code=resource).values_list('name', flat=True).first() or resource
+                    view_name = NAVIGATION_ROUTE_CATALOG[route_name]['label'].split(' · ', 1)[-1]
+                    raise serializers.ValidationError({
+                        'role_codes': f'Para habilitar esta pantalla por favor conceda el permiso de la vista {view_name} de consultar (recurso requerido: {resource_name}).',
+                    })
+        if route_name == 'admin.access':
+            selected_roles = set(role_codes) if role_codes is not None else set(self.instance.roles.values_list('code', flat=True))
+            if selected_roles != {AccessRole.Code.SUPERADMIN}:
+                raise serializers.ValidationError({'role_codes': 'Roles y permisos solo puede mostrarse al superadministrador.'})
         return attrs
 
 
@@ -1035,8 +1113,13 @@ def _sync_managed_user_profile(user, role, values):
 
 def _customer_for(user):
     role = role_for_user(user)
-    if not role or role.code != AccessRole.Code.CUSTOMER:
-        raise PermissionDenied('Esta acción solo está disponible para clientes.')
+    if not role:
+        raise PermissionDenied('Esta acción requiere un rol activo.')
+    customer = Customer.objects.filter(user=user).first()
+    if customer:
+        return customer
+    if role.code != AccessRole.Code.CUSTOMER:
+        raise PermissionDenied('Esta cuenta no tiene un perfil de cliente vinculado.')
     customer, _ = Customer.objects.get_or_create(
         user=user,
         defaults={
@@ -1093,6 +1176,9 @@ def _customer_orders(user):
         return craftswoman.orders.all() if craftswoman else Order.objects.none()
     if role.code == AccessRole.Code.CUSTOMER:
         return Order.objects.filter(customer__user=user)
+    customer = Customer.objects.filter(user=user).first()
+    if customer:
+        return Order.objects.filter(customer=customer)
     return Order.objects.none()
 
 
@@ -1935,6 +2021,7 @@ class SuperadminNavigationView(APIView):
             'role_codes': list(item.roles.values_list('code', flat=True)),
             'permission_resource': key[0] if key else None,
             'permission_action': key[1] if key else None,
+            'required_permissions': navigation_requirement_payload(item.route_name),
             'order': item.order,
             'active': item.active,
         }
@@ -1959,10 +2046,7 @@ class SuperadminNavigationRouteCatalogView(APIView):
     permission_classes = (SuperadminOnly,)
 
     def get(self, request):
-        return Response([
-            {'value': route, 'label': label, 'role_codes': navigation_role_codes(route)}
-            for route, label in NAVIGATION_ROUTE_CATALOG.items()
-        ])
+        return Response([navigation_route_payload(route) for route in NAVIGATION_ROUTE_CATALOG])
 
 
 class SuperadminNavigationDetailView(APIView):
@@ -2017,6 +2101,20 @@ class RoleNavigationMenuView(APIView):
         items = NavigationItem.objects.filter(active=True, roles=role).select_related('permission__content_type').order_by('order', 'label')
         for item in items:
             if item.route_name not in allowed_routes:
+                continue
+            if item.route_name.startswith('customer.') and role.code != AccessRole.Code.CUSTOMER and not Customer.objects.filter(user=request.user).exists():
+                continue
+            if item.route_name.startswith('craftswoman.') and not Craftswoman.objects.filter(user=request.user, active=True).exists():
+                continue
+            if item.route_name != 'admin.access' and any(
+                not has_rbac_permission(request.user, resource, action)
+                for resource, action in navigation_requirements(item.route_name)
+            ):
+                continue
+            if any(
+                record_scope_for(request.user, resource) != 'all'
+                for resource in NAVIGATION_ROUTE_CATALOG[item.route_name].get('all_scope', ())
+            ):
                 continue
             if item.permission_id:
                 key = permission_key(item.permission)

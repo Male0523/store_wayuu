@@ -44,7 +44,7 @@ function AccessGate({ user, onLogin }: {
 	}
 
 	if (user) {
-		const destination = roleRoutes.find((route) => route.role === user.role)
+		const destination = roleRoutes.find((route) => route.role === user.role) ?? { path: '/panel', label: 'Mi panel' }
 		return (
 			<section className="access-panel" aria-live="polite">
 				<h1>Esta vista no está disponible para tu cuenta</h1>
@@ -106,7 +106,7 @@ export default function App() {
 		event.preventDefault()
 		const values = new FormData(event.currentTarget)
 		const account = await loginUser(String(values.get('username')), String(values.get('password')))
-		const destination = roleRoutes.find((route) => route.role === account.role)?.path ?? '/tienda'
+		const destination = roleRoutes.find((route) => route.role === account.role)?.path ?? '/panel'
 		window.history.pushState(null, '', destination)
 		setPath(destination)
 	}
@@ -136,6 +136,11 @@ export default function App() {
 		case '/tejedora': page = protectedPage('craftswoman', <ConnectedShop key="tejedora" initialScreen="craftswoman" />, true); break
 		case '/admin': page = protectedPage('admin', <ConnectedShop key="admin" initialScreen="admin" />, true); break
 		case '/superadmin': page = protectedPage('superadmin', <ConnectedShop key="superadmin" initialScreen="admin" />, true); break
+		case '/panel': page = !sessionLoaded
+			? <div className="route-loading" role="status">Comprobando sesión…</div>
+			: user
+				? <ConnectedShop key={`panel-${user.id}`} initialScreen="account" />
+				: <AccessGate user={user} onLogin={login} />; break
 		default: page = <section className="access-panel"><h1>Página no encontrada</h1><a className="primary-link" href="/" onClick={(event) => navigate(event, '/')}>Volver al inicio</a></section>
 	}
 
@@ -148,6 +153,7 @@ export default function App() {
 					{roleRoutes.filter((route) => route.role === user?.role).map((route) => (
 						<a key={route.path} href={route.path} onClick={(event) => navigate(event, route.path)}>{route.label}</a>
 					))}
+					{user && !roleRoutes.some((route) => route.role === user.role) && <a href="/panel" onClick={(event) => navigate(event, '/panel')}>Mi panel</a>}
 				</nav>
 				{user && <button className="session-button" type="button" onClick={logout}>Cerrar sesión</button>}
 			</header>

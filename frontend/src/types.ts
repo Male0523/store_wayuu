@@ -222,6 +222,9 @@ export interface RBACNavigationRoute {
   value: string
   label: string
   role_codes: string[]
+  required_permissions: { resource: string; action: string; resource_name: string }[]
+  missing_permissions: Record<string, { resource: string; action: string; resource_name: string; granted: boolean }[]>
+  missing_scopes: Record<string, string[]>
 }
 
 export interface SuperadminUser {
@@ -359,6 +362,7 @@ export interface RBACNavigationItem {
   role_codes: string[]
   permission_resource: string | null
   permission_action: RBACAction | null
+  required_permissions: { resource: string; action: string; resource_name: string; granted: boolean | null }[]
   order: number
   active: boolean
 }
