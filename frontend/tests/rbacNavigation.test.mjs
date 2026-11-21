@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { ensureSuperadminAccessEntry, firstAvailableNavigationRoute, navigationItemMatchesInput, rolesAllowedForRoute, updateNavigationRoleSelection } from '../src/lib/navigation.ts'
+import { hasNavigationDraftChanges, roleCodesWithVisibility, routePermissions } from '../src/lib/navigationConfig.ts'
 
 const role = (code, active = true) => ({
   code, name: code, description: '', priority: 10, active, system: false, assigned_users: 0,
@@ -60,6 +61,29 @@ test('superadmin keeps an access entry if the navigation response omits it', () 
   assert.equal(result[0], configured[0])
   assert.equal(result.filter((entry) => entry.route_name === 'admin.access').length, 1)
   assert.deepEqual(ensureSuperadminAccessEntry(configured, 'admin'), configured)
+})
+
+test('route CRUD capabilities are taken only from resources required by the real route catalog', () => {
+  const route = { required_permissions: [{ resource: 'orders', action: 'view', resource_name: 'Pedidos' }] }
+  const permissions = [
+    { resource: 'orders', action: 'view' },
+    { resource: 'orders', action: 'assign' },
+    { resource: 'products', action: 'edit' },
+  ]
+  assert.deepEqual(routePermissions(route, permissions), permissions.slice(0, 2))
+})
+
+test('visibility assignment changes only the selected role and avoids duplicates', () => {
+  const item = { role_codes: ['admin', 'customer'] }
+  assert.deepEqual(roleCodesWithVisibility(item, 'admin', true), ['admin', 'customer'])
+  assert.deepEqual(roleCodesWithVisibility(item, 'admin', false), ['customer'])
+  assert.deepEqual(roleCodesWithVisibility(null, 'craftswoman', true), ['craftswoman'])
+})
+
+test('navigation draft detects permission and visibility changes', () => {
+  assert.equal(hasNavigationDraftChanges(false, false, { 'orders.view': 'inherit' }, { 'orders.view': 'inherit' }), false)
+  assert.equal(hasNavigationDraftChanges(false, true, {}, {}), true)
+  assert.equal(hasNavigationDraftChanges(false, false, { 'orders.view': 'inherit' }, { 'orders.view': 'allow' }), true)
 })
 
 test('does not duplicate a configured superadmin access entry', () => {
