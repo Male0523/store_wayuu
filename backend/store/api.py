@@ -805,70 +805,31 @@ SUPPORTED_NAVIGATION_ROUTES = (
 )
 
 NAVIGATION_ROUTE_CATALOG = {
-    'customer.orders': ('Cliente · Mis pedidos', (AccessRole.Code.CUSTOMER,)),
-    'customer.designs': ('Cliente · Mis diseños', (AccessRole.Code.CUSTOMER,)),
-    'customer.profile': ('Cliente · Mis datos', (AccessRole.Code.CUSTOMER,)),
-    'craftswoman.dashboard': ('Tejedora · Panel principal', (AccessRole.Code.CRAFTSWOMAN,)),
-    'craftswoman.products': ('Tejedora · Mis tejidos', (AccessRole.Code.CRAFTSWOMAN,)),
-    'craftswoman.inventory': ('Tejedora · Mi inventario', (AccessRole.Code.CRAFTSWOMAN,)),
-    'craftswoman.orders': ('Tejedora · Mis pedidos', (AccessRole.Code.CRAFTSWOMAN,)),
-    'admin.dashboard': ('Administrador · Panel principal', (AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN)),
-    'admin.products': ('Administrador · Productos', (AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN)),
-    'admin.inventory': ('Administrador · Inventario', (AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN)),
-    'admin.orders': ('Administrador · Pedidos', (AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN)),
-    'admin.categories': ('Administrador · Categorías', (AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN)),
-    'admin.access': ('Superadministrador · Roles y permisos', (AccessRole.Code.SUPERADMIN,)),
+    'customer.orders': 'Cliente · Mis pedidos',
+    'customer.designs': 'Cliente · Mis diseños',
+    'customer.profile': 'Cliente · Mis datos',
+    'craftswoman.dashboard': 'Tejedora · Panel principal',
+    'craftswoman.products': 'Tejedora · Mis tejidos',
+    'craftswoman.inventory': 'Tejedora · Mi inventario',
+    'craftswoman.orders': 'Tejedora · Mis pedidos',
+    'admin.dashboard': 'Administrador · Panel principal',
+    'admin.products': 'Administrador · Productos',
+    'admin.inventory': 'Administrador · Inventario',
+    'admin.orders': 'Administrador · Pedidos',
+    'admin.categories': 'Administrador · Categorías',
+    'admin.access': 'Superadministrador · Roles y permisos',
 }
-
-# The customer orders panel supports any assigned role; the orders API still
-# checks `orders.view` and applies its record scope. Administrative collections
-# require their view grant and, for private resources, an explicit all scope.
-# CustomerOnly/CraftswomanOnly routes remain with their established roles.
-DYNAMIC_NAVIGATION_ROLE_ONLY_ROUTES = {'customer.orders'}
-DYNAMIC_NAVIGATION_ROUTE_REQUIREMENTS = {
-    'admin.dashboard': ('orders', True),
-    'admin.products': ('products', True),
-    'admin.inventory': ('products', True),
-    'admin.orders': ('orders', True),
-    'admin.categories': ('categories', False),
-}
-
 
 def navigation_role_codes(route_name):
-    """Return active built-in roles and compatible explicitly granted custom roles."""
+    """Return active assignable roles for a known view, protecting RBAC itself."""
     route_definition = NAVIGATION_ROUTE_CATALOG.get(route_name)
     if route_definition is None:
         return []
 
-    active_roles = list(AccessRole.objects.filter(active=True).order_by('priority', 'name'))
-    allowed = set(route_definition[1])
+    active_roles = AccessRole.objects.filter(active=True).order_by('priority', 'name')
     if route_name == 'admin.access':
-        allowed.intersection_update({AccessRole.Code.SUPERADMIN})
-    elif route_name in DYNAMIC_NAVIGATION_ROLE_ONLY_ROUTES:
-        allowed.update(role.code for role in active_roles if role.code not in AccessRole.Code.values)
-    else:
-        requirement = DYNAMIC_NAVIGATION_ROUTE_REQUIREMENTS.get(route_name)
-        if requirement:
-            resource, requires_all_scope = requirement
-            permission = permission_for(resource, 'view')
-            capability = capability_for(resource, 'view')
-            for role in active_roles:
-                if role.code in AccessRole.Code.values or not permission or not capability:
-                    continue
-                if requires_all_scope and not RBACRecordScopeGrant.objects.filter(
-                    role=role, resource__code=resource, scope=RBACRecordScopeGrant.Scope.ALL,
-                ).exists():
-                    continue
-                grant = RBACGrant.objects.filter(role=role, capability=capability).first()
-                if grant and grant.effect == RBACGrant.Effect.DENY:
-                    continue
-                if (grant and grant.effect == RBACGrant.Effect.ALLOW) or RolePermission.objects.filter(
-                    role=role, permission=permission,
-                ).exists():
-                    allowed.add(role.code)
-
-    active_codes = {role.code for role in active_roles}
-    return [role.code for role in active_roles if role.code in allowed and role.code in active_codes]
+        return [role.code for role in active_roles if role.code == AccessRole.Code.SUPERADMIN]
+    return list(active_roles.values_list('code', flat=True))
 
 
 class NavigationItemWriteSerializer(serializers.Serializer):
@@ -2000,7 +1961,7 @@ class SuperadminNavigationRouteCatalogView(APIView):
     def get(self, request):
         return Response([
             {'value': route, 'label': label, 'role_codes': navigation_role_codes(route)}
-            for route, (label, _role_codes) in NAVIGATION_ROUTE_CATALOG.items()
+            for route, label in NAVIGATION_ROUTE_CATALOG.items()
         ])
 
 

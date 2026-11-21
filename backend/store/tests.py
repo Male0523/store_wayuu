@@ -3690,7 +3690,11 @@ class StoreAPITests(TestCase):
         self.client.force_login(craftswoman)
         response = self.client.get('/api/v1/navigation/menu/')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual([item['route_name'] for item in response.json()], ['craftswoman.products'])
+        self.assertEqual(
+            [item['route_name'] for item in response.json()],
+            ['craftswoman.products', 'customer.orders'],
+        )
+        self.assertEqual(self.client.get('/api/v1/orders/').status_code, 403)
 
         UserPermissionGrant.objects.create(
             user=craftswoman,
@@ -3699,7 +3703,7 @@ class StoreAPITests(TestCase):
         )
         denied = self.client.get('/api/v1/navigation/menu/')
         self.assertEqual(denied.status_code, 200)
-        self.assertEqual([item['route_name'] for item in denied.json()], [])
+        self.assertEqual([item['route_name'] for item in denied.json()], ['customer.orders'])
         self.assertEqual(self.client.get('/api/v1/craftswoman/products/').status_code, 403)
 
     def test_navigation_route_allowlist_accepts_dynamic_role_assignments(self):
@@ -3718,6 +3722,14 @@ class StoreAPITests(TestCase):
         routes = self.client.get('/api/v1/admin/rbac/navigation/routes/')
         customer_orders = next(route for route in routes.json() if route['value'] == 'customer.orders')
         self.assertIn(dynamic_role.code, customer_orders['role_codes'])
+        admin_orders = next(route for route in routes.json() if route['value'] == 'admin.orders')
+        self.assertIn(dynamic_role.code, admin_orders['role_codes'])
+        self.assertIn(AccessRole.Code.CUSTOMER, admin_orders['role_codes'])
+        for route in routes.json():
+            if route['value'] == 'admin.access':
+                self.assertNotIn(dynamic_role.code, route['role_codes'])
+            else:
+                self.assertIn(dynamic_role.code, route['role_codes'])
         target = self.create_role_user('orders-viewer-menu-target', AccessRole.Code.CUSTOMER)
         assign_role(target, dynamic_role.code, actor=superadmin)
         self.client.patch(
@@ -3730,37 +3742,29 @@ class StoreAPITests(TestCase):
         self.assertEqual(self.client.get('/api/v1/orders/').status_code, 403)
         self.client.force_login(superadmin)
 
-        set_role_permission(superadmin, dynamic_role.code, 'orders', 'view', allowed=True)
-        admin_orders = next(route for route in routes.json() if route['value'] == 'admin.orders')
-        self.assertNotIn(dynamic_role.code, admin_orders['role_codes'])
-        scope = self.client.put(
-            f'/api/v1/admin/rbac/roles/{dynamic_role.code}/scopes/',
-            {'scopes': [{'resource': 'orders', 'scope': 'all'}]},
-            content_type='application/json',
-        )
-        self.assertEqual(scope.status_code, 200, scope.content)
-        routes = self.client.get('/api/v1/admin/rbac/navigation/routes/')
-        admin_orders = next(route for route in routes.json() if route['value'] == 'admin.orders')
-        self.assertIn(dynamic_role.code, admin_orders['role_codes'])
+        admin_orders_item = NavigationItem.objects.get(route_name='admin.orders')
         cross_role_view = self.client.patch(
-            f'/api/v1/admin/rbac/navigation/{existing_view.id}/',
+            f'/api/v1/admin/rbac/navigation/{admin_orders_item.id}/',
             {'role_codes': [dynamic_role.code]}, content_type='application/json',
         )
         self.assertEqual(cross_role_view.status_code, 200)
         self.assertEqual(cross_role_view.json()['role_codes'], [dynamic_role.code])
-        incompatible = self.client.patch(
-            f'/api/v1/admin/rbac/navigation/{existing_view.id}/',
-            {'role_codes': ['admin']}, content_type='application/json',
-        )
-        self.assertEqual(incompatible.status_code, 400)
+        self.client.force_login(target)
+        assigned_admin_view = self.client.get('/api/v1/navigation/menu/')
+        self.assertIn('admin.orders', [item['route_name'] for item in assigned_admin_view.json()])
+        self.assertEqual(self.client.get('/api/v1/admin/orders/').status_code, 403)
+        self.client.force_login(superadmin)
         dynamic_role.active = False
         dynamic_role.save(update_fields=('active',))
         routes = self.client.get('/api/v1/admin/rbac/navigation/routes/')
         customer_orders = next(route for route in routes.json() if route['value'] == 'customer.orders')
         self.assertNotIn(dynamic_role.code, customer_orders['role_codes'])
-        inactive_assignment = self.client.post('/api/v1/admin/rbac/navigation/', {
-            'label': 'Pedidos inactivos', 'route_name': 'customer.orders', 'role_codes': [dynamic_role.code],
-        }, content_type='application/json')
+        admin_orders = next(route for route in routes.json() if route['value'] == 'admin.orders')
+        self.assertNotIn(dynamic_role.code, admin_orders['role_codes'])
+        inactive_assignment = self.client.patch(
+            f'/api/v1/admin/rbac/navigation/{admin_orders_item.id}/',
+            {'role_codes': [dynamic_role.code]}, content_type='application/json',
+        )
         self.assertEqual(inactive_assignment.status_code, 400)
 
     def test_navigation_view_assignment_does_not_grant_action_or_api_access(self):
@@ -3773,14 +3777,15 @@ class StoreAPITests(TestCase):
             f'/api/v1/admin/rbac/navigation/{existing_view.id}/',
             {'role_codes': ['customer']}, content_type='application/json',
         )
-        self.assertEqual(created.status_code, 400)
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(created.json()['role_codes'], ['customer'])
 
         self.client.force_login(customer)
         menu = self.client.get('/api/v1/navigation/menu/')
         direct_data = self.client.get('/api/v1/admin/products/')
         self.assertEqual(menu.status_code, 200)
         menu_routes = [item['route_name'] for item in menu.json()]
-        self.assertNotIn('admin.products', menu_routes)
+        self.assertIn('admin.products', menu_routes)
         self.assertIn('customer.orders', menu_routes)
         self.assertFalse(has_permission(customer, 'products', 'publish'))
         self.assertIn(direct_data.status_code, (401, 403))
