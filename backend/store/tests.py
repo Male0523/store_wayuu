@@ -3619,6 +3619,7 @@ class StoreAPITests(TestCase):
 
     def test_superadmin_can_create_update_and_delete_navigation_items(self):
         superadmin = self.create_role_user('rbac-navigation-superadmin', AccessRole.Code.SUPERADMIN)
+        dynamic_role = AccessRole.objects.create(code='navigation_roundtrip', name='Rol dinámico de navegación')
         NavigationItem.objects.filter(route_name='customer.orders').delete()
         self.client.force_login(superadmin)
         create = self.client.post('/api/v1/admin/rbac/navigation/', {
@@ -3635,6 +3636,8 @@ class StoreAPITests(TestCase):
         item_id = create.json()['id']
         self.assertEqual(create.json()['role_codes'], ['customer'])
         self.assertEqual(create.json()['permission_resource'], 'orders')
+        created_again = next(item for item in self.client.get('/api/v1/admin/rbac/navigation/').json() if item['id'] == item_id)
+        self.assertEqual(created_again['role_codes'], ['customer'])
         duplicate = self.client.post('/api/v1/admin/rbac/navigation/', {
             'label': 'Pedidos duplicados', 'route_name': 'customer.orders', 'role_codes': ['admin'],
         }, content_type='application/json')
@@ -3642,12 +3645,18 @@ class StoreAPITests(TestCase):
 
         update = self.client.patch(
             f'/api/v1/admin/rbac/navigation/{item_id}/',
-            {'label': 'Historial de pedidos', 'active': False},
+            {'label': 'Historial de pedidos', 'description': 'Compras guardadas.', 'active': False,
+             'role_codes': ['customer', dynamic_role.code]},
             content_type='application/json',
         )
         self.assertEqual(update.status_code, 200)
         self.assertEqual(update.json()['label'], 'Historial de pedidos')
         self.assertFalse(update.json()['active'])
+        persisted = next(item for item in self.client.get('/api/v1/admin/rbac/navigation/').json() if item['id'] == item_id)
+        self.assertEqual(persisted['label'], 'Historial de pedidos')
+        self.assertEqual(persisted['description'], 'Compras guardadas.')
+        self.assertFalse(persisted['active'])
+        self.assertCountEqual(persisted['role_codes'], ['customer', dynamic_role.code])
 
         delete = self.client.delete(f'/api/v1/admin/rbac/navigation/{item_id}/')
         self.assertEqual(delete.status_code, 204)

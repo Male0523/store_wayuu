@@ -1,4 +1,27 @@
-import type { RBACNavigationItem, RBACNavigationRoute, RBACRole } from '../types'
+import type { RBACNavigationInput, RBACNavigationItem, RBACNavigationRoute, RBACRole } from '../types'
+
+export function firstAvailableNavigationRoute(
+  routes: RBACNavigationRoute[],
+  items: RBACNavigationItem[],
+  preferredValue = '',
+): string {
+  const configured = new Set(items.map((item) => item.route_name))
+  const available = routes.filter((route) => route.role_codes.length > 0 && !configured.has(route.value))
+  if (available.some((route) => route.value === preferredValue)) return preferredValue
+  return available[0]?.value ?? ''
+}
+
+export function navigationItemMatchesInput(item: RBACNavigationItem, input: RBACNavigationInput): boolean {
+  return item.label === input.label
+    && item.route_name === input.route_name
+    && item.description === input.description
+    && item.anchor === input.anchor
+    && item.order === input.order
+    && item.active === input.active
+    && item.permission_resource === (input.permission_resource ?? null)
+    && item.permission_action === (input.permission_action ?? null)
+    && [...item.role_codes].sort().join('\0') === [...input.role_codes].sort().join('\0')
+}
 
 export function rolesAllowedForRoute(roles: RBACRole[], route?: RBACNavigationRoute): RBACRole[] {
   if (!route) return []

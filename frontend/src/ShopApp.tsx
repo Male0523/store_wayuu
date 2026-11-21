@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from './lib/api'
 import { resolveImageUrl } from './lib/imageUrl'
-import { ensureSuperadminAccessEntry, rolesAllowedForRoute } from './lib/navigation'
+import { ensureSuperadminAccessEntry, firstAvailableNavigationRoute, navigationItemMatchesInput, rolesAllowedForRoute } from './lib/navigation'
 import { useUserSession } from './context/user-context'
 import LegacyCartNotice from './LegacyCartNotice'
 import type { AdminCategory, AdminCraftswomanOption, AdminOrderSummary, AdminProduct, AdminProductInput, AuditEvent, Cart, Category, CustomDesign, CraftswomanDashboard, CraftswomanProfile, CraftswomanProfileInput, InventoryReport, Order, OrderItem, Page, Product, RBACCatalogEntry, RBACNavigationInput, RBACNavigationItem, RBACNavigationRoute, RBACPermission, RBACRole, RBACRolePermissions, RBACRoleScopes, RBACUserPermissions, RBACUserScopes, SessionUser, SuperadminUser, SuperadminUserInput, UserProfile } from './types'
@@ -1086,7 +1086,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   const [permissionSearch, setPermissionSearch] = useState('')
   const [createUserRole, setCreateUserRole] = useState<string>('customer')
   const [newNavigationRoute, setNewNavigationRoute] = useState('')
-  const [newNavigationRoles, setNewNavigationRoles] = useState<string[]>(['customer'])
+  const [newNavigationRoles, setNewNavigationRoles] = useState<string[]>([])
   const canViewCatalog = hasEffectivePermission(currentUser, 'permissions.view')
   const canChangePermissions = hasEffectivePermission(currentUser, 'permissions.change')
   const canViewUsers = hasEffectivePermission(currentUser, 'users.view')
@@ -1154,16 +1154,16 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
     setNavigationRolesError('')
 
     const itemRequest = api.navigationItems(controller.signal)
-      .then((items) => { if (active) setNavigationItems(items) })
-      .catch((loadError: unknown) => { if (active) setNavigationItemsError(errorMessage(loadError)) })
+      .then((items) => { if (active) setNavigationItems(items); return items })
+      .catch((loadError: unknown) => { if (active) setNavigationItemsError(errorMessage(loadError)); return null })
       .finally(() => { if (active) setNavigationItemsLoading(false) })
     const routeRequest = api.navigationRoutes(controller.signal)
       .then((routes) => {
         if (!active) return
         setNavigationRoutes(routes)
-        setNewNavigationRoute((current) => routes.some((route) => route.value === current) ? current : routes.find((route) => route.role_codes.length > 0)?.value ?? '')
+        return routes
       })
-      .catch((loadError: unknown) => { if (active) setNavigationRoutesError(errorMessage(loadError)) })
+      .catch((loadError: unknown) => { if (active) setNavigationRoutesError(errorMessage(loadError)); return null })
       .finally(() => { if (active) setNavigationRoutesLoading(false) })
     const roleRequest = api.roles(controller.signal)
       .then((roleRows) => { if (active) setRoles(roleRows) })
@@ -1174,7 +1174,16 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
     }
     window.addEventListener('focus', refreshWhenVisible)
     document.addEventListener('visibilitychange', refreshWhenVisible)
-    void Promise.all([itemRequest, routeRequest, roleRequest])
+    void Promise.all([itemRequest, routeRequest]).then(([items, routes]) => {
+      if (!active || !items || !routes) return
+      const nextRoute = firstAvailableNavigationRoute(routes, items, newNavigationRoute)
+      setNewNavigationRoute(nextRoute)
+      if (nextRoute !== newNavigationRoute) {
+        const selected = routes.find((route) => route.value === nextRoute)
+        setNewNavigationRoles(selected?.role_codes.includes('customer') ? ['customer'] : selected?.role_codes.slice(0, 1) ?? [])
+      }
+    })
+    void roleRequest
     return () => {
       active = false
       controller.abort()
@@ -1375,7 +1384,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
     setSaving(true)
     setError('')
     try {
-      const created = await api.createNavigationItem({
+      const input: RBACNavigationInput = {
         label: String(values.get('label') ?? '').trim(),
         route_name: String(values.get('route_name') ?? '').trim(),
         description: String(values.get('description') ?? '').trim(),
@@ -1385,12 +1394,24 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
         permission_action: permissionAction as RBACPermission['action'] || null,
         order: Number(values.get('order') ?? 10),
         active: true,
-      })
-      setNavigationItems((current) => [...current, created].sort((a, b) => a.order - b.order))
+      }
+      const created = await api.createNavigationItem(input)
+      if (!created.id || created.route_name !== input.route_name) {
+        setError('El servidor no confirmó qué opción creó. Vuelve a consultar el menú antes de reintentar.')
+        return
+      }
+      const refreshed = await api.navigationItems()
+      const persisted = refreshed.find((item) => item.id === created.id)
+      if (!persisted || !navigationItemMatchesInput(persisted, input)) {
+        setError('El servidor aceptó la opción, pero la consulta posterior no confirmó que quedara guardada. Vuelve a cargar el menú antes de reintentar.')
+        return
+      }
+      setNavigationItems(refreshed.sort((a, b) => a.order - b.order || a.label.localeCompare(b.label)))
       form.reset()
-      const nextRoute = navigationRoutes.find((route) => ![...navigationItems, created].some((item) => item.route_name === route.value))
-      setNewNavigationRoute(nextRoute?.value ?? '')
-      setNewNavigationRoles(nextRoute?.role_codes.includes('customer') ? ['customer'] : nextRoute?.role_codes.slice(0, 1) ?? [])
+      const nextRoute = firstAvailableNavigationRoute(navigationRoutes, refreshed)
+      setNewNavigationRoute(nextRoute)
+      const nextRouteInfo = navigationRoutes.find((route) => route.value === nextRoute)
+      setNewNavigationRoles(nextRouteInfo?.role_codes.includes('customer') ? ['customer'] : nextRouteInfo?.role_codes.slice(0, 1) ?? [])
       setFeedback('Elemento de menú creado y guardado.')
     } catch (saveError) { setError(errorMessage(saveError)) } finally { setSaving(false) }
   }
@@ -1424,7 +1445,17 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
     setFeedback('')
     try {
       const updated = await api.updateNavigationItem(itemId, values)
-      setNavigationItems((current) => current.map((entry) => entry.id === itemId ? updated : entry).sort((a, b) => a.order - b.order || a.label.localeCompare(b.label)))
+      if (updated.id !== itemId) {
+        setError('El servidor devolvió una opción distinta de la editada. No se confirmó el cambio; vuelve a consultar el menú.')
+        return false
+      }
+      const refreshed = await api.navigationItems()
+      const persisted = refreshed.find((item) => item.id === itemId)
+      if (!persisted || !navigationItemMatchesInput(persisted, values)) {
+        setError('El servidor aceptó la solicitud, pero la consulta posterior no confirmó los cambios. Vuelve a cargar el menú antes de reintentar.')
+        return false
+      }
+      setNavigationItems(refreshed.sort((a, b) => a.order - b.order || a.label.localeCompare(b.label)))
       setFeedback(`“${updated.label}” se actualizó.`)
       return true
     } catch (saveError) {
@@ -1585,9 +1616,10 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
         {canAddNavigation && <form className="rbac-user-form rbac-navigation-form" onSubmit={createNavigationItem}>
           <div className="rbac-form-section-title"><span>1</span><div><strong>Identificación de la opción</strong><small>Los campos con * son obligatorios.</small></div></div>
           <label className="form-label">Nombre visible *<input name="label" required maxLength={80} placeholder="Ej. Mis pedidos" /><small>Es el texto que verá la persona en su menú.</small></label>
-          <label className="form-label">Pantalla permitida *<select name="route_name" required value={newNavigationRoute} disabled={navigationRoutesLoading || Boolean(navigationRoutesError) || navigationRoutes.length === 0} onChange={(event) => { const route = navigationRoutes.find((option) => option.value === event.target.value); setNewNavigationRoute(event.target.value); setNewNavigationRoles((current) => current.filter((code) => route?.role_codes.includes(code))) }}>{navigationRoutesLoading ? <option value="">Cargando pantallas…</option> : navigationRoutesError ? <option value="">No se pudieron cargar</option> : navigationRoutes.map((option) => <option key={option.value} value={option.value} disabled={navigationItems.some((item) => item.route_name === option.value)}>{option.label}{navigationItems.some((item) => item.route_name === option.value) ? ' · ya configurada' : ''}</option>)}</select><small>Selecciona una pantalla válida del catálogo. Para sumar roles a una ruta existente, edítala.</small></label>
+          <label className="form-label">Pantalla permitida *<select name="route_name" required value={newNavigationRoute} disabled={navigationRoutesLoading || Boolean(navigationRoutesError) || navigationRoutes.length === 0} onChange={(event) => { const route = navigationRoutes.find((option) => option.value === event.target.value); setNewNavigationRoute(event.target.value); setNewNavigationRoles((current) => current.filter((code) => route?.role_codes.includes(code))) }}>{navigationRoutesLoading ? <option value="">Cargando pantallas…</option> : navigationRoutesError ? <option value="">No se pudieron cargar</option> : <>{!newNavigationRoute && <option value="" disabled>No hay pantallas nuevas disponibles</option>}{navigationRoutes.map((option) => <option key={option.value} value={option.value} disabled={navigationItems.some((item) => item.route_name === option.value)}>{option.label}{navigationItems.some((item) => item.route_name === option.value) ? ' · ya configurada' : ''}</option>)}</>}</select><small>Selecciona una pantalla válida del catálogo. Para sumar roles a una ruta existente, edítala.</small></label>
           {navigationRoutesError && <p className="rbac-warning" role="alert">No se pudo cargar el catálogo de pantallas. {navigationRoutesError}</p>}
           {!navigationRoutesLoading && !navigationRoutesError && navigationRoutes.length === 0 && <p className="muted-copy">No hay pantallas disponibles para configurar.</p>}
+          {!navigationRoutesLoading && !navigationRoutesError && navigationRoutes.length > 0 && !newNavigationRoute && <p className="muted-copy">Todas las pantallas del catálogo ya tienen una opción. Edita una existente para ajustar sus roles; una pantalla nueva debe incorporarse primero al catálogo.</p>}
           <p className="rbac-warning">Asignar una pantalla controla su aparición en el menú; no concede acceso a datos ni acciones. El servidor valida cada endpoint por separado.</p>
           <div className="rbac-form-section-title"><span>2</span><div><strong>Presentación y orden</strong><small>Estos datos organizan el menú; no habilitan permisos.</small></div></div>
           <label className="form-label">Sección (opcional)<input name="anchor" maxLength={80} placeholder="Ej. pedidos" /><small>Identificador auxiliar; puedes dejarlo vacío si no sabes qué colocar.</small></label>
