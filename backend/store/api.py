@@ -864,20 +864,6 @@ class NavigationItemWriteSerializer(serializers.Serializer):
         if role_codes is not None and set(role_codes) - set(AccessRole.objects.filter(active=True).values_list('code', flat=True)):
             raise serializers.ValidationError({'role_codes': 'Todas las asignaciones deben apuntar a roles activos existentes.'})
         route_name = attrs.get('route_name', getattr(self.instance, 'route_name', None))
-        if route_name:
-            existing_roles = set(self.instance.roles.values_list('code', flat=True)) if self.instance else set()
-            selected_roles = set(role_codes) if role_codes is not None else existing_roles
-            route_definition = NAVIGATION_ROUTE_CATALOG.get(route_name)
-            if route_definition:
-                allowed_roles = set(route_definition[1])
-            elif self.instance and route_name == self.instance.route_name:
-                allowed_roles = existing_roles
-            else:
-                allowed_roles = set()
-            if selected_roles - allowed_roles:
-                raise serializers.ValidationError({
-                    'role_codes': 'Uno o más roles no están permitidos para esta ruta.',
-                })
         if route_name == 'admin.access':
             selected_roles = set(role_codes) if role_codes is not None else set(self.instance.roles.values_list('code', flat=True))
             if selected_roles != {AccessRole.Code.SUPERADMIN}:
@@ -1954,8 +1940,8 @@ class SuperadminNavigationRouteCatalogView(APIView):
     def get(self, request):
         active_roles = set(AccessRole.objects.filter(active=True).values_list('code', flat=True))
         return Response([
-            {'value': route, 'label': label, 'role_codes': [code for code in allowed_roles if code in active_roles]}
-            for route, (label, allowed_roles) in NAVIGATION_ROUTE_CATALOG.items()
+            {'value': route, 'label': label, 'role_codes': [code for code in active_roles if route != 'admin.access' or code == AccessRole.Code.SUPERADMIN]}
+            for route, (label, _role_codes) in NAVIGATION_ROUTE_CATALOG.items()
         ])
 
 

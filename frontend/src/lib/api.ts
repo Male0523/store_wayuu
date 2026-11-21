@@ -33,20 +33,15 @@ import type {
   UserProfile,
 } from '../types'
 
-const API_BASE = (import.meta.env?.VITE_API_BASE_URL ?? '/api/v1').replace(/\/$/, '')
-const DEFAULT_REQUEST_TIMEOUT_MS = 15_000
-
-export type ApiErrorKind = 'http' | 'network' | 'timeout'
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '/api/v1').replace(/\/$/, '')
 
 export class ApiError extends Error {
   status: number
-  kind: ApiErrorKind
 
-  constructor(message: string, status: number, kind: ApiErrorKind = 'http') {
+  constructor(message: string, status: number) {
     super(message)
     this.name = 'ApiError'
     this.status = status
-    this.kind = kind
   }
 }
 
@@ -55,75 +50,44 @@ function csrfCookie(): string | undefined {
   return entry ? decodeURIComponent(entry.slice('csrftoken='.length)) : undefined
 }
 
-async function ensureCsrf(signal: AbortSignal): Promise<string> {
+async function ensureCsrf(): Promise<string> {
   let token = csrfCookie()
   if (!token) {
-    const response = await fetch(`${API_BASE}/csrf/`, { credentials: 'include', signal })
+    const response = await fetch(`${API_BASE}/csrf/`, { credentials: 'include' })
     if (!response.ok) throw new ApiError('No fue posible obtener el token de seguridad.', response.status)
-    let payload: { csrfToken?: unknown } | null = null
-    try { payload = await response.json() } catch (error) {
-      if (signal.aborted) throw error
-    }
+    const payload = await response.json().catch(() => null)
     token = typeof payload?.csrfToken === 'string' ? payload.csrfToken : csrfCookie()
   }
   if (!token) throw new ApiError('No fue posible iniciar una sesión segura. Intenta de nuevo.', 0)
   return token
 }
 
-export async function request<T>(
-  path: string,
-  init: RequestInit = {},
-  timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
-): Promise<T> {
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const method = (init.method ?? 'GET').toUpperCase()
   const headers = new Headers(init.headers)
   if (init.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json')
-  const controller = new AbortController()
-  const externalSignal = init.signal
-  let timedOut = false
-  const forwardAbort = () => controller.abort(externalSignal?.reason)
-  if (externalSignal?.aborted) forwardAbort()
-  else externalSignal?.addEventListener('abort', forwardAbort, { once: true })
-  const timeout = setTimeout(() => {
-    timedOut = true
-    controller.abort()
-  }, timeoutMs)
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) headers.set('X-CSRFToken', await ensureCsrf())
 
-  try {
-    if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) headers.set('X-CSRFToken', await ensureCsrf(controller.signal))
-    const response = await fetch(`${API_BASE}${path}`, {
-      ...init,
-      method,
-      headers,
-      credentials: 'include',
-      signal: controller.signal,
-    })
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    method,
+    headers,
+    credentials: 'include',
+  })
 
-    if (response.status === 401 && path !== '/auth/me/') {
-      window.dispatchEvent(new Event('wayuu:session-expired'))
-    }
-
-    if (response.status === 204) return undefined as T
-    let payload: Record<string, unknown> | null = null
-    try { payload = await response.json() } catch (error) {
-      if (controller.signal.aborted) throw error
-    }
-    if (!response.ok) {
-      const detail = payload?.detail
-        ?? Object.values(payload ?? {}).flat().find((value) => typeof value === 'string')
-        ?? `No se pudo completar la solicitud (${response.status}).`
-      throw new ApiError(String(detail), response.status)
-    }
-    return payload as T
-  } catch (error) {
-    if (externalSignal?.aborted) throw error
-    if (timedOut) throw new ApiError('La solicitud tardó demasiado. Intenta de nuevo.', 0, 'timeout')
-    if (error instanceof ApiError) throw error
-    throw new ApiError('No pudimos conectar con el servidor. Revisa la conexión e intenta de nuevo.', 0, 'network')
-  } finally {
-    clearTimeout(timeout)
-    externalSignal?.removeEventListener('abort', forwardAbort)
+  if (response.status === 401 && path !== '/auth/me/') {
+    window.dispatchEvent(new Event('wayuu:session-expired'))
   }
+
+  if (response.status === 204) return undefined as T
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) {
+    const detail = payload?.detail
+      ?? Object.values(payload ?? {}).flat().find((value) => typeof value === 'string')
+      ?? `No se pudo completar la solicitud (${response.status}).`
+    throw new ApiError(String(detail), response.status)
+  }
+  return payload as T
 }
 
 const json = (value: unknown): string => JSON.stringify(value)
@@ -206,38 +170,38 @@ export const api = {
     return `${API_BASE}/admin/inventory/report/?${exportParams}`
   },
   adminProductOptions: () => request<{ categories: AdminCategory[]; craftswomen: AdminCraftswomanOption[] }>('/admin/products/options/'),
-  superadminUsers: (params: URLSearchParams, signal?: AbortSignal) => request<SuperadminUser[]>(`/admin/users/?${params}`, { signal }),
+  superadminUsers: (params: URLSearchParams) => request<SuperadminUser[]>(`/admin/users/?${params}`),
   createSuperadminUser: (values: SuperadminUserInput) =>
     request<SuperadminUser>('/admin/users/', { method: 'POST', body: json(values) }),
   superadminUser: (userId: number) => request<SuperadminUser>(`/admin/users/${userId}/`),
   updateSuperadminUser: (userId: number, values: Partial<SuperadminUserInput>) =>
     request<SuperadminUser>(`/admin/users/${userId}/`, { method: 'PATCH', body: json(values) }),
-  rbacCatalog: (signal?: AbortSignal) => request<{ permissions: RBACPermission[]; resources: RBACCatalogEntry[]; actions: RBACCatalogEntry[] }>('/admin/rbac/catalog/', { signal }),
-  roles: (signal?: AbortSignal) => request<RBACRole[]>('/admin/rbac/roles/', { signal }),
+  rbacCatalog: () => request<{ permissions: RBACPermission[]; resources: RBACCatalogEntry[]; actions: RBACCatalogEntry[] }>('/admin/rbac/catalog/'),
+  roles: () => request<RBACRole[]>('/admin/rbac/roles/'),
   createRole: (values: Pick<RBACRole, 'code' | 'name' | 'description' | 'priority'>) =>
     request<RBACRole>('/admin/rbac/roles/', { method: 'POST', body: json(values) }),
   updateRole: (role: string, values: Partial<Pick<RBACRole, 'name' | 'description' | 'priority' | 'active'>>) =>
     request<RBACRole>(`/admin/rbac/roles/${role}/`, { method: 'PATCH', body: json(values) }),
-  rolePermissions: (role: string, signal?: AbortSignal) =>
-    request<RBACRolePermissions>(`/admin/rbac/roles/${role}/permissions/`, { signal }),
+  rolePermissions: (role: string) =>
+    request<RBACRolePermissions>(`/admin/rbac/roles/${role}/permissions/`),
   updateRolePermissions: (role: string, permissions: (Pick<RBACPermission, 'resource' | 'action' | 'allowed'> & { effect?: 'allow' | 'deny' | null })[]) =>
     request<RBACRolePermissions>(`/admin/rbac/roles/${role}/permissions/`, {
       method: 'PUT', body: json({ permissions }),
     }),
-  roleScopes: (role: string, signal?: AbortSignal) => request<RBACRoleScopes>(`/admin/rbac/roles/${role}/scopes/`, { signal }),
+  roleScopes: (role: string) => request<RBACRoleScopes>(`/admin/rbac/roles/${role}/scopes/`),
   updateRoleScopes: (role: string, scopes: Pick<RBACRoleScopes['scopes'][number], 'resource' | 'scope'>[]) =>
     request<RBACRoleScopes>(`/admin/rbac/roles/${role}/scopes/`, { method: 'PUT', body: json({ scopes }) }),
   setRoleActive: (role: string, active: boolean) =>
     request<{ role: string; active: boolean }>(`/admin/rbac/roles/${role}/permissions/`, {
       method: 'PATCH', body: json({ active }),
     }),
-  userPermissions: (userId: number, signal?: AbortSignal) =>
-    request<RBACUserPermissions>(`/admin/rbac/users/${userId}/permissions/`, { signal }),
+  userPermissions: (userId: number) =>
+    request<RBACUserPermissions>(`/admin/rbac/users/${userId}/permissions/`),
   updateUserPermissions: (userId: number, permissions: Pick<RBACPermission, 'resource' | 'action' | 'effect'>[]) =>
     request<RBACUserPermissions>(`/admin/rbac/users/${userId}/permissions/`, {
       method: 'PUT', body: json({ permissions }),
     }),
-  userScopes: (userId: number, signal?: AbortSignal) => request<RBACUserScopes>(`/admin/rbac/users/${userId}/scopes/`, { signal }),
+  userScopes: (userId: number) => request<RBACUserScopes>(`/admin/rbac/users/${userId}/scopes/`),
   updateUserScopes: (userId: number, scopes: Pick<RBACUserScopes['scopes'][number], 'resource' | 'scope'>[]) =>
     request<RBACUserScopes>(`/admin/rbac/users/${userId}/scopes/`, { method: 'PUT', body: json({ scopes }) }),
   permissionDelegations: () => request<RBACDelegation[]>('/admin/rbac/delegations/'),
@@ -247,8 +211,8 @@ export const api = {
     request<{ user_id: number; role: string }>(`/admin/users/${userId}/role/`, {
       method: 'PATCH', body: json({ role }),
     }),
-  auditEvents: (signal?: AbortSignal) => request<AuditEvent[]>('/admin/rbac/audit/', { signal }),
-  roleNavigation: (signal?: AbortSignal) => request<RBACNavigationItem[]>('/navigation/menu/', { signal }),
+  auditEvents: () => request<AuditEvent[]>('/admin/rbac/audit/'),
+  roleNavigation: () => request<RBACNavigationItem[]>('/navigation/menu/'),
   createResource: (values: Pick<RBACCatalogEntry, 'code' | 'name' | 'description'>) =>
     request<RBACCatalogEntry>('/admin/rbac/resources/', { method: 'POST', body: json(values) }),
   updateResource: (code: string, values: Partial<Pick<RBACCatalogEntry, 'name' | 'description' | 'active'>>) =>
@@ -259,8 +223,8 @@ export const api = {
     request<RBACPermission>('/admin/rbac/capabilities/', { method: 'POST', body: json(values) }),
   updateAction: (code: string, values: Partial<Pick<RBACCatalogEntry, 'name' | 'description' | 'active'>>) =>
     request<RBACCatalogEntry>(`/admin/rbac/actions/${code}/`, { method: 'PATCH', body: json(values) }),
-  navigationItems: (signal?: AbortSignal) => request<RBACNavigationItem[]>('/admin/rbac/navigation/', { signal }),
-  navigationRoutes: (signal?: AbortSignal) => request<RBACNavigationRoute[]>('/admin/rbac/navigation/routes/', { signal }),
+  navigationItems: () => request<RBACNavigationItem[]>('/admin/rbac/navigation/'),
+  navigationRoutes: () => request<RBACNavigationRoute[]>('/admin/rbac/navigation/routes/'),
   createNavigationItem: (values: RBACNavigationInput) =>
     request<RBACNavigationItem>('/admin/rbac/navigation/', { method: 'POST', body: json(values) }),
   updateNavigationItem: (id: number, values: Partial<RBACNavigationInput>) =>
