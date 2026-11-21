@@ -47,7 +47,7 @@ from .models import (
     UserPermissionGrant,
     UserRole,
 )
-from .permissions import AdminOrSuperadmin, CraftswomanOnly, CustomerOnly, HasAssignedRole, OrderAccess, SuperadminOnly, category_visibility_action, order_admin_action, product_publish_action
+from .permissions import AdminOrSuperadmin, CraftswomanOnly, CustomerOnly, HasAssignedRole, OrderAccess, RolePermission as RolePermissionAccess, SuperadminOnly, category_visibility_action, order_admin_action, product_publish_action
 from .cart_services import (
     MAX_CART_QUANTITY,
     discard_unresolved_legacy_cart_item,
@@ -816,19 +816,14 @@ NAVIGATION_ROUTE_CATALOG = {
     'admin.inventory': {'label': 'Administrador · Inventario', 'requires': (('products', 'view'),), 'all_scope': ('products',)},
     'admin.orders': {'label': 'Administrador · Pedidos', 'requires': (('orders', 'view'),), 'all_scope': ('orders',)},
     'admin.categories': {'label': 'Administrador · Categorías', 'requires': (('categories', 'view'),)},
-    'admin.access': {'label': 'Superadministrador · Roles y permisos', 'requires': (('roles', 'view'),)},
+    'admin.access': {'label': 'Roles y permisos', 'requires': (('roles', 'view'),)},
 }
 
 def navigation_role_codes(route_name):
-    """Return active assignable roles for a known view, protecting RBAC itself."""
-    route_definition = NAVIGATION_ROUTE_CATALOG.get(route_name)
-    if route_definition is None:
+    """Return active roles; route-level permission requirements are validated separately."""
+    if route_name not in NAVIGATION_ROUTE_CATALOG:
         return []
-
-    active_roles = AccessRole.objects.filter(active=True).order_by('priority', 'name')
-    if route_name == 'admin.access':
-        return [role.code for role in active_roles if role.code == AccessRole.Code.SUPERADMIN]
-    return list(active_roles.values_list('code', flat=True))
+    return list(AccessRole.objects.filter(active=True).order_by('priority', 'name').values_list('code', flat=True))
 
 
 def navigation_requirements(route_name):
@@ -946,8 +941,6 @@ class NavigationItemWriteSerializer(serializers.Serializer):
         if route_name and (role_codes is not None or 'route_name' in attrs):
             selected_roles = set(role_codes) if role_codes is not None else set(self.instance.roles.values_list('code', flat=True))
             incompatible = selected_roles - set(navigation_role_codes(route_name))
-            if route_name == 'admin.access':
-                incompatible = set()
             if incompatible:
                 raise serializers.ValidationError({
                     'role_codes': f'Estos roles no son compatibles con la pantalla seleccionada: {", ".join(sorted(incompatible))}.',
@@ -959,16 +952,17 @@ class NavigationItemWriteSerializer(serializers.Serializer):
             for role in AccessRole.objects.filter(code__in=selected_roles, active=True):
                 missing = missing_role_navigation_requirements(role, route_name)
                 if missing:
-                    resource, _action = missing[0]
-                    resource_name = RBACResource.objects.filter(code=resource).values_list('name', flat=True).first() or resource
                     view_name = NAVIGATION_ROUTE_CATALOG[route_name]['label'].split(' · ', 1)[-1]
+                    missing_names = [
+                        RBACResource.objects.filter(code=resource).values_list('name', flat=True).first() or resource
+                        for resource, _action in missing
+                    ]
+                    message = f'Para habilitar esta pantalla por favor conceda el permiso de la vista {view_name} de consultar'
+                    if len(missing_names) > 1:
+                        message += f". Permisos faltantes: {', '.join(missing_names)}"
                     raise serializers.ValidationError({
-                        'role_codes': f'Para habilitar esta pantalla por favor conceda el permiso de la vista {view_name} de consultar (recurso requerido: {resource_name}).',
+                        'role_codes': message + '.',
                     })
-        if route_name == 'admin.access':
-            selected_roles = set(role_codes) if role_codes is not None else set(self.instance.roles.values_list('code', flat=True))
-            if selected_roles != {AccessRole.Code.SUPERADMIN}:
-                raise serializers.ValidationError({'role_codes': 'Roles y permisos solo puede mostrarse al superadministrador.'})
         return attrs
 
 
@@ -1516,17 +1510,10 @@ class SuperadminUserDetailView(APIView):
 
 
 class RBACCatalogView(APIView):
-    permission_classes = (SuperadminOnly,)
+    permission_classes = (RolePermissionAccess,)
+    rbac_resource = 'permissions'
 
     def get(self, request):
-        if is_explicitly_denied(request.user, 'permissions', 'view'):
-            record_audit(
-                request.user,
-                'denied_view',
-                'permissions',
-                result=AuditEvent.Result.DENIED,
-            )
-            raise PermissionDenied('No tienes permiso para consultar el catálogo RBAC.')
         entries = permission_catalog()
         return Response({
             'permissions': entries,
@@ -1634,7 +1621,7 @@ class SuperadminUserScopesView(APIView):
 
 
 class SuperadminRolesView(APIView):
-    permission_classes = (SuperadminOnly,)
+    permission_classes = (RolePermissionAccess,)
     rbac_resource = 'roles'
 
     @staticmethod
@@ -1658,7 +1645,7 @@ class SuperadminRolesView(APIView):
 
 
 class SuperadminRoleDetailView(APIView):
-    permission_classes = (SuperadminOnly,)
+    permission_classes = (RolePermissionAccess,)
     rbac_resource = 'roles'
 
     def patch(self, request, role_code):
@@ -1678,7 +1665,7 @@ class SuperadminRoleDetailView(APIView):
 
 
 class SuperadminResourceCatalogView(APIView):
-    permission_classes = (SuperadminOnly,)
+    permission_classes = (RolePermissionAccess,)
     rbac_resource = 'permissions'
 
     def get(self, request):
@@ -1699,7 +1686,7 @@ class SuperadminResourceCatalogView(APIView):
 
 
 class SuperadminResourceDetailView(APIView):
-    permission_classes = (SuperadminOnly,)
+    permission_classes = (RolePermissionAccess,)
     rbac_resource = 'permissions'
 
     def patch(self, request, resource_code):
@@ -1715,7 +1702,7 @@ class SuperadminResourceDetailView(APIView):
 
 
 class SuperadminActionCatalogView(APIView):
-    permission_classes = (SuperadminOnly,)
+    permission_classes = (RolePermissionAccess,)
     rbac_resource = 'permissions'
 
     def get(self, request):
@@ -1738,7 +1725,7 @@ class SuperadminActionCatalogView(APIView):
 
 
 class SuperadminActionDetailView(APIView):
-    permission_classes = (SuperadminOnly,)
+    permission_classes = (RolePermissionAccess,)
     rbac_resource = 'permissions'
 
     def patch(self, request, action_code):
@@ -1754,7 +1741,7 @@ class SuperadminActionDetailView(APIView):
 
 
 class SuperadminCapabilitiesView(APIView):
-    permission_classes = (SuperadminOnly,)
+    permission_classes = (RolePermissionAccess,)
     rbac_resource = 'permissions'
 
     def post(self, request):
@@ -1774,8 +1761,19 @@ class SuperadminCapabilitiesView(APIView):
 
 
 class SuperadminRolePermissionsView(APIView):
-    permission_classes = (SuperadminOnly,)
-    rbac_resource = 'roles'
+    permission_classes = (RolePermissionAccess,)
+    rbac_resource = 'permissions'
+    # Matrix writes return the persisted matrix; require read capability as well
+    # to prevent write-only actors from receiving a full permission listing.
+    rbac_actions = {'PUT': ('view', 'edit')}
+
+    @staticmethod
+    def rbac_resource_for_request(request, view):
+        # PATCH updates role metadata/state. Reading or changing the matrix uses
+        # permissions.view/edit on GET/PUT respectively.
+        if request.method == 'PATCH':
+            return 'roles'
+        return 'permissions'
 
     def get(self, request, role_code):
         role = get_object_or_404(AccessRole, code=role_code)
@@ -1890,6 +1888,9 @@ class AdminUserPermissionsView(APIView):
     permission_classes = (AdminOrSuperadmin,)
 
     def get(self, request, user_id):
+        actor_role = role_for_user(request.user)
+        if not actor_role or actor_role.code not in (AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN):
+            raise PermissionDenied('Solo administración puede consultar grants individuales.')
         if is_explicitly_denied(request.user, 'permissions', 'view'):
             record_audit(request.user, 'denied_view', 'permissions', result=AuditEvent.Result.DENIED)
             raise PermissionDenied('No tienes permiso para consultar permisos individuales.')
@@ -1920,7 +1921,10 @@ class AdminUserPermissionsView(APIView):
         return Response({'user_id': target.id, 'username': target.username, 'permissions': entries})
 
     def put(self, request, user_id):
-        if is_explicitly_denied(request.user, 'permissions', 'change'):
+        actor_role = role_for_user(request.user)
+        if not actor_role or actor_role.code not in (AccessRole.Code.ADMIN, AccessRole.Code.SUPERADMIN):
+            raise PermissionDenied('Solo administración puede modificar grants individuales.')
+        if is_explicitly_denied(request.user, 'permissions', 'edit'):
             record_audit(request.user, 'denied_change', 'permissions', result=AuditEvent.Result.DENIED)
             raise PermissionDenied('No tienes permiso para cambiar grants individuales.')
         target = get_object_or_404(User, pk=user_id)
@@ -1982,7 +1986,7 @@ class SuperadminRoleAssignmentView(APIView):
 
 
 class SuperadminAuditView(APIView):
-    permission_classes = (SuperadminOnly,)
+    permission_classes = (RolePermissionAccess,)
     rbac_resource = 'audit'
 
     def get(self, request):
@@ -2002,7 +2006,7 @@ class SuperadminAuditView(APIView):
 
 
 class SuperadminNavigationView(APIView):
-    permission_classes = (SuperadminOnly,)
+    permission_classes = (RolePermissionAccess,)
     rbac_resource = 'navigation'
 
     def get(self, request):
@@ -2043,14 +2047,15 @@ class SuperadminNavigationView(APIView):
 
 
 class SuperadminNavigationRouteCatalogView(APIView):
-    permission_classes = (SuperadminOnly,)
+    permission_classes = (RolePermissionAccess,)
+    rbac_resource = 'navigation'
 
     def get(self, request):
         return Response([navigation_route_payload(route) for route in NAVIGATION_ROUTE_CATALOG])
 
 
 class SuperadminNavigationDetailView(APIView):
-    permission_classes = (SuperadminOnly,)
+    permission_classes = (RolePermissionAccess,)
     rbac_resource = 'navigation'
 
     def patch(self, request, item_id):
@@ -2106,7 +2111,7 @@ class RoleNavigationMenuView(APIView):
                 continue
             if item.route_name.startswith('craftswoman.') and not Craftswoman.objects.filter(user=request.user, active=True).exists():
                 continue
-            if item.route_name != 'admin.access' and any(
+            if any(
                 not has_rbac_permission(request.user, resource, action)
                 for resource, action in navigation_requirements(item.route_name)
             ):
@@ -2118,10 +2123,7 @@ class RoleNavigationMenuView(APIView):
                 continue
             if item.permission_id:
                 key = permission_key(item.permission)
-                # admin.access is itself restricted to the persisted superadmin
-                # role and its API remains protected by SuperadminOnly. A stale
-                # optional permission link must not hide the root entry point.
-                if item.route_name != 'admin.access' and (not key or not has_rbac_permission(request.user, *key)):
+                if not key or not has_rbac_permission(request.user, *key):
                     continue
             visible.append(SuperadminNavigationView.serialize_item(item))
         return Response(visible)

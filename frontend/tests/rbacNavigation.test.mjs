@@ -12,6 +12,17 @@ test('route picker uses backend compatibility and includes active dynamic roles'
   assert.deepEqual(rolesAllowedForRoute(roles, route).map((entry) => entry.code), ['customer', 'orders_viewer'])
 })
 
+test('roles with the required view grant can be selected for admin access', () => {
+  const roles = [role('superadmin'), role('craftswoman'), role('roles_auditor'), role('inactive_role', false)]
+  const route = {
+    value: 'admin.access', label: 'Roles y permisos',
+    role_codes: ['superadmin', 'craftswoman', 'roles_auditor', 'inactive_role'],
+  }
+  assert.deepEqual(rolesAllowedForRoute(roles, route).map((entry) => entry.code), [
+    'superadmin', 'craftswoman', 'roles_auditor',
+  ])
+})
+
 test('role assignment adds and removes one role without losing other active assignments', () => {
   const assigned = ['admin', 'customer']
   assert.deepEqual(updateNavigationRoleSelection(assigned, 'orders_auditor', true), ['admin', 'customer', 'orders_auditor'])

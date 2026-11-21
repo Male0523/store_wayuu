@@ -3739,7 +3739,11 @@ class StoreAPITests(TestCase):
         self.assertIn(AccessRole.Code.CUSTOMER, admin_orders['role_codes'])
         for route in routes.json():
             if route['value'] == 'admin.access':
-                self.assertNotIn(dynamic_role.code, route['role_codes'])
+                self.assertIn(dynamic_role.code, route['role_codes'])
+                self.assertEqual(
+                    [permission['resource'] for permission in route['missing_permissions'][dynamic_role.code]],
+                    ['roles'],
+                )
             else:
                 self.assertIn(dynamic_role.code, route['role_codes'])
         target = self.create_role_user('orders-viewer-menu-target', AccessRole.Code.CUSTOMER)
@@ -4031,18 +4035,32 @@ class StoreAPITests(TestCase):
         self.assertEqual(self.client.get('/api/v1/admin/orders/').status_code, 403)
 
 
-    def test_dynamic_navigation_catalog_includes_superadmin_screen_and_rejects_other_roles(self):
+    def test_dynamic_navigation_catalog_allows_admin_access_for_any_role_with_roles_view(self):
         root = self.create_role_user('navigation-catalog-root', AccessRole.Code.SUPERADMIN)
         admin_user = self.create_role_user('navigation-catalog-admin', AccessRole.Code.ADMIN)
+        craftswoman_user = self.create_role_user('navigation-catalog-craftswoman', AccessRole.Code.CRAFTSWOMAN)
+        no_view_role = AccessRole.objects.create(code='roles_hidden', name='Sin consultar roles')
+        set_role_permission(root, AccessRole.Code.ADMIN, 'roles', 'view', allowed=True)
+        set_role_permission(root, AccessRole.Code.CRAFTSWOMAN, 'roles', 'view', allowed=True)
         self.client.force_login(root)
         response = self.client.get('/api/v1/admin/rbac/navigation/routes/')
         self.assertEqual(response.status_code, 200)
         root_route = next(route for route in response.json() if route['value'] == 'admin.access')
-        self.assertEqual(root_route['role_codes'], ['superadmin'])
+        self.assertEqual(set(root_route['role_codes']), set(AccessRole.objects.filter(active=True).values_list('code', flat=True)))
+        self.assertEqual(root_route['missing_permissions']['admin'], [])
         self.assertIn('admin.products', [route['value'] for route in response.json()])
         access_item = NavigationItem.objects.get(route_name='admin.access')
         self.assertIn('admin.access', [entry['route_name'] for entry in self.client.get('/api/v1/navigation/menu/').json()])
         self.assertEqual(access_item.roles.values_list('code', flat=True).get(), AccessRole.Code.SUPERADMIN)
+        missing_view = self.client.patch(
+            f'/api/v1/admin/rbac/navigation/{access_item.id}/', {'role_codes': [no_view_role.code]},
+            content_type='application/json',
+        )
+        self.assertEqual(missing_view.status_code, 400)
+        self.assertIn(
+            'Para habilitar esta pantalla por favor conceda el permiso de la vista Roles y permisos de consultar',
+            str(missing_view.json()),
+        )
         craftswoman_profile_item = NavigationItem.objects.get(route_name='craftswoman.profile')
         self.assertEqual(list(craftswoman_profile_item.roles.values_list('code', flat=True)), [AccessRole.Code.CRAFTSWOMAN])
         NavigationItem.objects.filter(route_name='customer.profile').delete()
@@ -4053,19 +4071,115 @@ class StoreAPITests(TestCase):
         self.assertEqual(renamed.status_code, 400)
         disabled = self.client.patch(f'/api/v1/admin/rbac/navigation/{access_item.id}/', {'active': False}, content_type='application/json')
         self.assertEqual(disabled.status_code, 400)
-        empty_roles = self.client.patch(
-            f'/api/v1/admin/rbac/navigation/{access_item.id}/', {'role_codes': []}, content_type='application/json',
+        assigned = self.client.patch(
+            f'/api/v1/admin/rbac/navigation/{access_item.id}/', {'role_codes': ['superadmin', 'admin', 'craftswoman']}, content_type='application/json',
         )
-        self.assertEqual(empty_roles.status_code, 400)
-        self.assertEqual(list(access_item.roles.values_list('code', flat=True)), [AccessRole.Code.SUPERADMIN])
+        self.assertEqual(assigned.status_code, 200, assigned.content)
         deleted = self.client.delete(f'/api/v1/admin/rbac/navigation/{access_item.id}/')
         self.assertEqual(deleted.status_code, 400)
-        forbidden = self.client.post('/api/v1/admin/rbac/navigation/', {
-            'label': 'Acceso RBAC para tienda', 'route_name': 'admin.access', 'role_codes': ['admin'],
-        }, content_type='application/json')
-        self.assertEqual(forbidden.status_code, 400)
         self.client.force_login(admin_user)
+        self.assertIn('admin.access', [row['route_name'] for row in self.client.get('/api/v1/navigation/menu/').json()])
+        self.assertEqual(self.client.get('/api/v1/admin/rbac/roles/').status_code, 200)
+        self.assertEqual(self.client.post('/api/v1/admin/rbac/roles/', {
+            'code': 'unapproved_role', 'name': 'Sin permiso de crear',
+        }, content_type='application/json').status_code, 403)
         self.assertEqual(self.client.get('/api/v1/admin/rbac/navigation/routes/').status_code, 403)
+        self.client.force_login(craftswoman_user)
+        self.assertIn('admin.access', [row['route_name'] for row in self.client.get('/api/v1/navigation/menu/').json()])
+        self.assertEqual(self.client.get('/api/v1/admin/rbac/roles/').status_code, 200)
+
+    def test_admin_access_assignment_grants_only_the_roles_view_screen_requirement(self):
+        root = self.create_role_user('rbac-access-readonly-root', AccessRole.Code.SUPERADMIN)
+        viewer = self.create_role_user('rbac-access-readonly-user', AccessRole.Code.CUSTOMER)
+        role = AccessRole.objects.create(code='roles_observer', name='Observador de roles')
+        assign_role(viewer, role.code, actor=root)
+        set_role_permission(root, role.code, 'roles', 'view', allowed=True)
+        access_item = NavigationItem.objects.get(route_name='admin.access')
+        access_item.roles.add(role)
+
+        self.client.force_login(viewer)
+        menu = self.client.get('/api/v1/navigation/menu/')
+        self.assertEqual(menu.status_code, 200)
+        self.assertIn('admin.access', [row['route_name'] for row in menu.json()])
+        self.assertTrue(has_permission(viewer, 'roles', 'view'))
+        self.assertFalse(has_permission(viewer, 'roles', 'create'))
+        self.assertFalse(has_permission(viewer, 'permissions', 'edit'))
+        self.assertEqual(self.client.get('/api/v1/admin/rbac/roles/').status_code, 200)
+        self.assertEqual(self.client.post('/api/v1/admin/rbac/roles/', {
+            'code': 'forbidden_create', 'name': 'No autorizado',
+        }, content_type='application/json').status_code, 403)
+        self.assertEqual(self.client.patch('/api/v1/admin/rbac/roles/admin/', {
+            'description': 'No autorizado',
+        }, content_type='application/json').status_code, 403)
+        self.assertEqual(self.client.get('/api/v1/admin/rbac/roles/admin/permissions/').status_code, 403)
+        self.assertEqual(self.client.put('/api/v1/admin/rbac/roles/admin/permissions/', {
+            'permissions': [{'resource': 'products', 'action': 'view', 'effect': 'deny'}],
+        }, content_type='application/json').status_code, 403)
+        self.assertEqual(self.client.get('/api/v1/admin/rbac/catalog/').status_code, 403)
+        self.assertEqual(self.client.get('/api/v1/admin/rbac/navigation/').status_code, 403)
+
+    def test_rbac_actions_are_checked_per_endpoint_and_grants_cannot_escalate(self):
+        root = self.create_role_user('rbac-granular-root', AccessRole.Code.SUPERADMIN)
+        manager = self.create_role_user('rbac-granular-manager', AccessRole.Code.CUSTOMER)
+        manager_role = AccessRole.objects.create(code='limited_rbac_manager', name='Gestor RBAC limitado')
+        target_role = AccessRole.objects.create(code='rbac_target', name='Rol objetivo')
+        assign_role(manager, manager_role.code, actor=root)
+        for resource, action in (
+            ('roles', 'view'), ('roles', 'edit'),
+            ('permissions', 'view'), ('permissions', 'edit'),
+            ('products', 'view'),
+        ):
+            set_role_permission(root, manager_role.code, resource, action, allowed=True)
+        access_item = NavigationItem.objects.get(route_name='admin.access')
+        access_item.roles.add(manager_role)
+        self.client.force_login(manager)
+
+        self.assertEqual(self.client.get('/api/v1/admin/rbac/roles/').status_code, 200)
+        self.assertEqual(self.client.post('/api/v1/admin/rbac/roles/', {
+            'code': 'forbidden_create', 'name': 'No autorizado',
+        }, content_type='application/json').status_code, 403)
+        role_edit = self.client.patch('/api/v1/admin/rbac/roles/rbac_target/', {
+            'description': 'Edición permitida',
+        }, content_type='application/json')
+        self.assertEqual(role_edit.status_code, 200, role_edit.content)
+        self.assertEqual(self.client.get('/api/v1/admin/rbac/roles/rbac_target/permissions/').status_code, 200)
+        matrix_write = self.client.put('/api/v1/admin/rbac/roles/rbac_target/permissions/', {
+            'permissions': [{'resource': 'products', 'action': 'view', 'effect': 'allow'}],
+        }, content_type='application/json')
+        self.assertEqual(matrix_write.status_code, 200, matrix_write.content)
+        escalated_matrix_write = self.client.put('/api/v1/admin/rbac/roles/rbac_target/permissions/', {
+            'permissions': [{'resource': 'users', 'action': 'create', 'effect': 'allow'}],
+        }, content_type='application/json')
+        self.assertEqual(escalated_matrix_write.status_code, 403)
+        self.assertFalse(has_permission(manager, 'users', 'create'))
+        self.assertEqual(self.client.get('/api/v1/admin/rbac/resources/').status_code, 200)
+        self.assertEqual(self.client.post('/api/v1/admin/rbac/resources/', {
+            'code': 'extra_resource', 'name': 'Recurso extra',
+        }, content_type='application/json').status_code, 403)
+        self.assertEqual(self.client.get('/api/v1/admin/rbac/roles/rbac_target/scopes/').status_code, 403)
+
+    def test_roles_edit_does_not_enable_role_creation_or_permission_matrix_changes(self):
+        root = self.create_role_user('rbac-role-edit-only-root', AccessRole.Code.SUPERADMIN)
+        editor = self.create_role_user('rbac-role-edit-only-user', AccessRole.Code.CUSTOMER)
+        editor_role = AccessRole.objects.create(code='roles_editor_only', name='Editor de roles')
+        target_role = AccessRole.objects.create(code='roles_edit_target', name='Rol editable')
+        assign_role(editor, editor_role.code, actor=root)
+        set_role_permission(root, editor_role.code, 'roles', 'view', allowed=True)
+        set_role_permission(root, editor_role.code, 'roles', 'edit', allowed=True)
+        NavigationItem.objects.get(route_name='admin.access').roles.add(editor_role)
+        self.client.force_login(editor)
+
+        changed = self.client.patch('/api/v1/admin/rbac/roles/roles_edit_target/', {
+            'description': 'Cambio autorizado',
+        }, content_type='application/json')
+        self.assertEqual(changed.status_code, 200, changed.content)
+        self.assertEqual(self.client.post('/api/v1/admin/rbac/roles/', {
+            'code': 'roles_editor_created', 'name': 'No autorizado',
+        }, content_type='application/json').status_code, 403)
+        self.assertEqual(self.client.get('/api/v1/admin/rbac/roles/roles_edit_target/permissions/').status_code, 403)
+        self.assertEqual(self.client.put('/api/v1/admin/rbac/roles/roles_edit_target/permissions/', {
+            'permissions': [{'resource': 'products', 'action': 'view', 'effect': 'deny'}],
+        }, content_type='application/json').status_code, 403)
 
     def test_navigation_requires_role_view_grants_and_hides_revoked_or_out_of_scope_screens(self):
         root = self.create_role_user('navigation-requirements-root', AccessRole.Code.SUPERADMIN)
@@ -4144,7 +4258,10 @@ class StoreAPITests(TestCase):
         self.assertEqual(set(NAVIGATION_ROUTE_CATALOG), expected_screens)
         self.assertTrue(all(row['required_permissions'] for row in routes))
         self.assertIn('admin.access', {row['value'] for row in routes})
-        self.assertEqual(next(row for row in routes if row['value'] == 'admin.access')['role_codes'], ['superadmin'])
+        self.assertEqual(
+            set(next(row for row in routes if row['value'] == 'admin.access')['role_codes']),
+            set(AccessRole.objects.filter(active=True).values_list('code', flat=True)),
+        )
 
     def test_traditional_navigation_admin_requires_view_and_protects_admin_access(self):
         NavigationItem.objects.filter(route_name='customer.orders').delete()
@@ -4166,9 +4283,9 @@ class StoreAPITests(TestCase):
         self.assertTrue(valid_form.is_valid(), valid_form.errors)
 
         data.update(label='Acceso RBAC', route_name='admin.access', roles=[role.pk])
-        protected_form = NavigationItemAdminForm(data=data)
-        self.assertFalse(protected_form.is_valid())
-        self.assertIn('superadministrador', ' '.join(protected_form.errors.get('roles', [])).lower())
+        set_role_permission(root, role.code, 'roles', 'view', allowed=True)
+        protected_form = NavigationItemAdminForm(data=data, instance=NavigationItem.objects.get(route_name='admin.access'))
+        self.assertTrue(protected_form.is_valid(), protected_form.errors)
 
     def test_checkout_assigns_each_order_item_and_notifies_product_craftswoman(self):
         assigned_user = self.create_role_user('line-assigned-craftswoman', AccessRole.Code.CRAFTSWOMAN)

@@ -47,6 +47,7 @@ function errorMessage(error: unknown) {
 }
 
 function hasEffectivePermission(user: SessionUser, permission: string) {
+  if (user.role === 'superadmin') return true
   return user.permissions?.includes(permission) ?? false
 }
 
@@ -962,7 +963,7 @@ function AdminAccountView({ user, isSuperadmin, navigationItems, navigationError
     try { setAdminOrderPage(await api.adminOrders(params)) } catch (error) { onNotice(errorMessage(error)) }
   }
 
-  const navItems = navigationItems.filter((item) => item.route_name !== 'admin.access' || isSuperadmin).map((item) => {
+  const navItems = navigationItems.map((item) => {
     const id = item.route_name.split('.')[1] as 'dashboard' | 'products' | 'inventory' | 'orders' | 'categories' | 'access'
     const icon = id === 'dashboard' ? <LayoutDashboard size={17} /> : id === 'products' ? <ShoppingBag size={17} /> : id === 'orders' ? <ShoppingCart size={17} /> : id === 'access' ? <LockKeyhole size={17} /> : <Boxes size={17} />
     return { id, label: item.label, icon }
@@ -1020,7 +1021,7 @@ function AdminAccountView({ user, isSuperadmin, navigationItems, navigationError
           <nav className="admin-order-pagination" aria-label="Paginación de pedidos"><button type="button" className="button button-outline" disabled={!adminOrderPage.previous || ordersLoading} onClick={() => setOrderPageNumber((page) => Math.max(1, page - 1))}>Anterior</button><span>Página {orderPageNumber} de {Math.max(1, Math.ceil(adminOrderPage.count / 20))}</span><button type="button" className="button button-outline" disabled={!adminOrderPage.next || ordersLoading} onClick={() => setOrderPageNumber((page) => page + 1)}>Siguiente</button></nav>
         </> : <p className="muted-copy">Tu rol no tiene permiso para consultar pedidos.</p>}</section>}
         {canOpenSection('categories') && activeSection === 'categories' && <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>ORGANIZACIÓN DEL CATÁLOGO</small><h1>Categorías</h1><p>Mantén las categorías disponibles para ordenar las piezas de la tienda.</p></div></div>{canAddCategories && <form className="admin-category-form" onSubmit={submitNewCategory}><label className="form-label">Nombre de categoría *<input name="name" required maxLength={100} placeholder="Ej. Mantas Wayúu" /></label><label className="form-label">Descripción<input name="description" maxLength={500} placeholder="Descripción breve" /></label><button className="button button-dark" disabled={busy}>{busy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} Crear categoría</button></form>}{canViewCategories && <div className="admin-category-list">{categories.map((category) => <AdminCategoryRow key={category.id} category={category} busy={busy} canEdit={canEditCategories && !category.is_internal} canChangeVisibility={!category.is_internal && (category.active ? canUnpublishCategories : canPublishCategories)} onSave={onSaveCategory} onActive={onCategoryActive} />)}</div>}</section>}
-        {canOpenSection('access') && activeSection === 'access' && isSuperadmin && <SuperadminRBACPanel currentUser={user} />}
+        {canOpenSection('access') && activeSection === 'access' && <SuperadminRBACPanel currentUser={user} />}
       </main>
     </section>
   </div>
@@ -1093,17 +1094,30 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   const [newNavigationRoles, setNewNavigationRoles] = useState<string[]>([])
   const canViewCatalog = hasEffectivePermission(currentUser, 'permissions.view')
   const canChangePermissions = hasEffectivePermission(currentUser, 'permissions.change')
-  const canViewUsers = hasEffectivePermission(currentUser, 'users.view')
+  const canViewUsers = currentUser.role === 'superadmin' && hasEffectivePermission(currentUser, 'users.view')
   const canAddUsers = hasEffectivePermission(currentUser, 'users.add')
   const canChangeUsers = hasEffectivePermission(currentUser, 'users.change')
   const canAssignRoles = hasEffectivePermission(currentUser, 'role_assignments.change')
   const canViewRoles = hasEffectivePermission(currentUser, 'roles.view')
+  const canAddRoles = hasEffectivePermission(currentUser, 'roles.add')
   const canChangeRoles = hasEffectivePermission(currentUser, 'roles.change')
   const canViewAudit = hasEffectivePermission(currentUser, 'audit.view')
   const canViewNavigation = hasEffectivePermission(currentUser, 'navigation.view')
   const canAddNavigation = hasEffectivePermission(currentUser, 'navigation.add')
   const canChangeNavigation = hasEffectivePermission(currentUser, 'navigation.change')
   const canDeleteNavigation = hasEffectivePermission(currentUser, 'navigation.delete')
+  const canAddCatalog = hasEffectivePermission(currentUser, 'permissions.add')
+  const canChangeCatalog = hasEffectivePermission(currentUser, 'permissions.change')
+  const canManageScopes = currentUser.role === 'superadmin'
+  const availableSections: RBACSection[] = [
+    ...(canViewRoles ? ['roles' as const] : []),
+    ...(canViewUsers ? ['users' as const] : []),
+    ...(canViewNavigation ? ['navigation' as const] : []),
+    ...(canViewCatalog ? ['catalog' as const] : []),
+    ...(canViewAudit ? ['audit' as const] : []),
+  ]
+  const availableSectionsKey = availableSections.join('|')
+  const activeSectionAllowed = availableSections.includes(activeSection)
   const selectedUser = users.find((candidate) => String(candidate.id) === selectedUserId)
   const selectedRoleInfo = roles.find((role) => role.code === selectedRole)
   const visibleRolePermissions = (rolePermissions?.permissions ?? []).filter((permission) => {
@@ -1146,6 +1160,11 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
     })
     return () => { active = false }
   }, [currentUser.id, canViewCatalog, canViewUsers, canViewAudit, canViewRoles])
+
+  useEffect(() => {
+    if (activeSectionAllowed) return
+    setActiveSection((availableSectionsKey.split('|')[0] as RBACSection | undefined) ?? 'roles')
+  }, [activeSectionAllowed, availableSectionsKey])
 
   useEffect(() => {
     if (!canViewNavigation || activeSection !== 'navigation') return
@@ -1197,9 +1216,11 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   }, [canViewNavigation, activeSection, navigationReloadVersion])
 
   useEffect(() => {
-    if (!canViewRoles) return
+    if (!canViewRoles || !canViewCatalog) return
     let active = true
-    Promise.allSettled([api.rolePermissions(selectedRole), api.roleScopes(selectedRole)]).then(([permissions, scopes]) => {
+    const permissionRequest = api.rolePermissions(selectedRole)
+    const scopeRequest = canManageScopes ? api.roleScopes(selectedRole) : Promise.resolve(null)
+    Promise.allSettled([permissionRequest, scopeRequest]).then(([permissions, scopes]) => {
       if (!active) return
       const errors: string[] = []
       if (permissions.status === 'fulfilled') setRolePermissions(permissions.value)
@@ -1209,7 +1230,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
       if (errors.length) setError(errors.join(' '))
     })
     return () => { active = false }
-  }, [selectedRole, canViewRoles])
+  }, [selectedRole, canViewRoles, canViewCatalog, canManageScopes])
 
   useEffect(() => {
     if (!selectedUserId || !canViewUsers || !canViewCatalog) return
@@ -1479,7 +1500,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   }
 
   async function changeRolePermission(permission: RBACPermission, effect: 'allow' | 'deny' | null) {
-    if (!rolePermissions || !canChangeRoles) return
+    if (!rolePermissions || !canChangePermissions) return
     setSaving(true)
     setError('')
     try {
@@ -1539,7 +1560,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   return <section className="rbac-panel" aria-labelledby="rbac-heading">
     <div className="rbac-hero"><div><p className="eyebrow">SEGURIDAD DE LA TIENDA</p><h2 id="rbac-heading">Roles y permisos</h2><p>Administra qué puede consultar y modificar cada tipo de cuenta.</p></div><div className="rbac-total"><strong>{catalog.length}</strong><span>permisos disponibles</span></div></div>
     <nav className="rbac-tabs" aria-label="Secciones de administración de acceso">
-      {([['roles', 'Roles y acciones'], ['users', 'Cuentas'], ['navigation', 'Vistas y menú'], ['catalog', 'Catálogo'], ['audit', 'Auditoría']] as [RBACSection, string][]).map(([section, label]) => <button type="button" key={section} className={activeSection === section ? 'active' : ''} onClick={() => { if (section === 'navigation' && activeSection === 'navigation') setNavigationReloadVersion((version) => version + 1); setActiveSection(section) }}>{label}</button>)}
+      {([['roles', 'Roles y acciones'], ['users', 'Cuentas'], ['navigation', 'Vistas y menú'], ['catalog', 'Catálogo'], ['audit', 'Auditoría']] as [RBACSection, string][]).filter(([section]) => availableSections.includes(section)).map(([section, label]) => <button type="button" key={section} className={activeSection === section ? 'active' : ''} onClick={() => { if (section === 'navigation' && activeSection === 'navigation') setNavigationReloadVersion((version) => version + 1); setActiveSection(section) }}>{label}</button>)}
     </nav>
     {(canViewRoles || canViewNavigation) && <section className="rbac-relationship-guide" aria-label="Cómo se relacionan los permisos y el menú">
       {canViewRoles && <article className="rbac-relationship-card">
@@ -1569,21 +1590,23 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
       </form>}
     </section>}
     <div className="rbac-layout">
-      {activeSection === 'catalog' && canViewRoles && <section className="rbac-block"><div className="rbac-block-heading"><div><h3>Catálogo independiente</h3><p>Recursos y acciones describen capacidades disponibles; crear entradas no concede permisos.</p></div></div>
-        <form className="rbac-user-form" onSubmit={(event) => void createCatalogEntry(event, 'resource')}><div className="rbac-form-section-title"><span>R</span><div><strong>Agregar recurso</strong><small>El código debe identificar un recurso estable del sistema.</small></div></div><label className="form-label">Código<input name="code" required maxLength={80} pattern="[a-zA-Z0-9_-]+" /></label><label className="form-label">Nombre<input name="name" required maxLength={100} /></label><label className="form-label">Descripción<input name="description" /></label><button className="button button-dark" disabled={saving}>Crear recurso</button></form>
+      {activeSection === 'catalog' && canViewCatalog && <section className="rbac-block"><div className="rbac-block-heading"><div><h3>Catálogo independiente</h3><p>Recursos y acciones describen capacidades disponibles; crear entradas no concede permisos.</p></div></div>
+        {canAddCatalog && <><form className="rbac-user-form" onSubmit={(event) => void createCatalogEntry(event, 'resource')}><div className="rbac-form-section-title"><span>R</span><div><strong>Agregar recurso</strong><small>El código debe identificar un recurso estable del sistema.</small></div></div><label className="form-label">Código<input name="code" required maxLength={80} pattern="[a-zA-Z0-9_-]+" /></label><label className="form-label">Nombre<input name="name" required maxLength={100} /></label><label className="form-label">Descripción<input name="description" /></label><button className="button button-dark" disabled={saving}>Crear recurso</button></form>
         <form className="rbac-user-form" onSubmit={(event) => void createCatalogEntry(event, 'action')}><div className="rbac-form-section-title"><span>A</span><div><strong>Agregar acción</strong><small>Las acciones globales no se asocian automáticamente a recursos.</small></div></div><label className="form-label">Código<input name="code" required maxLength={40} pattern="[a-zA-Z0-9_-]+" /></label><label className="form-label">Nombre<input name="name" required maxLength={80} /></label><label className="form-label">Descripción<input name="description" /></label><button className="button button-dark" disabled={saving}>Crear acción</button></form>
-        <form className="rbac-user-form" onSubmit={(event) => void createCatalogEntry(event, 'capability')}><div className="rbac-form-section-title"><span>R·A</span><div><strong>Asociar acción a recurso</strong><small>La asociación crea una capacidad, pero no la concede a ningún rol o usuario.</small></div></div><label className="form-label">Recurso<select name="resource" required>{resources.filter((entry) => entry.active).map((entry) => <option key={entry.code} value={entry.code}>{entry.name} ({entry.code})</option>)}</select></label><label className="form-label">Acción<select name="action" required>{actions.filter((entry) => entry.active).map((entry) => <option key={entry.code} value={entry.code}>{entry.name} ({entry.code})</option>)}</select></label><button className="button button-dark" disabled={saving || !resources.some((entry) => entry.active) || !actions.some((entry) => entry.active)}>Asociar capacidad</button></form>
-        <div className="rbac-nav-list">{resources.map((entry) => <article className="rbac-nav-row" key={`resource-${entry.id}`}><div><strong>{entry.name}</strong><small>{entry.code} · Recurso</small><small>{entry.description}</small></div><label><input type="checkbox" checked={entry.active} disabled={saving} onChange={(event) => void toggleCatalogEntry(entry, 'resource', event.target.checked)} /> Activo</label></article>)}{actions.map((entry) => <article className="rbac-nav-row" key={`action-${entry.id}`}><div><strong>{entry.name}</strong><small>{entry.code} · Acción</small><small>{entry.description}</small></div><label><input type="checkbox" checked={entry.active} disabled={saving} onChange={(event) => void toggleCatalogEntry(entry, 'action', event.target.checked)} /> Activa</label></article>)}</div>
+        <form className="rbac-user-form" onSubmit={(event) => void createCatalogEntry(event, 'capability')}><div className="rbac-form-section-title"><span>R·A</span><div><strong>Asociar acción a recurso</strong><small>La asociación crea una capacidad, pero no la concede a ningún rol o usuario.</small></div></div><label className="form-label">Recurso<select name="resource" required>{resources.filter((entry) => entry.active).map((entry) => <option key={entry.code} value={entry.code}>{entry.name} ({entry.code})</option>)}</select></label><label className="form-label">Acción<select name="action" required>{actions.filter((entry) => entry.active).map((entry) => <option key={entry.code} value={entry.code}>{entry.name} ({entry.code})</option>)}</select></label><button className="button button-dark" disabled={saving || !resources.some((entry) => entry.active) || !actions.some((entry) => entry.active)}>Asociar capacidad</button></form></>}
+        <div className="rbac-nav-list">{resources.map((entry) => <article className="rbac-nav-row" key={`resource-${entry.id}`}><div><strong>{entry.name}</strong><small>{entry.code} · Recurso</small><small>{entry.description}</small></div><label><input type="checkbox" checked={entry.active} disabled={saving || !canChangeCatalog} onChange={(event) => void toggleCatalogEntry(entry, 'resource', event.target.checked)} /> Activo</label></article>)}{actions.map((entry) => <article className="rbac-nav-row" key={`action-${entry.id}`}><div><strong>{entry.name}</strong><small>{entry.code} · Acción</small><small>{entry.description}</small></div><label><input type="checkbox" checked={entry.active} disabled={saving || !canChangeCatalog} onChange={(event) => void toggleCatalogEntry(entry, 'action', event.target.checked)} /> Activa</label></article>)}</div>
       </section>}
       {activeSection === 'roles' && canViewRoles && <section className="rbac-block rbac-main-block">
         <div className="rbac-block-heading"><div><h3>Roles, vistas y acciones</h3><p>Los permisos de acción protegen el servidor. La asignación de una vista solo controla navegación.</p></div><div className="rbac-role-heading-actions">{canAddNavigation && <button type="button" className="button button-outline" onClick={() => setActiveSection('navigation')}><Plus size={15} /> Añadir vista</button>}<select aria-label="Rol a configurar" value={selectedRole} onChange={(event) => { setSelectedRole(event.target.value); setPermissionSearch('') }}>{roles.map((role) => <option key={role.code} value={role.code}>{role.name} ({role.code})</option>)}</select></div></div>
-        {canChangeRoles && <form className="rbac-user-form" onSubmit={createManagedRole}><div className="rbac-form-section-title"><span>+</span><div><strong>Crear rol dinámico</strong><small>El rol comienza sin capacidades permitidas.</small></div></div><label className="form-label">Código<input name="code" required maxLength={30} pattern="[a-zA-Z0-9_-]+" /></label><label className="form-label">Nombre<input name="name" required maxLength={80} /></label><label className="form-label">Descripción<input name="description" /></label><label className="form-label">Prioridad<input name="priority" type="number" min="0" defaultValue="10" /></label><button className="button button-dark" disabled={saving}>Crear rol</button></form>}
+        {selectedRoleInfo && <div className="rbac-role-status"><strong>{selectedRoleInfo.name}</strong><span>{selectedRoleInfo.description || 'Sin descripción.'} · {selectedRoleInfo.active ? 'Activo' : 'Inactivo'} · {selectedRoleInfo.assigned_users} cuentas</span></div>}
+        {!canViewCatalog && <p className="rbac-info">Puedes consultar los roles. La matriz de permisos requiere el permiso específico de consultar permisos.</p>}
+        {canAddRoles && <form className="rbac-user-form" onSubmit={createManagedRole}><div className="rbac-form-section-title"><span>+</span><div><strong>Crear rol dinámico</strong><small>El rol comienza sin capacidades permitidas.</small></div></div><label className="form-label">Código<input name="code" required maxLength={30} pattern="[a-zA-Z0-9_-]+" /></label><label className="form-label">Nombre<input name="name" required maxLength={80} /></label><label className="form-label">Descripción<input name="description" /></label><label className="form-label">Prioridad<input name="priority" type="number" min="0" defaultValue="10" /></label><button className="button button-dark" disabled={saving}>Crear rol</button></form>}
         {selectedRoleInfo && selectedRole !== 'superadmin' && canChangeRoles && <form className="rbac-user-form" onSubmit={updateManagedRole}><div className="rbac-form-section-title"><span>✎</span><div><strong>Editar rol {selectedRoleInfo.name}</strong><small>El código no cambia para conservar asignaciones existentes.</small></div></div><label className="form-label">Nombre<input name="name" required maxLength={80} defaultValue={selectedRoleInfo.name} /></label><label className="form-label">Descripción<input name="description" defaultValue={selectedRoleInfo.description} /></label><label className="form-label">Prioridad<input name="priority" type="number" min="0" defaultValue={selectedRoleInfo.priority} /></label><button className="button button-outline" disabled={saving}>Guardar rol</button></form>}
         {rolePermissions && <div className="rbac-role-status"><label className="admin-check rbac-active"><input type="checkbox" checked={rolePermissions.active} disabled={saving || !canChangeRoles || selectedRole === 'superadmin'} onChange={(event) => void changeRoleActive(event.target.checked)} /> Rol activo</label><span>{rolePermissions.active ? 'Este rol puede acceder al sistema.' : 'Este rol está desactivado y no puede acceder al sistema.'}</span></div>}
-        {roleScopes && <section className="rbac-permission-list"><h4>Alcance sobre registros privados</h4><p>Una acción de consulta no concede alcance. “Todos” habilita la colección administrativa; el valor heredado mantiene el ámbito del rol.</p>{roleScopes.scopes.map((entry) => <label className="rbac-permission" key={entry.resource}><span><strong>{entry.resource_name}</strong><small>Ámbito heredado: {entry.effective_scope}</small></span><select aria-label={`Ámbito ${entry.resource_name} para el rol ${roleScopes.role}`} value={entry.scope ?? ''} disabled={saving || !canChangeRoles || selectedRole === 'superadmin'} onChange={(event) => void changeRoleScope(entry.resource, event.target.value ? event.target.value as 'all' | 'none' : null)}><option value="">Heredar</option><option value="none">Sin registros</option><option value="all">Todos los registros</option></select></label>)}</section>}
+        {canManageScopes && roleScopes && <section className="rbac-permission-list"><h4>Alcance sobre registros privados</h4><p>Una acción de consulta no concede alcance. “Todos” habilita la colección administrativa; el valor heredado mantiene el ámbito del rol.</p>{roleScopes.scopes.map((entry) => <label className="rbac-permission" key={entry.resource}><span><strong>{entry.resource_name}</strong><small>Ámbito heredado: {entry.effective_scope}</small></span><select aria-label={`Ámbito ${entry.resource_name} para el rol ${roleScopes.role}`} value={entry.scope ?? ''} disabled={saving || selectedRole === 'superadmin'} onChange={(event) => void changeRoleScope(entry.resource, event.target.value ? event.target.value as 'all' | 'none' : null)}><option value="">Heredar</option><option value="none">Sin registros</option><option value="all">Todos los registros</option></select></label>)}</section>}
         {selectedRole === 'superadmin' && <p className="rbac-info">El superadministrador conserva acceso global. Esta matriz es solo informativa y no se puede modificar.</p>}
-        <label className="rbac-search"><Search size={16} /><input value={permissionSearch} onChange={(event) => setPermissionSearch(event.target.value)} placeholder="Buscar recurso o acción..." /></label>
-        <div className="rbac-groups">{Object.entries(permissionGroups).map(([resource, permissions]) => <section className="rbac-resource-card" key={resource}><div className="rbac-resource-heading"><strong>{rbacResourceLabels[resource] ?? permissions[0]?.resource_name ?? resource}</strong><span>{permissions.filter((permission) => permission.effect === 'allow').length} permitidas · {permissions.filter((permission) => permission.effect === 'deny').length} denegadas</span></div><div className="rbac-actions-grid">{permissions.map((permission) => <label className="rbac-action-option" key={permission.resource + '.' + permission.action}><span>{rbacActionLabels[permission.action] ?? permission.action_name ?? permission.action}</span><select aria-label={`${permission.action_name ?? permission.action} ${permission.resource_name ?? resource}`} value={permission.effect ?? 'inherit'} disabled={saving || !canChangeRoles || !rolePermissions?.active || selectedRole === 'superadmin'} onChange={(event) => void changeRolePermission(permission, event.target.value === 'inherit' ? null : event.target.value as 'allow' | 'deny')}><option value="inherit">Heredar</option><option value="allow">Permitir</option><option value="deny">Denegar</option></select></label>)}</div></section>)}</div>
+        {canViewCatalog && <><label className="rbac-search"><Search size={16} /><input value={permissionSearch} onChange={(event) => setPermissionSearch(event.target.value)} placeholder="Buscar recurso o acción..." /></label>
+        <div className="rbac-groups">{Object.entries(permissionGroups).map(([resource, permissions]) => <section className="rbac-resource-card" key={resource}><div className="rbac-resource-heading"><strong>{rbacResourceLabels[resource] ?? permissions[0]?.resource_name ?? resource}</strong><span>{permissions.filter((permission) => permission.effect === 'allow').length} permitidas · {permissions.filter((permission) => permission.effect === 'deny').length} denegadas</span></div><div className="rbac-actions-grid">{permissions.map((permission) => <label className="rbac-action-option" key={permission.resource + '.' + permission.action}><span>{rbacActionLabels[permission.action] ?? permission.action_name ?? permission.action}</span><select aria-label={`${permission.action_name ?? permission.action} ${permission.resource_name ?? resource}`} value={permission.effect ?? 'inherit'} disabled={saving || !canChangePermissions || !rolePermissions?.active || selectedRole === 'superadmin'} onChange={(event) => void changeRolePermission(permission, event.target.value === 'inherit' ? null : event.target.value as 'allow' | 'deny')}><option value="inherit">Heredar</option><option value="allow" disabled={!hasEffectivePermission(currentUser, `${permission.resource}.${permission.action}`)}>Permitir</option><option value="deny">Denegar</option></select></label>)}</div></section>)}</div></>}
         {Object.keys(permissionGroups).length === 0 && <p className="muted-copy">No hay permisos que coincidan con la búsqueda.</p>}
       </section>}
       {activeSection === "users" && canViewUsers && canViewCatalog && <section className="rbac-block"><div className="rbac-block-heading"><div><h3>Cuenta y permisos individuales</h3><p>Administra los datos y excepciones de una cuenta específica.</p></div><select aria-label="Usuario a gestionar" value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)}><option value="">Selecciona una cuenta</option>{users.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.username} · {candidate.role}</option>)}</select></div>
@@ -1708,8 +1731,7 @@ function AdminNavigationRow({ item, allItems, roles, resources, actions, routes,
       <NavigationRolePicker legend="Roles autorizados" roles={roles} route={route} selectedRoleCodes={roleCodes} onSelectionChange={setRoleCodes} />
       <div className="admin-product-edit-fields"><label className="form-label">Recurso requerido (opcional)<select value={permissionResource} onChange={(event) => { setPermissionResource(event.target.value); if (!event.target.value) setPermissionAction('') }}><option value="">Sin requisito adicional</option>{resources.map((resource) => <option key={resource.code} value={resource.code}>{resource.name}</option>)}</select></label><label className="form-label">Acción requerida<select value={permissionAction} disabled={!permissionResource} required={Boolean(permissionResource)} onChange={(event) => setPermissionAction(event.target.value)}><option value="">Selecciona una acción</option>{actions.map((action) => <option key={action.code} value={action.code}>{action.name}</option>)}</select></label></div>
       {inactiveRoleCodes.length > 0 && <p className="rbac-warning" role="alert">Retira los roles inactivos seleccionados antes de guardar. Los roles inactivos no pueden recibir asignaciones nuevas.</p>}
-      {!roleCodes.length && item.route_name !== 'admin.access' && <p className="rbac-warning">Sin roles asignados, esta opción no aparecerá en ningún menú.</p>}
-      {item.route_name === 'admin.access' && <p className="rbac-info">Esta pantalla permanece asignada exclusivamente al superadministrador.</p>}
+      {!roleCodes.length && <p className="rbac-warning">Sin roles asignados, esta opción no aparecerá en ningún menú.</p>}
       {(permissionResource && !permissionAction) && <p className="rbac-warning" role="alert">Completa ambos valores del permiso opcional o retira el requisito.</p>}
       <div className="rbac-nav-actions"><button className="button button-dark" disabled={busy || !canEdit || !label.trim() || inactiveRoleCodes.length > 0 || duplicateRoute || Boolean(permissionResource) !== Boolean(permissionAction)}>Guardar cambios</button><button className="button button-outline" type="button" disabled={busy} onClick={() => { resetDraft(); setEditing(false) }}>Cancelar</button></div>
     </form> : <><div><strong>{item.label}</strong><small>{item.route_name} · Posición {item.order}</small><small>{item.description || 'Sin descripción'}</small><small>{item.order <= 10 ? 'Aparece al inicio del menú' : item.order <= 20 ? 'Aparece después de las opciones con posición 10' : 'Aparece después de las opciones con posiciones menores'}</small><small>Visible para: {item.role_codes.map((role) => rbacRoleLabels[role] ?? roles.find((entry) => entry.code === role)?.name ?? role).join(', ')}</small><small>{item.permission_resource ? 'Filtro adicional: ' + (rbacResourceLabels[item.permission_resource] ?? item.permission_resource) + ' · ' + (rbacActionLabels[item.permission_action ?? 'view'] ?? item.permission_action ?? 'view') : 'Sin permiso adicional configurado'}</small></div><div className="rbac-nav-actions"><label><input type="checkbox" checked={item.active} disabled={busy || !canEdit || item.route_name === 'admin.access'} onChange={(event) => void onToggle(item, event.target.checked)} /> Visible</label>{canEdit && <button type="button" className="button button-outline" disabled={busy} onClick={() => setEditing(true)}>Editar</button>}{canDelete && item.route_name !== 'admin.access' && <button type="button" className="button button-outline" disabled={busy} onClick={() => void onDelete(item)}>Eliminar</button>}</div></>}
@@ -1736,16 +1758,17 @@ function NavigationRolePicker({ legend, roles, route, selectedRoleCodes, onSelec
     <div className="rbac-role-options">
       {filteredRoles.map((role) => {
         const checked = selectedRoleCodes.includes(role.code)
-        const protectedSuperadmin = route?.value === 'admin.access' && role.code === 'superadmin'
         const missingRequirements = route?.missing_permissions[role.code] ?? []
         const blockedForMissingView = missingRequirements.length > 0
         const missingScopes = route?.missing_scopes[role.code] ?? []
-        const missingPermissionMessages = missingRequirements.map((permission) => {
+        const missingPermissionMessages = missingRequirements.length ? (() => {
           const viewName = route?.label.split(' · ').pop() ?? route?.label ?? 'esta pantalla'
-          return `Para habilitar esta pantalla por favor conceda el permiso de la vista ${viewName} de consultar (recurso requerido: ${permission.resource_name}).`
-        })
+          const missingNames = missingRequirements.map((permission) => permission.resource_name)
+          const message = `Para habilitar esta pantalla por favor conceda el permiso de la vista ${viewName} de consultar`
+          return [missingNames.length > 1 ? `${message}. Permisos faltantes: ${missingNames.join(', ')}.` : `${message}.`]
+        })() : []
         return <label className={`rbac-role-option${checked ? ' is-selected' : ''}`} key={role.code}>
-          <input type="checkbox" checked={checked} disabled={protectedSuperadmin || ((!role.active || blockedForMissingView || missingScopes.length > 0) && !checked)} onChange={(event) => onSelectionChange(updateNavigationRoleSelection(selectedRoleCodes, role.code, event.target.checked))} />
+          <input type="checkbox" checked={checked} disabled={(!role.active || blockedForMissingView || missingScopes.length > 0) && !checked} onChange={(event) => onSelectionChange(updateNavigationRoleSelection(selectedRoleCodes, role.code, event.target.checked))} />
           <span><strong>{role.name}</strong><small>{role.active ? 'Activo' : 'Inactivo'} · {role.system ? 'Predeterminado' : 'Dinámico'}{checked ? ' · Seleccionado' : ''}</small>{missingPermissionMessages.map((message) => <small className="rbac-warning" role="status" key={message}>{message}</small>)}{missingScopes.map((resource) => <small className="rbac-warning" role="status" key={resource}>Para mostrar esta sección, configura el alcance de registros «Todos los registros» para el recurso {resource} en Roles y permisos.</small>)}</span>
         </label>
       })}

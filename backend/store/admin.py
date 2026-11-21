@@ -404,17 +404,19 @@ class NavigationItemAdminForm(forms.ModelForm):
             for role in role_rows:
                 missing = missing_role_navigation_requirements(role, route_name)
                 if missing:
-                    resource, _action = missing[0]
-                    resource_name = RBACResource.objects.filter(code=resource).values_list('name', flat=True).first() or resource
                     view_name = NAVIGATION_ROUTE_CATALOG[route_name]['label'].split(' · ', 1)[-1]
+                    missing_names = [
+                        RBACResource.objects.filter(code=resource).values_list('name', flat=True).first() or resource
+                        for resource, _action in missing
+                    ]
+                    message = f'Para habilitar esta pantalla por favor conceda el permiso de la vista {view_name} de consultar'
+                    if len(missing_names) > 1:
+                        message += f". Permisos faltantes: {', '.join(missing_names)}"
                     self.add_error(
                         'roles',
-                        f'Para habilitar esta pantalla por favor conceda el permiso de la vista {view_name} de consultar (recurso requerido: {resource_name}).',
+                        message + '.',
                     )
                     break
-        role_codes = {role.code for role in role_rows}
-        if route_name == 'admin.access' and role_codes != {AccessRole.Code.SUPERADMIN}:
-            self.add_error('roles', 'Roles y permisos solo puede mostrarse al superadministrador.')
         if self.instance.pk and self.instance.route_name == 'admin.access':
             if route_name != 'admin.access':
                 self.add_error('route_name', 'La opción Roles y permisos está protegida y no puede cambiar de pantalla.')
@@ -445,7 +447,7 @@ class NavigationItemAdmin(SuperadminOnlyAdmin):
 
     def get_readonly_fields(self, request, obj=None):
         if obj and obj.route_name == 'admin.access':
-            return (*super().get_readonly_fields(request, obj), 'route_name', 'roles', 'active')
+            return (*super().get_readonly_fields(request, obj), 'route_name')
         return super().get_readonly_fields(request, obj)
 
     def save_model(self, request, obj, form, change):

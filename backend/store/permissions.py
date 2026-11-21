@@ -14,7 +14,10 @@ class RolePermission(BasePermission):
         role = role_for_user(request.user)
         if role is None or (self.role_codes and role.code not in self.role_codes):
             return False
-        resource = getattr(view, 'rbac_resource', None)
+        resource = getattr(view, 'rbac_resource_for_request', None)
+        if callable(resource):
+            resource = resource(request, view)
+        resource = resource or getattr(view, 'rbac_resource', None)
         if resource:
             default_action = {
                 'GET': 'view',

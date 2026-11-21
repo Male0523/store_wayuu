@@ -305,13 +305,13 @@ def has_permission(user, resource, action, obj=None):
     role = role_for_user(user)
     if role is None:
         return False
+    if role.code == AccessRole.Code.SUPERADMIN:
+        return True
     action = canonical_action(action)
     permission = permission_for(resource, action)
     capability = capability_for(resource, action)
     if capability is None:
         return False
-    if role.code == AccessRole.Code.SUPERADMIN:
-        return True
     legacy_individual = UserPermissionGrant.objects.filter(user=user, permission=permission).first() if permission else None
     if legacy_individual and legacy_individual.effect == UserPermissionGrant.Effect.DENY:
         return False
@@ -442,12 +442,12 @@ def revoke_admin_delegations(admin_user, actor=None):
 
 
 def set_role_permission(actor, role_code, resource, action, allowed=None, effect=None):
-    if (
-        not has_role(actor, AccessRole.Code.SUPERADMIN)
-        or is_explicitly_denied(actor, 'roles', 'change')
-    ):
+    actor_role = role_for_user(actor)
+    is_root = bool(actor_role and actor_role.code == AccessRole.Code.SUPERADMIN)
+    may_edit_permission_matrix = is_root or has_permission(actor, 'permissions', 'edit')
+    if not may_edit_permission_matrix:
         record_audit(actor, 'set_role_permission', resource, result=AuditEvent.Result.DENIED)
-        raise PermissionDenied('Solo un superadmin puede configurar permisos por rol.')
+        raise PermissionDenied('No tienes permiso para modificar la matriz de permisos.')
     with transaction.atomic():
         role = AccessRole.objects.select_for_update().get(code=role_code)
         if role.code == AccessRole.Code.SUPERADMIN:
@@ -457,6 +457,17 @@ def set_role_permission(actor, role_code, resource, action, allowed=None, effect
         next_effect = effect or (RBACGrant.Effect.ALLOW if allowed else None)
         if not role.active or not capability or next_effect not in (None, *RBACGrant.Effect.values):
             raise ValidationError('El rol o el permiso no está disponible.')
+        # A delegated permission manager may only grant capabilities they hold.
+        # Denying or clearing a grant cannot increase the target role's access.
+        if next_effect == RBACGrant.Effect.ALLOW and not is_root and not has_permission(actor, resource, action):
+            record_audit(
+                actor,
+                'set_role_permission',
+                resource,
+                result=AuditEvent.Result.DENIED,
+                details={'role': role.code, 'action': canonical_action(action), 'effect': next_effect},
+            )
+            raise PermissionDenied('No puedes conceder una capacidad que tu cuenta no tiene.')
         if next_effect:
             RBACGrant.objects.update_or_create(
                 role=role,
