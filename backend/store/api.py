@@ -820,6 +820,56 @@ NAVIGATION_ROUTE_CATALOG = {
     'admin.access': ('Superadministrador · Roles y permisos', (AccessRole.Code.SUPERADMIN,)),
 }
 
+# The customer orders panel supports any assigned role; the orders API still
+# checks `orders.view` and applies its record scope. Administrative collections
+# require their view grant and, for private resources, an explicit all scope.
+# CustomerOnly/CraftswomanOnly routes remain with their established roles.
+DYNAMIC_NAVIGATION_ROLE_ONLY_ROUTES = {'customer.orders'}
+DYNAMIC_NAVIGATION_ROUTE_REQUIREMENTS = {
+    'admin.dashboard': ('orders', True),
+    'admin.products': ('products', True),
+    'admin.inventory': ('products', True),
+    'admin.orders': ('orders', True),
+    'admin.categories': ('categories', False),
+}
+
+
+def navigation_role_codes(route_name):
+    """Return active built-in roles and compatible explicitly granted custom roles."""
+    route_definition = NAVIGATION_ROUTE_CATALOG.get(route_name)
+    if route_definition is None:
+        return []
+
+    active_roles = list(AccessRole.objects.filter(active=True).order_by('priority', 'name'))
+    allowed = set(route_definition[1])
+    if route_name == 'admin.access':
+        allowed.intersection_update({AccessRole.Code.SUPERADMIN})
+    elif route_name in DYNAMIC_NAVIGATION_ROLE_ONLY_ROUTES:
+        allowed.update(role.code for role in active_roles if role.code not in AccessRole.Code.values)
+    else:
+        requirement = DYNAMIC_NAVIGATION_ROUTE_REQUIREMENTS.get(route_name)
+        if requirement:
+            resource, requires_all_scope = requirement
+            permission = permission_for(resource, 'view')
+            capability = capability_for(resource, 'view')
+            for role in active_roles:
+                if role.code in AccessRole.Code.values or not permission or not capability:
+                    continue
+                if requires_all_scope and not RBACRecordScopeGrant.objects.filter(
+                    role=role, resource__code=resource, scope=RBACRecordScopeGrant.Scope.ALL,
+                ).exists():
+                    continue
+                grant = RBACGrant.objects.filter(role=role, capability=capability).first()
+                if grant and grant.effect == RBACGrant.Effect.DENY:
+                    continue
+                if (grant and grant.effect == RBACGrant.Effect.ALLOW) or RolePermission.objects.filter(
+                    role=role, permission=permission,
+                ).exists():
+                    allowed.add(role.code)
+
+    active_codes = {role.code for role in active_roles}
+    return [role.code for role in active_roles if role.code in allowed and role.code in active_codes]
+
 
 class NavigationItemWriteSerializer(serializers.Serializer):
     label = serializers.CharField(max_length=80)
@@ -863,13 +913,23 @@ class NavigationItemWriteSerializer(serializers.Serializer):
         role_codes = attrs.get('role_codes')
         if role_codes is not None and set(role_codes) - set(AccessRole.objects.filter(active=True).values_list('code', flat=True)):
             raise serializers.ValidationError({'role_codes': 'Todas las asignaciones deben apuntar a roles activos existentes.'})
-        route_name = attrs.get('route_name', getattr(self.instance, 'route_name', None))
+        previous_route = getattr(self.instance, 'route_name', None)
+        route_name = attrs.get('route_name', previous_route)
+        if previous_route == 'admin.access' and route_name != previous_route:
+            raise serializers.ValidationError({'route_name': 'La opción Roles y permisos está protegida y no puede cambiar de pantalla.'})
         if route_name == 'admin.access':
             selected_roles = set(role_codes) if role_codes is not None else set(self.instance.roles.values_list('code', flat=True))
             if selected_roles != {AccessRole.Code.SUPERADMIN}:
                 raise serializers.ValidationError({'role_codes': 'Roles y permisos solo puede mostrarse al superadministrador.'})
         if getattr(self.instance, 'route_name', None) == 'admin.access' and attrs.get('active') is False:
             raise serializers.ValidationError({'active': 'La pantalla de administración RBAC debe permanecer disponible para el superadministrador.'})
+        if route_name and (role_codes is not None or 'route_name' in attrs):
+            selected_roles = set(role_codes) if role_codes is not None else set(self.instance.roles.values_list('code', flat=True))
+            incompatible = selected_roles - set(navigation_role_codes(route_name))
+            if incompatible:
+                raise serializers.ValidationError({
+                    'role_codes': f'Estos roles no son compatibles con la pantalla seleccionada: {", ".join(sorted(incompatible))}.',
+                })
         return attrs
 
 
@@ -1938,9 +1998,8 @@ class SuperadminNavigationRouteCatalogView(APIView):
     permission_classes = (SuperadminOnly,)
 
     def get(self, request):
-        active_roles = set(AccessRole.objects.filter(active=True).values_list('code', flat=True))
         return Response([
-            {'value': route, 'label': label, 'role_codes': [code for code in active_roles if route != 'admin.access' or code == AccessRole.Code.SUPERADMIN]}
+            {'value': route, 'label': label, 'role_codes': navigation_role_codes(route)}
             for route, (label, _role_codes) in NAVIGATION_ROUTE_CATALOG.items()
         ])
 
@@ -1990,11 +2049,20 @@ class RoleNavigationMenuView(APIView):
         if role is None:
             return Response([])
         visible = []
+        allowed_routes = {
+            route_name for route_name in NAVIGATION_ROUTE_CATALOG
+            if role.code in navigation_role_codes(route_name)
+        }
         items = NavigationItem.objects.filter(active=True, roles=role).select_related('permission__content_type').order_by('order', 'label')
         for item in items:
+            if item.route_name not in allowed_routes:
+                continue
             if item.permission_id:
                 key = permission_key(item.permission)
-                if not key or not has_rbac_permission(request.user, *key):
+                # admin.access is itself restricted to the persisted superadmin
+                # role and its API remains protected by SuperadminOnly. A stale
+                # optional permission link must not hide the root entry point.
+                if item.route_name != 'admin.access' and (not key or not has_rbac_permission(request.user, *key)):
                     continue
             visible.append(SuperadminNavigationView.serialize_item(item))
         return Response(visible)
