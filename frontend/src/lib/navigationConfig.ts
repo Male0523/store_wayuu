@@ -2,6 +2,10 @@ import type { RBACNavigationItem, RBACNavigationRoute, RBACPermission } from '..
 
 export const CRUD_ACTIONS = ['view', 'create', 'edit', 'delete'] as const
 
+export function permissionRequestPending(canViewPermissions: boolean, roleCode: string, hasSelectedRoute: boolean, completedRoleCode: string | null) {
+  return canViewPermissions && Boolean(roleCode && hasSelectedRoute && completedRoleCode !== roleCode)
+}
+
 export function routePermissions(route: RBACNavigationRoute, permissions: RBACPermission[]) {
   const resources = [...new Set(route.required_permissions.map((entry) => entry.resource))]
   return permissions.filter((permission) => resources.includes(permission.resource))

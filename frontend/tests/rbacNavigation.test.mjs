@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { ensureSuperadminAccessEntry, firstAvailableNavigationRoute, navigationItemMatchesInput, rolesAllowedForRoute, updateNavigationRoleSelection } from '../src/lib/navigation.ts'
-import { hasNavigationDraftChanges, roleCodesWithVisibility, routePermissions } from '../src/lib/navigationConfig.ts'
+import { hasNavigationDraftChanges, permissionRequestPending, roleCodesWithVisibility, routePermissions } from '../src/lib/navigationConfig.ts'
 
 const role = (code, active = true) => ({
   code, name: code, description: '', priority: 10, active, system: false, assigned_users: 0,
@@ -84,6 +84,13 @@ test('navigation draft detects permission and visibility changes', () => {
   assert.equal(hasNavigationDraftChanges(false, false, { 'orders.view': 'inherit' }, { 'orders.view': 'inherit' }), false)
   assert.equal(hasNavigationDraftChanges(false, true, {}, {}), true)
   assert.equal(hasNavigationDraftChanges(false, false, { 'orders.view': 'inherit' }, { 'orders.view': 'allow' }), true)
+})
+
+test('permission loading ends when a role request completes, including a failed request', () => {
+  assert.equal(permissionRequestPending(true, 'admin', true, null), true)
+  assert.equal(permissionRequestPending(true, 'admin', true, 'admin'), false)
+  assert.equal(permissionRequestPending(true, 'craftswoman', true, 'admin'), true)
+  assert.equal(permissionRequestPending(true, 'admin', false, null), false)
 })
 
 test('does not duplicate a configured superadmin access entry', () => {

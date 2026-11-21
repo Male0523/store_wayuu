@@ -151,8 +151,21 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
   useEffect(() => {
     if (!user) { setRoleNavigation([]); setRoleNavigationError(''); return }
     const controller = new AbortController()
-    void refreshRoleNavigation(user, controller.signal)
-    return () => controller.abort()
+    let pending = false
+    const refresh = () => {
+      if (pending) return
+      pending = true
+      void refreshRoleNavigation(user, controller.signal).finally(() => { pending = false })
+    }
+    const refreshWhenVisible = () => { if (document.visibilityState === 'visible') refresh() }
+    refresh()
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      controller.abort()
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
   }, [user?.id, user?.role, user?.permissions?.join('|'), refreshRoleNavigation])
 
   const loadAdminData = useCallback(async () => {
@@ -1070,9 +1083,11 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   const [navigationItemsError, setNavigationItemsError] = useState('')
   const [navigationRoutes, setNavigationRoutes] = useState<RBACNavigationRoute[]>([])
   const [navigationRoutesLoading, setNavigationRoutesLoading] = useState(false)
+  const [navigationRolesLoadedVersion, setNavigationRolesLoadedVersion] = useState(-1)
   const [navigationRoutesError, setNavigationRoutesError] = useState('')
   const [navigationRolesError, setNavigationRolesError] = useState('')
   const [navigationReloadVersion, setNavigationReloadVersion] = useState(0)
+  const navigationRolesLoading = navigationRolesLoadedVersion !== navigationReloadVersion
   const [audit, setAudit] = useState<AuditEvent[]>([])
   const [selectedRole, setSelectedRole] = useState<string>('admin')
   const [rolePermissions, setRolePermissions] = useState<RBACRolePermissions | null>(null)
@@ -1186,6 +1201,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
     const roleRequest = api.roles(controller.signal)
       .then((roleRows) => { if (active) setRoles(roleRows) })
       .catch((loadError: unknown) => { if (active) setNavigationRolesError(errorMessage(loadError)) })
+      .finally(() => { if (active) setNavigationRolesLoadedVersion(navigationReloadVersion) })
 
     const refreshWhenVisible = () => {
       if (document.visibilityState === 'visible') setNavigationReloadVersion((version) => version + 1)
@@ -1513,7 +1529,10 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
         roles={roles}
         items={navigationItems}
         routes={navigationRoutes}
+        resources={resources.filter((resource) => resource.active)}
+        actions={actions.filter((action) => action.active)}
         loading={navigationItemsLoading || navigationRoutesLoading}
+        rolesLoading={navigationRolesLoading}
         error={navigationItemsError || navigationRoutesError}
         rolesError={navigationRolesError}
         canAddNavigation={canAddNavigation}
