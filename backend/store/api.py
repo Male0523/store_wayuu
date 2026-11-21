@@ -839,7 +839,7 @@ class NavigationItemWriteSerializer(serializers.Serializer):
     description = serializers.CharField(max_length=220, required=False, allow_blank=True)
     role_codes = serializers.ListField(
         child=serializers.SlugField(max_length=30),
-        allow_empty=False,
+        allow_empty=True,
     )
     permission_resource = serializers.ChoiceField(
         choices=tuple((key, key) for key in PERMISSION_RESOURCES),

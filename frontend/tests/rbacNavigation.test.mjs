@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { ensureSuperadminAccessEntry, firstAvailableNavigationRoute, navigationItemMatchesInput, rolesAllowedForRoute } from '../src/lib/navigation.ts'
+import { ensureSuperadminAccessEntry, firstAvailableNavigationRoute, navigationItemMatchesInput, rolesAllowedForRoute, updateNavigationRoleSelection } from '../src/lib/navigation.ts'
 
 const role = (code, active = true) => ({
   code, name: code, description: '', priority: 10, active, system: false, assigned_users: 0,
@@ -10,6 +10,14 @@ test('route picker uses backend compatibility and includes active dynamic roles'
   const roles = [role('customer'), role('orders_viewer'), role('inactive_viewer', false)]
   const route = { value: 'customer.orders', label: 'Mis pedidos', role_codes: ['customer', 'orders_viewer', 'inactive_viewer'] }
   assert.deepEqual(rolesAllowedForRoute(roles, route).map((entry) => entry.code), ['customer', 'orders_viewer'])
+})
+
+test('role assignment adds and removes one role without losing other active assignments', () => {
+  const assigned = ['admin', 'customer']
+  assert.deepEqual(updateNavigationRoleSelection(assigned, 'orders_auditor', true), ['admin', 'customer', 'orders_auditor'])
+  assert.deepEqual(updateNavigationRoleSelection(assigned, 'customer', false), ['admin'])
+  assert.deepEqual(updateNavigationRoleSelection(['customer'], 'customer', false), [])
+  assert.deepEqual(updateNavigationRoleSelection(['customer'], 'customer', true), ['customer'])
 })
 
 test('new route picker chooses a free route and returns empty when the catalog is exhausted', () => {

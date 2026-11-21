@@ -28,6 +28,11 @@ export function rolesAllowedForRoute(roles: RBACRole[], route?: RBACNavigationRo
   return roles.filter((role) => role.active && route.role_codes.includes(role.code))
 }
 
+export function updateNavigationRoleSelection(selected: string[], roleCode: string, checked: boolean): string[] {
+  if (checked) return selected.includes(roleCode) ? selected : [...selected, roleCode]
+  return selected.filter((code) => code !== roleCode)
+}
+
 export function ensureSuperadminAccessEntry(
   items: RBACNavigationItem[],
   roleCode: string | null | undefined,
