@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { adminNavigationTarget, canUseCustomerFeatures, canViewSharedCatalog, ensureSuperadminAccessEntry, firstAvailableNavigationRoute, isAdminPanelSection, navigationItemMatchesInput, rolesAllowedForRoute, updateNavigationRoleSelection } from '../src/lib/navigation.ts'
+import { adminNavigationTarget, adminPanelNavigationForRole, canUseCustomerFeatures, canViewSharedCatalog, ensureSuperadminAccessEntry, firstAvailableNavigationRoute, isAdminPanelSection, navigationItemMatchesInput, rolePanelNavigationSection, rolePanelSectionPath, rolesAllowedForRoute, updateNavigationRoleSelection } from '../src/lib/navigation.ts'
 import { canAssignNavigationWithoutDataAccess, hasNavigationDraftChanges, permissionRequestPending, roleCodesWithVisibility, routePermissions, visibleRBACSections } from '../src/lib/navigationConfig.ts'
 
 const role = (code, active = true) => ({
@@ -98,10 +98,37 @@ test('permission loading ends when a role request completes, including a failed 
 test('admin navigation recognizes the colon-delimited storefront route', () => {
   assert.equal(adminNavigationTarget({ panel: 'shared', section: 'catalog' }), 'storefront')
   assert.equal(adminNavigationTarget({ panel: 'admin', section: 'access' }), 'access')
+  assert.equal(adminNavigationTarget({ panel: 'admin', section: 'categories' }), 'categories')
   assert.equal(adminNavigationTarget({ panel: 'admin', section: 'unknown' }), null)
   assert.equal(adminNavigationTarget({ panel: 'craftswoman', section: 'orders' }), null)
+  for (const section of ['access', 'categories']) {
+    const item = { panel: 'admin', section }
+    assert.equal(rolePanelNavigationSection(item), section)
+    assert.equal(rolePanelSectionPath(section), `/panel?section=${section}`)
+  }
+  assert.equal(rolePanelNavigationSection({ panel: 'admin', section: 'orders' }), null)
+  assert.equal(rolePanelSectionPath('orders'), null)
   assert.equal(isAdminPanelSection('storefront'), false)
   assert.equal(isAdminPanelSection('access'), true)
+})
+
+test('delegated roles only receive assigned categories and access entries in the admin panel', () => {
+  const routes = [
+    { panel: 'admin', section: 'categories', route_name: 'admin.categories' },
+    { panel: 'admin', section: 'access', route_name: 'admin.access' },
+    { panel: 'admin', section: 'products', route_name: 'admin.products' },
+    { panel: 'admin', section: 'orders', route_name: 'admin.orders' },
+    { panel: 'shared', section: 'catalog', route_name: 'store:catalog' },
+  ]
+  for (const role of ['customer', 'craftswoman', 'custom_role']) {
+    assert.deepEqual(
+      adminPanelNavigationForRole(routes, role).map((item) => item.route_name),
+      ['admin.categories', 'admin.access'],
+    )
+  }
+  assert.equal(adminPanelNavigationForRole(routes, 'customer').some((item) => item.route_name === 'admin.products'), false)
+  assert.equal(adminPanelNavigationForRole(routes, 'admin'), routes)
+  assert.equal(adminPanelNavigationForRole(routes, 'superadmin'), routes)
 })
 
 test('shared customer catalog requires effective product view for each non-superadmin role', () => {

@@ -2,6 +2,28 @@ import type { RBACNavigationInput, RBACNavigationItem, RBACNavigationRoute, RBAC
 
 export type AdminNavigationTarget = 'dashboard' | 'products' | 'inventory' | 'orders' | 'categories' | 'access' | 'storefront'
 
+export function rolePanelSectionPath(section: string): string | null {
+  if (section !== 'categories' && section !== 'access') return null
+  return `/panel?section=${encodeURIComponent(section)}`
+}
+
+export function navigateToRolePanelSection(section: string): boolean {
+  const destination = rolePanelSectionPath(section)
+  if (!destination) return false
+  window.dispatchEvent(new CustomEvent('wayuu:navigate', { detail: destination }))
+  return true
+}
+
+export function rolePanelNavigationSection(item: Pick<RBACNavigationItem, 'panel' | 'section'>): 'categories' | 'access' | null {
+  if (item.panel !== 'admin' || (item.section !== 'categories' && item.section !== 'access')) return null
+  return item.section
+}
+
+export function adminPanelNavigationForRole(items: RBACNavigationItem[], roleCode: string): RBACNavigationItem[] {
+  if (roleCode === 'admin' || roleCode === 'superadmin') return items
+  return items.filter((item) => rolePanelNavigationSection(item) !== null)
+}
+
 export function isAdminPanelSection(target: AdminNavigationTarget): target is Exclude<AdminNavigationTarget, 'storefront'> {
   return target !== 'storefront'
 }

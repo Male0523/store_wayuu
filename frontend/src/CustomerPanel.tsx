@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { ArrowLeft, Heart, Home, LogOut, Minus, Plus, Search, ShoppingBag, ShoppingCart, UserRound, X } from 'lucide-react'
+import { ArrowLeft, Boxes, Heart, Home, LockKeyhole, LogOut, Minus, Plus, Search, ShoppingBag, ShoppingCart, UserRound, X } from 'lucide-react'
 import { api, ApiError } from './lib/api'
 import { resolveImageUrl } from './lib/imageUrl'
-import { canUseCustomerFeatures } from './lib/navigation'
+import { canUseCustomerFeatures, navigateToRolePanelSection, rolePanelNavigationSection } from './lib/navigation'
 import { useUserSession } from './context/user-context'
 import type { Cart, Category, CustomDesign, Order, Product, RBACNavigationItem, UserProfile } from './types'
 import LegacyCartNotice from './LegacyCartNotice'
@@ -233,6 +233,9 @@ export default function CustomerPanel({ catalogOnly = false, embedded = false }:
 
   const fullName = profile?.name || user?.name || user?.username || 'Cliente'
   const accountNavigation = navigationItems.filter((item) => item.panel === 'customer' && ['orders', 'designs', 'profile'].includes(item.section ?? ''))
+  const delegatedAdminNavigation = customerFeaturesAvailable
+    ? navigationItems.filter((item) => rolePanelNavigationSection(item) !== null)
+    : []
   const canEditProfile = Boolean(user?.permissions?.includes('customers.change'))
 
   return <div className={`customer-shell${embedded ? ' customer-shell-embedded' : ''}`}>
@@ -244,6 +247,9 @@ export default function CustomerPanel({ catalogOnly = false, embedded = false }:
         {customerFeaturesAvailable && <button className={view === 'favorites' ? 'active' : ''} onClick={() => navigate('favorites')}><Heart size={17}/>Mis favoritos</button>}
         {customerFeaturesAvailable && <button className={view === 'cart' ? 'active' : ''} onClick={() => navigate('cart')}><ShoppingCart size={17}/>Mi carrito <span>{cart.count}</span></button>}
         {customerFeaturesAvailable && accountNavigation.length > 0 && <button className={view === 'account' ? 'active' : ''} onClick={openAccount} disabled={busy}><UserRound size={17}/>Mi cuenta</button>}
+        {delegatedAdminNavigation.map((item) => <button key={item.id} onClick={() => navigateToRolePanelSection(item.section ?? '')}>
+          {item.section === 'access' ? <LockKeyhole size={17}/> : <Boxes size={17}/>}{item.label}
+        </button>)}
       </nav>
       <div className="customer-sidebar-bottom"><div className="customer-user"><span className="customer-avatar">{fullName.slice(0,1).toUpperCase()}</span><div><strong>{fullName}</strong><small>{catalogOnly ? 'Catálogo autorizado' : 'Cliente'}</small></div></div><button className="customer-logout" onClick={signOut} disabled={busy}><LogOut size={16}/>Cerrar sesión</button></div>
     </aside>}
