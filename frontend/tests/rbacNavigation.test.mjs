@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { adminNavigationTarget, ensureSuperadminAccessEntry, firstAvailableNavigationRoute, isAdminPanelSection, navigationItemMatchesInput, rolesAllowedForRoute, updateNavigationRoleSelection } from '../src/lib/navigation.ts'
+import { adminNavigationTarget, canUseCustomerFeatures, canViewSharedCatalog, ensureSuperadminAccessEntry, firstAvailableNavigationRoute, isAdminPanelSection, navigationItemMatchesInput, rolesAllowedForRoute, updateNavigationRoleSelection } from '../src/lib/navigation.ts'
 import { hasNavigationDraftChanges, permissionRequestPending, roleCodesWithVisibility, routePermissions, visibleRBACSections } from '../src/lib/navigationConfig.ts'
 
 const role = (code, active = true) => ({
@@ -100,6 +100,20 @@ test('admin navigation recognizes the colon-delimited storefront route', () => {
   assert.equal(adminNavigationTarget('craftswoman.orders'), null)
   assert.equal(isAdminPanelSection('storefront'), false)
   assert.equal(isAdminPanelSection('access'), true)
+})
+
+test('shared customer catalog requires effective product view for each non-superadmin role', () => {
+  assert.equal(canViewSharedCatalog({ role: 'admin', permissions: ['products.view'] }), true)
+  assert.equal(canViewSharedCatalog({ role: 'superadmin', permissions: [] }), true)
+  assert.equal(canViewSharedCatalog({ role: 'craftswoman', permissions: ['orders.view'] }), false)
+  assert.equal(canViewSharedCatalog({ role: 'admin', permissions: ['products.edit'] }), false)
+  assert.equal(canViewSharedCatalog(null), false)
+})
+
+test('favorites, cart, and account features are restricted to the full customer panel', () => {
+  assert.equal(canUseCustomerFeatures({ role: 'customer', permissions: [] }, false), true)
+  assert.equal(canUseCustomerFeatures({ role: 'customer', permissions: [] }, true), false)
+  assert.equal(canUseCustomerFeatures({ role: 'admin', permissions: ['products.view'] }, false), false)
 })
 
 test('RBAC tabs use independent view grants while superadmin remains global', () => {

@@ -53,6 +53,10 @@ function hasEffectivePermission(user: SessionUser, permission: string) {
   return user.permissions?.includes(permission) ?? false
 }
 
+function openSharedCatalog() {
+  window.dispatchEvent(new CustomEvent('wayuu:navigate', { detail: '/catalogo-compartido' }))
+}
+
 type SessionUserWithNames = SessionUser & {
   first_name?: string
   last_name?: string
@@ -451,6 +455,8 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
       } else if (configuredNavigation.some((item) => item.route_name.startsWith('admin.'))) {
         await loadAdminData()
         setScreen('admin')
+      } else if (user.role !== 'customer' && configuredNavigation.some((item) => item.route_name === 'store:catalog')) {
+        openSharedCatalog()
       } else if (user.role === 'customer' || configuredNavigation.some((item) => item.route_name.startsWith('customer.'))) {
         const visibleSections = configuredNavigation.map((item) => item.route_name.split('.')[1])
         const requests = await Promise.all([
@@ -685,9 +691,9 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
 
     {screen === 'orders' && user && <CustomerAccountView user={user} navigationItems={roleNavigation} orders={orders} designs={designs} profile={profileDraft} section={accountSection} busy={busy} onSection={setAccountSection} onProfileSubmit={saveProfile} onSignOut={signOut} onShop={() => setScreen('shop')} />}
 
-    {screen === 'craftswoman' && user && <CraftswomanAccountView user={user} navigationItems={roleNavigation} dashboard={dashboard} profile={craftswomanProfile} products={craftswomanProducts} categories={categories} busy={busy} onCreateProduct={createCraftswomanProduct} onSaveProfile={saveCraftswomanProfile} onSignOut={signOut} onAcceptWorkItem={acceptWorkItem} onWorkItemStatus={updateWorkItem} onDesignStatus={updateDesignStatus} />}
+    {screen === 'craftswoman' && user && <CraftswomanAccountView user={user} navigationItems={roleNavigation} dashboard={dashboard} profile={craftswomanProfile} products={craftswomanProducts} categories={categories} busy={busy} onCreateProduct={createCraftswomanProduct} onSaveProfile={saveCraftswomanProfile} onSignOut={signOut} onBrowseCatalog={openSharedCatalog} onAcceptWorkItem={acceptWorkItem} onWorkItemStatus={updateWorkItem} onDesignStatus={updateDesignStatus} />}
 
-    {screen === 'admin' && user && <AdminAccountView user={user} isSuperadmin={user.role === 'superadmin'} navigationItems={roleNavigation} navigationError={roleNavigationError} onRetryNavigation={() => void refreshRoleNavigation(user)} onBrowseCatalog={() => setScreen('shop')} orderSummary={adminOrderSummary} products={adminProducts} categories={adminCategories} productCraftswomen={adminCraftswomen} busy={busy} onSignOut={signOut} onSaveProduct={saveAdminProduct} onCreateProduct={createAdminProduct} onCreateCategory={createAdminCategory} onSaveCategory={saveAdminCategory} onCategoryActive={updateAdminCategory} onOrderStatus={saveAdminOrderStatus} onNotice={setNotice} />}
+    {screen === 'admin' && user && <AdminAccountView user={user} isSuperadmin={user.role === 'superadmin'} navigationItems={roleNavigation} navigationError={roleNavigationError} onRetryNavigation={() => void refreshRoleNavigation(user)} onBrowseCatalog={openSharedCatalog} orderSummary={adminOrderSummary} products={adminProducts} categories={adminCategories} productCraftswomen={adminCraftswomen} busy={busy} onSignOut={signOut} onSaveProduct={saveAdminProduct} onCreateProduct={createAdminProduct} onCreateCategory={createAdminCategory} onSaveCategory={saveAdminCategory} onCategoryActive={updateAdminCategory} onOrderStatus={saveAdminOrderStatus} onNotice={setNotice} />}
 
     {screen !== 'shop' && screen !== 'admin' && <Footer onInstagram={() => setNotice('Pronto encontrarás nuestras novedades en Instagram.')} />}
     {selectedProduct && <ProductDialog product={selectedProduct} busy={busy} onClose={() => setSelectedProduct(null)} onAdd={() => addToCart(selectedProduct.id)} />}
@@ -749,7 +755,7 @@ function CustomerAccountView({ user, navigationItems, orders, designs, profile, 
   </main>
 }
 
-function CraftswomanAccountView({ user, navigationItems, dashboard, profile, products, categories, busy, onCreateProduct, onSaveProfile, onSignOut, onAcceptWorkItem, onWorkItemStatus, onDesignStatus }: {
+function CraftswomanAccountView({ user, navigationItems, dashboard, profile, products, categories, busy, onCreateProduct, onSaveProfile, onSignOut, onBrowseCatalog, onAcceptWorkItem, onWorkItemStatus, onDesignStatus }: {
   user: SessionUser | null
   navigationItems: RBACNavigationItem[]
   dashboard: CraftswomanDashboard | null
@@ -764,6 +770,7 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, profile, pro
   }) => void
   onSaveProfile: (values: CraftswomanProfileInput) => Promise<void>
   onSignOut: () => void
+  onBrowseCatalog: () => void
   onAcceptWorkItem: (itemId: number) => Promise<void>
   onWorkItemStatus: (itemId: number, status: string) => Promise<void>
   onDesignStatus: (designId: number, status: string) => void
@@ -779,15 +786,22 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, profile, pro
   const pending = products.length - published
   const stock = products.reduce((total, product) => total + product.stock, 0)
   const initials = accountName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()
-  const navItems: { id: 'dashboard' | 'products' | 'inventory' | 'orders' | 'profile'; label: string; icon: ReactNode }[] = navigationItems.map((item) => {
-    const id = item.route_name.split('.')[1] as 'dashboard' | 'products' | 'inventory' | 'orders' | 'profile'
-    const icon = id === 'dashboard' ? <LayoutDashboard size={17} /> : id === 'products' ? <ShoppingBag size={17} /> : id === 'inventory' ? <Boxes size={17} /> : id === 'profile' ? <CircleUserRound size={17} /> : <ShoppingCart size={17} />
-    return { id, label: item.label, icon }
-  }).filter((item) => ['dashboard', 'products', 'inventory', 'orders', 'profile'].includes(item.id))
+  type CraftswomanNavId = 'dashboard' | 'products' | 'inventory' | 'orders' | 'profile' | 'storefront'
+  const craftswomanSections = ['dashboard', 'products', 'inventory', 'orders', 'profile'] as const
+  const navItems: { id: CraftswomanNavId; label: string; icon: ReactNode }[] = navigationItems.flatMap((item) => {
+    const suffix = item.route_name.startsWith('craftswoman.') ? item.route_name.slice('craftswoman.'.length) : ''
+    const id: CraftswomanNavId | null = item.route_name === 'store:catalog'
+      ? 'storefront'
+      : craftswomanSections.includes(suffix as typeof craftswomanSections[number]) ? suffix as typeof craftswomanSections[number] : null
+    if (!id) return []
+    const icon = id === 'dashboard' ? <LayoutDashboard size={17} /> : id === 'products' || id === 'storefront' ? <ShoppingBag size={17} /> : id === 'inventory' ? <Boxes size={17} /> : id === 'profile' ? <CircleUserRound size={17} /> : <ShoppingCart size={17} />
+    return [{ id, label: item.label, icon }]
+  })
   const canOpenSection = (section: string) => navItems.some((item) => item.id === section)
   const canEditProfile = Boolean(user && hasEffectivePermission(user, 'craftswomen.edit'))
   useEffect(() => {
-    if (!canOpenSection(activeSection) && navItems[0]) setActiveSection(navItems[0].id)
+    const firstSection = navItems.find((item) => item.id !== 'storefront')?.id
+    if (!canOpenSection(activeSection) && firstSection && firstSection !== 'storefront') setActiveSection(firstSection)
   }, [navigationItems, activeSection])
   async function handleAcceptWorkItem(itemId: number) {
     if (acceptingOrderId !== null) return
@@ -820,7 +834,7 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, profile, pro
       <div className="craftswoman-brand"><span className="craftswoman-brand-mark"><Layers size={22} /></span><span><strong>Wayúu</strong><small>PORTAL DE TEJEDORA</small></span></div>
       <nav className="craftswoman-nav" aria-label="Menú de tejedora">
         <p>MENÚ PRINCIPAL</p>
-        {navItems.map((item) => <button key={item.id} className={activeSection === item.id ? 'active' : ''} onClick={() => setActiveSection(item.id)}>{item.icon}<span>{item.label}</span></button>)}
+        {navItems.map((item) => <button key={item.id} className={item.id !== 'storefront' && activeSection === item.id ? 'active' : ''} onClick={() => { if (item.id === 'storefront') onBrowseCatalog(); else setActiveSection(item.id) }}>{item.icon}<span>{item.label}</span></button>)}
       </nav>
       <div className="craftswoman-sidebar-profile"><span className="craftswoman-avatar">{initials || 'TW'}</span><div><strong>{accountName}</strong><small>Tejedora Wayúu</small></div><button onClick={onSignOut} aria-label="Cerrar sesión" title="Cerrar sesión"><LogOut size={16} /></button></div>
       <div className="craftswoman-sidebar-foot">SÜCHIKI KANAAS · LEGADO CULTURAL</div>

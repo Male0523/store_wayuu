@@ -1,9 +1,17 @@
-import type { RBACNavigationInput, RBACNavigationItem, RBACNavigationRoute, RBACRole } from '../types'
+import type { RBACNavigationInput, RBACNavigationItem, RBACNavigationRoute, RBACRole, SessionUser } from '../types'
 
 export type AdminNavigationTarget = 'dashboard' | 'products' | 'inventory' | 'orders' | 'categories' | 'access' | 'storefront'
 
 export function isAdminPanelSection(target: AdminNavigationTarget): target is Exclude<AdminNavigationTarget, 'storefront'> {
   return target !== 'storefront'
+}
+
+export function canViewSharedCatalog(user: SessionUser | null | undefined): boolean {
+  return Boolean(user && (user.role === 'superadmin' || user.permissions?.includes('products.view')))
+}
+
+export function canUseCustomerFeatures(user: SessionUser | null | undefined, catalogOnly: boolean): boolean {
+  return Boolean(user?.role === 'customer' && !catalogOnly)
 }
 
 export function adminNavigationTarget(routeName: string): AdminNavigationTarget | null {

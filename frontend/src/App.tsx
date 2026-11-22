@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState, type ComponentType, type FormEvent, type ReactNode } from 'react'
 import { useUserSession } from './context/user-context'
+import { canViewSharedCatalog } from './lib/navigation'
 import type { SessionUser } from './types'
 
 const legacyViews = import.meta.glob<ComponentType>('../../*.tsx', { import: 'default' })
@@ -68,14 +69,15 @@ function AccessGate({ user, onLogin }: {
 	)
 }
 
-function RolePage({ user, role, onLogin, children, connected = false }: {
+function RolePage({ user, role, onLogin, children, connected = false, canAccess }: {
 	user: SessionUser | null
 	role: Role
 	onLogin: (event: FormEvent<HTMLFormElement>) => Promise<void>
 	children: ReactNode
 	connected?: boolean
+  canAccess?: (user: SessionUser) => boolean
 }) {
-	if (user?.role !== role) return <AccessGate user={user} onLogin={onLogin} />
+	if (!user || !(canAccess ? canAccess(user) : user.role === role)) return <AccessGate user={user} onLogin={onLogin} />
 	if (role === 'craftswoman' && user.profile?.active === false) {
 		return <section className="access-panel"><h1>Cuenta pendiente de activación</h1><p>La administración debe activar el perfil antes de habilitar el panel de tejedora.</p></section>
 	}
@@ -89,9 +91,17 @@ export default function App() {
 
 	useEffect(() => {
 		const syncPath = () => setPath(window.location.pathname)
+		const navigateWithinApp = (event: Event) => {
+			const destination = (event as CustomEvent<unknown>).detail
+			if (typeof destination !== 'string' || !destination.startsWith('/')) return
+			window.history.pushState(null, '', destination)
+			setPath(window.location.pathname)
+		}
 		window.addEventListener('popstate', syncPath)
+		window.addEventListener('wayuu:navigate', navigateWithinApp)
 		return () => {
 			window.removeEventListener('popstate', syncPath)
+			window.removeEventListener('wayuu:navigate', navigateWithinApp)
 		}
 	}, [])
 
@@ -132,6 +142,9 @@ export default function App() {
 	switch (path.replace(/\/$/, '') || '/') {
 		case '/': page = <><DemoNotice /><PublicSite /></>; break
 		case '/cliente': page = protectedPage('customer', <CustomerPanel />, true); break
+		case '/catalogo-compartido': page = !sessionLoaded
+			? <div className="route-loading" role="status">Comprobando sesión…</div>
+			: <RolePage user={user} role="customer" onLogin={login} canAccess={canViewSharedCatalog} connected><CustomerPanel catalogOnly={user?.role !== 'customer'} /></RolePage>; break
 		case '/tienda': page = <ConnectedShop key="tienda" initialScreen="shop" />; break
 		case '/tejedora': page = protectedPage('craftswoman', <ConnectedShop key="tejedora" initialScreen="craftswoman" />, true); break
 		case '/admin': page = protectedPage('admin', <ConnectedShop key="admin" initialScreen="admin" />, true); break

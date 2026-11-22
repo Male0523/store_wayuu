@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { ArrowLeft, Heart, Home, LogOut, Minus, Plus, Search, ShoppingBag, ShoppingCart, UserRound, X } from 'lucide-react'
 import { api, ApiError } from './lib/api'
 import { resolveImageUrl } from './lib/imageUrl'
+import { canUseCustomerFeatures } from './lib/navigation'
 import { useUserSession } from './context/user-context'
 import type { Cart, Category, CustomDesign, Order, Product, RBACNavigationItem, UserProfile } from './types'
 import LegacyCartNotice from './LegacyCartNotice'
@@ -12,8 +13,9 @@ type AccountSection = 'orders' | 'designs' | 'profile'
 const money = (value: string | number) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(Number(value || 0))
 const messageOf = (error: unknown) => error instanceof ApiError ? error.message : 'No fue posible completar la operación. Comprueba que Django esté activo e inténtalo de nuevo.'
 
-export default function CustomerPanel() {
+export default function CustomerPanel({ catalogOnly = false }: { catalogOnly?: boolean }) {
   const { user, logout } = useUserSession()
+  const customerFeaturesAvailable = canUseCustomerFeatures(user, catalogOnly)
   const [view, setView] = useState<View>('catalog')
   const [previousView, setPreviousView] = useState<View>('catalog')
   const [products, setProducts] = useState<Product[]>([])
@@ -42,7 +44,7 @@ export default function CustomerPanel() {
 
   useEffect(() => {
     let active = true
-    if (user?.role === 'customer') {
+    if (customerFeaturesAvailable && user) {
       api.favorites().then(async ({ product_ids }) => {
         let ids = product_ids
         const storageKey = `wayuu:favorites:${user.id}`
@@ -75,7 +77,7 @@ export default function CustomerPanel() {
       setProducts(page.results)
       setCategories(list)
     }).catch((error) => { if (active) setNotice(messageOf(error)) })
-    if (user?.role === 'customer') {
+    if (customerFeaturesAvailable && user) {
       if (user.permissions?.includes('cart.view')) {
         api.cart().then((value) => { if (active) setCart(value) }).catch((error) => { if (active) setNotice(messageOf(error)) })
       } else {
@@ -93,7 +95,7 @@ export default function CustomerPanel() {
       }
     }
     return () => { active = false }
-  }, [user?.id, user?.role])
+  }, [user?.id, user?.role, catalogOnly])
 
   useEffect(() => {
     if (!notice) return
@@ -234,15 +236,15 @@ export default function CustomerPanel() {
 
   return <div className="customer-shell">
     <aside className="customer-sidebar">
-      <div className="customer-brand"><span className="customer-brand-mark">◇</span><div><strong>Wayúu</strong><small>Portal del Cliente</small></div></div>
+      <div className="customer-brand"><span className="customer-brand-mark">◇</span><div><strong>Wayúu</strong><small>{catalogOnly ? 'Catálogo comercial' : 'Portal del Cliente'}</small></div></div>
       <div className="customer-nav-label">NAVEGACIÓN PRINCIPAL</div>
       <nav className="customer-nav">
         <button className={view === 'catalog' || view === 'detail' ? 'active' : ''} onClick={() => navigate('catalog')}><Home size={17}/>Inicio y catálogo</button>
-        <button className={view === 'favorites' ? 'active' : ''} onClick={() => navigate('favorites')}><Heart size={17}/>Mis favoritos</button>
-        <button className={view === 'cart' ? 'active' : ''} onClick={() => navigate('cart')}><ShoppingCart size={17}/>Mi carrito <span>{cart.count}</span></button>
-        {accountNavigation.length > 0 && <button className={view === 'account' ? 'active' : ''} onClick={openAccount} disabled={busy}><UserRound size={17}/>Mi cuenta</button>}
+        {customerFeaturesAvailable && <button className={view === 'favorites' ? 'active' : ''} onClick={() => navigate('favorites')}><Heart size={17}/>Mis favoritos</button>}
+        {customerFeaturesAvailable && <button className={view === 'cart' ? 'active' : ''} onClick={() => navigate('cart')}><ShoppingCart size={17}/>Mi carrito <span>{cart.count}</span></button>}
+        {customerFeaturesAvailable && accountNavigation.length > 0 && <button className={view === 'account' ? 'active' : ''} onClick={openAccount} disabled={busy}><UserRound size={17}/>Mi cuenta</button>}
       </nav>
-      <div className="customer-sidebar-bottom"><div className="customer-user"><span className="customer-avatar">{fullName.slice(0,1).toUpperCase()}</span><div><strong>{fullName}</strong><small>Cliente</small></div></div><button className="customer-logout" onClick={signOut} disabled={busy}><LogOut size={16}/>Cerrar sesión</button></div>
+      <div className="customer-sidebar-bottom"><div className="customer-user"><span className="customer-avatar">{fullName.slice(0,1).toUpperCase()}</span><div><strong>{fullName}</strong><small>{catalogOnly ? 'Catálogo autorizado' : 'Cliente'}</small></div></div><button className="customer-logout" onClick={signOut} disabled={busy}><LogOut size={16}/>Cerrar sesión</button></div>
     </aside>
 
     <main className="customer-main">
@@ -259,12 +261,12 @@ export default function CustomerPanel() {
           {view === 'favorites' && !favoriteProducts.length && <p className="customer-empty">Aún no has guardado favoritos en esta sesión.</p>}
           <div className="customer-product-grid">{(view === 'favorites' ? favoriteProducts : filtered).map((item) => <article className="customer-product-card" key={item.id}>
             <button className="customer-product-image" onClick={() => { setSelected(item); setPreviousView(view); setView('detail') }}><img src={resolveImageUrl(item.image_url)} alt={item.name} onError={(event) => { event.currentTarget.style.display = 'none' }}/><span>{item.category?.name || 'Artesanía'}</span></button>
-            <div className="customer-product-copy"><small>{item.region || 'La Guajira'}</small><h3>{item.name}</h3><p>{money(item.price)}</p><div><button onClick={() => { setSelected(item); setPreviousView(view); setView('detail') }}>Ver detalle</button><button aria-label="Agregar al carrito" title="Agregar al carrito" onClick={() => void addItem(item)} disabled={busy || item.stock < 1}><ShoppingBag size={17}/></button><button aria-label="Agregar o retirar favorito" className={favorites.includes(item.id) ? 'saved' : ''} onClick={() => void toggleFavorite(item.id)} disabled={busy}><Heart size={17} fill={favorites.includes(item.id) ? 'currentColor' : 'none'}/></button></div></div>
+            <div className="customer-product-copy"><small>{item.region || 'La Guajira'}</small><h3>{item.name}</h3><p>{money(item.price)}</p><div><button onClick={() => { setSelected(item); setPreviousView(view); setView('detail') }}>Ver detalle</button>{customerFeaturesAvailable && <><button aria-label="Agregar al carrito" title="Agregar al carrito" onClick={() => void addItem(item)} disabled={busy || item.stock < 1}><ShoppingBag size={17}/></button><button aria-label="Agregar o retirar favorito" className={favorites.includes(item.id) ? 'saved' : ''} onClick={() => void toggleFavorite(item.id)} disabled={busy}><Heart size={17} fill={favorites.includes(item.id) ? 'currentColor' : 'none'}/></button></>}</div></div>
           </article>)}</div>
         </section>
       </>}
 
-      {view === 'detail' && selected && <section className="customer-detail"><button className="customer-back" onClick={() => setView(previousView)}><ArrowLeft size={16}/>Volver</button><div className="customer-detail-card"><div className="customer-detail-image"><img src={resolveImageUrl(selected.image_url)} alt={selected.name}/></div><div className="customer-detail-copy"><span className="customer-kicker">{selected.category?.name || 'Artesanía Wayúu'}</span><h2>{selected.name}</h2><strong>{money(selected.price)}</strong><p>{selected.description || 'Pieza artesanal elaborada en La Guajira.'}</p><dl><div><dt>Origen</dt><dd>{selected.region || 'La Guajira'}</dd></div><div><dt>Color</dt><dd>{selected.color || 'Consultar disponibilidad'}</dd></div><div><dt>Talla</dt><dd>{selected.size || 'Consultar'}</dd></div><div><dt>Disponibles</dt><dd>{selected.stock}</dd></div></dl><button className="customer-primary" disabled={busy || selected.stock < 1} onClick={() => void addItem(selected)}><ShoppingBag size={17}/>Agregar al carrito</button><button className="customer-text-button" disabled={busy} onClick={() => void toggleFavorite(selected.id)}><Heart size={17} fill={favorites.includes(selected.id) ? 'currentColor' : 'none'}/>{favorites.includes(selected.id) ? 'Quitar de favoritos' : 'Guardar en favoritos'}</button></div></div></section>}
+      {view === 'detail' && selected && <section className="customer-detail"><button className="customer-back" onClick={() => setView(previousView)}><ArrowLeft size={16}/>Volver</button><div className="customer-detail-card"><div className="customer-detail-image"><img src={resolveImageUrl(selected.image_url)} alt={selected.name}/></div><div className="customer-detail-copy"><span className="customer-kicker">{selected.category?.name || 'Artesanía Wayúu'}</span><h2>{selected.name}</h2><strong>{money(selected.price)}</strong><p>{selected.description || 'Pieza artesanal elaborada en La Guajira.'}</p><dl><div><dt>Origen</dt><dd>{selected.region || 'La Guajira'}</dd></div><div><dt>Color</dt><dd>{selected.color || 'Consultar disponibilidad'}</dd></div><div><dt>Talla</dt><dd>{selected.size || 'Consultar'}</dd></div><div><dt>Disponibles</dt><dd>{selected.stock}</dd></div></dl>{customerFeaturesAvailable && <><button className="customer-primary" disabled={busy || selected.stock < 1} onClick={() => void addItem(selected)}><ShoppingBag size={17}/>Agregar al carrito</button><button className="customer-text-button" disabled={busy} onClick={() => void toggleFavorite(selected.id)}><Heart size={17} fill={favorites.includes(selected.id) ? 'currentColor' : 'none'}/>{favorites.includes(selected.id) ? 'Quitar de favoritos' : 'Guardar en favoritos'}</button></>}</div></div></section>}
 
       {view === 'cart' && <section className="customer-account-section"><div className="customer-section-heading"><div><span className="customer-kicker">RESUMEN DE COMPRA</span><h2>Tu carrito</h2></div><span>{cart.count} unidades</span></div><LegacyCartNotice items={cart.legacy_items} busy={busy} onRemove={(key) => void removeLegacyCartItem(key)}/>{!cart.items.length ? <p className="customer-empty">Tu carrito está vacío. Explora el catálogo para encontrar una pieza.</p> : <><div className="customer-cart-list">{cart.items.map((item) => <article className="customer-cart-row" key={item.product.id}><img src={resolveImageUrl(item.product.image_url)} alt={item.product.name}/><div><h3>{item.product.name}</h3><p>{money(item.product.price)}</p>{item.available === false && <small role="status">No disponible en la cantidad actual. Ajusta o retira esta pieza.</small>}{item.product.is_custom_design ? <small>Cantidad incluida en el diseño</small> : <div className="customer-quantity"><button onClick={() => void changeQuantity(item.product.id, item.quantity - 1)} disabled={busy}><Minus size={14}/></button><span>{item.quantity}</span><button onClick={() => void changeQuantity(item.product.id, item.quantity + 1)} disabled={busy}><Plus size={14}/></button></div>}</div><strong>{money(item.subtotal)}</strong><button className="customer-remove" onClick={() => void changeQuantity(item.product.id, 0)} aria-label="Retirar producto" disabled={busy}><X size={17}/></button></article>)}</div><div className="customer-cart-total"><span>Total de productos</span><strong>{money(cart.total)}</strong></div><button className="customer-primary" disabled={busy || cart.items.some((item) => item.available === false)} onClick={() => setCheckoutOpen(true)}>Continuar con la compra</button></>}</section>}
 
