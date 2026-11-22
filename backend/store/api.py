@@ -1386,10 +1386,21 @@ class AdminProductOptionsView(APIView):
 
 
 class SuperadminUserListView(PaginatedAPIView):
-    permission_classes = (SuperadminOnly,)
+    permission_classes = (RolePermissionAccess,)
     rbac_resource = 'users'
 
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [RolePermissionAccess()]
+        return [SuperadminOnly()]
+
+    @staticmethod
+    def require_global_user_scope(request):
+        if record_scope_for(request.user, 'users') != 'all':
+            raise PermissionDenied('Tu alcance no permite consultar todas las cuentas.')
+
     def get(self, request):
+        self.require_global_user_scope(request)
         role_code = request.query_params.get('role', 'all').strip()
         valid_roles = (*AccessRole.objects.values_list('code', flat=True), 'unassigned', 'all')
         if role_code not in valid_roles:
@@ -1442,10 +1453,17 @@ class SuperadminUserListView(PaginatedAPIView):
 
 
 class SuperadminUserDetailView(APIView):
-    permission_classes = (SuperadminOnly,)
+    permission_classes = (RolePermissionAccess,)
     rbac_resource = 'users'
 
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [RolePermissionAccess()]
+        return [SuperadminOnly()]
+
     def get(self, request, user_id):
+        if record_scope_for(request.user, 'users') != 'all':
+            raise PermissionDenied('Tu alcance no permite consultar otras cuentas.')
         user = get_object_or_404(
             User.objects.select_related('access_profile__role', 'customer_profile', 'craftswoman_profile'),
             pk=user_id,

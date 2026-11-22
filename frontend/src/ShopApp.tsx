@@ -7,7 +7,8 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from './lib/api'
 import { resolveImageUrl } from './lib/imageUrl'
-import { ensureSuperadminAccessEntry } from './lib/navigation'
+import { adminNavigationTarget, ensureSuperadminAccessEntry, isAdminPanelSection } from './lib/navigation'
+import { visibleRBACSections, type RBACSection } from './lib/navigationConfig'
 import { useUserSession } from './context/user-context'
 import LegacyCartNotice from './LegacyCartNotice'
 import { RBACNavigationConfigurator } from './RBACNavigationConfigurator'
@@ -686,7 +687,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
 
     {screen === 'craftswoman' && user && <CraftswomanAccountView user={user} navigationItems={roleNavigation} dashboard={dashboard} profile={craftswomanProfile} products={craftswomanProducts} categories={categories} busy={busy} onCreateProduct={createCraftswomanProduct} onSaveProfile={saveCraftswomanProfile} onSignOut={signOut} onAcceptWorkItem={acceptWorkItem} onWorkItemStatus={updateWorkItem} onDesignStatus={updateDesignStatus} />}
 
-    {screen === 'admin' && user && <AdminAccountView user={user} isSuperadmin={user.role === 'superadmin'} navigationItems={roleNavigation} navigationError={roleNavigationError} onRetryNavigation={() => void refreshRoleNavigation(user)} orderSummary={adminOrderSummary} products={adminProducts} categories={adminCategories} productCraftswomen={adminCraftswomen} busy={busy} onSignOut={signOut} onSaveProduct={saveAdminProduct} onCreateProduct={createAdminProduct} onCreateCategory={createAdminCategory} onSaveCategory={saveAdminCategory} onCategoryActive={updateAdminCategory} onOrderStatus={saveAdminOrderStatus} onNotice={setNotice} />}
+    {screen === 'admin' && user && <AdminAccountView user={user} isSuperadmin={user.role === 'superadmin'} navigationItems={roleNavigation} navigationError={roleNavigationError} onRetryNavigation={() => void refreshRoleNavigation(user)} onBrowseCatalog={() => setScreen('shop')} orderSummary={adminOrderSummary} products={adminProducts} categories={adminCategories} productCraftswomen={adminCraftswomen} busy={busy} onSignOut={signOut} onSaveProduct={saveAdminProduct} onCreateProduct={createAdminProduct} onCreateCategory={createAdminCategory} onSaveCategory={saveAdminCategory} onCategoryActive={updateAdminCategory} onOrderStatus={saveAdminOrderStatus} onNotice={setNotice} />}
 
     {screen !== 'shop' && screen !== 'admin' && <Footer onInstagram={() => setNotice('Pronto encontrarás nuestras novedades en Instagram.')} />}
     {selectedProduct && <ProductDialog product={selectedProduct} busy={busy} onClose={() => setSelectedProduct(null)} onAdd={() => addToCart(selectedProduct.id)} />}
@@ -859,11 +860,12 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, profile, pro
   </div>
 }
 
-function AdminAccountView({ user, isSuperadmin, navigationItems, navigationError, onRetryNavigation, orderSummary, products, categories, productCraftswomen, busy, onSignOut, onSaveProduct, onCreateProduct, onCreateCategory, onSaveCategory, onCategoryActive, onOrderStatus, onNotice }: {
+function AdminAccountView({ user, isSuperadmin, navigationItems, navigationError, onRetryNavigation, onBrowseCatalog, orderSummary, products, categories, productCraftswomen, busy, onSignOut, onSaveProduct, onCreateProduct, onCreateCategory, onSaveCategory, onCategoryActive, onOrderStatus, onNotice }: {
   user: SessionUser
   navigationItems: RBACNavigationItem[]
   navigationError: string
   onRetryNavigation: () => void
+  onBrowseCatalog: () => void
   isSuperadmin: boolean
   orderSummary: AdminOrderSummary | null
   products: AdminProduct[]
@@ -978,20 +980,22 @@ function AdminAccountView({ user, isSuperadmin, navigationItems, navigationError
   }
 
   const navItems = navigationItems.map((item) => {
-    const id = item.route_name.split('.')[1] as 'dashboard' | 'products' | 'inventory' | 'orders' | 'categories' | 'access'
+    const id = adminNavigationTarget(item.route_name)
+    if (!id) return null
     const icon = id === 'dashboard' ? <LayoutDashboard size={17} /> : id === 'products' ? <ShoppingBag size={17} /> : id === 'orders' ? <ShoppingCart size={17} /> : id === 'access' ? <LockKeyhole size={17} /> : <Boxes size={17} />
     return { id, label: item.label, icon }
-  }).filter((item) => ['dashboard', 'products', 'inventory', 'orders', 'categories', 'access'].includes(item.id))
+  }).filter((item): item is NonNullable<typeof item> => item !== null)
   const canOpenSection = (section: string) => navItems.some((item) => item.id === section)
   useEffect(() => {
-    if (!canOpenSection(activeSection) && navItems[0]) setActiveSection(navItems[0].id)
+    const firstAdminSection = navItems.map((item) => item.id).find(isAdminPanelSection)
+    if (!canOpenSection(activeSection) && firstAdminSection) setActiveSection(firstAdminSection)
   }, [navigationItems, activeSection])
   return <div className="craftswoman-workspace admin-workspace">
     <aside className="craftswoman-sidebar">
       <div className="craftswoman-brand"><span className="craftswoman-brand-mark"><Layers size={22} /></span><span><strong>Wayúu</strong><small>{isSuperadmin ? 'CONTROL GENERAL DEL SISTEMA' : 'ADMINISTRACIÓN DE TIENDA'}</small></span></div>
       <nav className="craftswoman-nav" aria-label="Menú de administración">
         <p>MENÚ PRINCIPAL</p>
-        {navItems.map((item) => <button key={item.id} className={activeSection === item.id ? 'active' : ''} onClick={() => { setActiveSection(item.id); if (item.id === 'access') onRetryNavigation() }}>{item.icon}<span>{item.label}</span></button>)}
+        {navItems.map((item) => <button key={item.id} className={isAdminPanelSection(item.id) && activeSection === item.id ? 'active' : ''} onClick={() => { if (!isAdminPanelSection(item.id)) { onBrowseCatalog(); return } setActiveSection(item.id); if (item.id === 'access') onRetryNavigation() }}>{item.icon}<span>{item.label}</span></button>)}
       </nav>
       <div className="craftswoman-sidebar-profile"><span className="craftswoman-avatar">{accountName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'AD'}</span><div><strong>{accountName}</strong><small>{isSuperadmin ? 'Superadministrador' : 'Administrador de tienda'}</small></div><button onClick={onSignOut} aria-label="Cerrar sesión" title="Cerrar sesión"><LogOut size={16} /></button></div>
       <div className="craftswoman-sidebar-foot">SÜCHIKI KANAAS · LEGADO CULTURAL</div>
@@ -1070,8 +1074,6 @@ const rbacResourceLabels: Record<string, string> = {
   role_assignments: 'Asignación de roles', permissions: 'Permisos',
   delegations: 'Delegaciones', navigation: 'Menú y navegación', audit: 'Registro de actividad',
 }
-type RBACSection = 'roles' | 'users' | 'audit' | 'navigation' | 'catalog'
-
 function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   const [catalog, setCatalog] = useState<RBACPermission[]>([])
   const [roles, setRoles] = useState<RBACRole[]>([])
@@ -1104,10 +1106,10 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   const [createUserRole, setCreateUserRole] = useState<string>('customer')
   const canViewCatalog = hasEffectivePermission(currentUser, 'permissions.view')
   const canChangePermissions = hasEffectivePermission(currentUser, 'permissions.change')
-  const canViewUsers = currentUser.role === 'superadmin' && hasEffectivePermission(currentUser, 'users.view')
-  const canAddUsers = hasEffectivePermission(currentUser, 'users.add')
-  const canChangeUsers = hasEffectivePermission(currentUser, 'users.change')
-  const canAssignRoles = hasEffectivePermission(currentUser, 'role_assignments.change')
+  const canViewUsers = hasEffectivePermission(currentUser, 'users.view')
+  const canAddUsers = currentUser.role === 'superadmin' && hasEffectivePermission(currentUser, 'users.add')
+  const canChangeUsers = currentUser.role === 'superadmin' && hasEffectivePermission(currentUser, 'users.change')
+  const canAssignRoles = currentUser.role === 'superadmin' && hasEffectivePermission(currentUser, 'role_assignments.change')
   const canViewRoles = hasEffectivePermission(currentUser, 'roles.view')
   const canAddRoles = hasEffectivePermission(currentUser, 'roles.add')
   const canChangeRoles = hasEffectivePermission(currentUser, 'roles.change')
@@ -1119,16 +1121,13 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   const canAddCatalog = hasEffectivePermission(currentUser, 'permissions.add')
   const canChangeCatalog = hasEffectivePermission(currentUser, 'permissions.change')
   const canManageScopes = currentUser.role === 'superadmin'
-  const availableSections: RBACSection[] = [
-    ...(canViewRoles ? ['roles' as const] : []),
-    ...(canViewUsers ? ['users' as const] : []),
-    ...(canViewNavigation ? ['navigation' as const] : []),
-    ...(canViewCatalog ? ['catalog' as const] : []),
-    ...(canViewAudit ? ['audit' as const] : []),
-  ]
+  const availableSections: RBACSection[] = visibleRBACSections(currentUser.role, currentUser.permissions ?? [])
   const availableSectionsKey = availableSections.join('|')
   const activeSectionAllowed = availableSections.includes(activeSection)
   const selectedUser = users.find((candidate) => String(candidate.id) === selectedUserId)
+  const canInspectSelectedUserPermissions = currentUser.role === 'superadmin'
+    || selectedUser?.role === 'customer'
+    || selectedUser?.role === 'craftswoman'
   const selectedRoleInfo = roles.find((role) => role.code === selectedRole)
   const visibleRolePermissions = (rolePermissions?.permissions ?? []).filter((permission) => {
     const search = permissionSearch.trim().toLocaleLowerCase('es')
@@ -1236,9 +1235,9 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
   }, [selectedRole, canViewRoles, canViewCatalog, canManageScopes])
 
   useEffect(() => {
-    if (!selectedUserId || !canViewUsers || !canViewCatalog) return
+    if (!selectedUserId || !canViewUsers || !canViewCatalog || !canInspectSelectedUserPermissions) return
     let active = true
-    Promise.allSettled([api.userPermissions(Number(selectedUserId)), api.userScopes(Number(selectedUserId))]).then(([permissions, scopes]) => {
+    Promise.allSettled([api.userPermissions(Number(selectedUserId)), canManageScopes ? api.userScopes(Number(selectedUserId)) : Promise.resolve(null)]).then(([permissions, scopes]) => {
       if (!active) return
       const errors: string[] = []
       if (permissions.status === 'fulfilled') setUserPermissions(permissions.value)
@@ -1248,7 +1247,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
       if (errors.length) setError(errors.join(' '))
     })
     return () => { active = false }
-  }, [selectedUserId, canViewUsers, canViewCatalog])
+  }, [selectedUserId, canViewUsers, canViewCatalog, canManageScopes, canInspectSelectedUserPermissions])
 
   async function reloadUsers(selectedId?: number) {
     const refreshedUsers = await api.superadminUsers(new URLSearchParams({ page_size: '100' }))
@@ -1257,7 +1256,7 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
     if (selectedId) setSelectedUserId(String(selectedId))
     if (nextSelectedId && canViewUsers && canViewCatalog) {
       setUserPermissions(await api.userPermissions(nextSelectedId))
-      setUserScopes(await api.userScopes(nextSelectedId))
+      if (canManageScopes) setUserScopes(await api.userScopes(nextSelectedId))
     }
   }
 
@@ -1521,8 +1520,8 @@ function SuperadminRBACPanel({ currentUser }: { currentUser: SessionUser }) {
           {selectedUser.role === 'craftswoman' && <><label className="form-label">Teléfono<input name="phone" maxLength={30} defaultValue={selectedUser.profile?.phone ?? ''} disabled={!canChangeUsers} /></label><label className="form-label">Comunidad<input name="community" maxLength={150} defaultValue={selectedUser.profile?.community ?? ''} disabled={!canChangeUsers} /></label><label className="form-label">Región<input name="region" maxLength={100} defaultValue={selectedUser.profile?.region ?? ''} disabled={!canChangeUsers} /></label><label className="admin-check"><input name="craftswoman_active" type="checkbox" defaultChecked={selectedUser.profile?.active ?? false} disabled={!canChangeUsers} /> Perfil artesana activo</label></>}
           {canChangeUsers && <button className="button button-outline" disabled={saving}>{saving ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />} Guardar cuenta</button>}
         </form>}
-        <div className="rbac-permission-list">{userPermissions?.permissions.map((permission) => <label className="rbac-permission" key={`${permission.resource}.${permission.action}`}><span><strong>{rbacResourceLabels[permission.resource] ?? permission.resource}</strong><small>{rbacActionLabels[permission.action] ?? permission.action_name ?? permission.action} · {permission.name}</small></span><select aria-label={`${permission.resource} ${permission.action} para ${userPermissions.username}`} value={permission.effect ?? ''} disabled={saving || !canChangePermissions} onChange={(event) => void changeUserPermission(permission, event.target.value ? event.target.value as 'allow' | 'deny' : null)}><option value="">Heredado</option><option value="allow">Permitir</option><option value="deny">Denegar</option></select></label>)}</div>
-        {userScopes && <section className="rbac-permission-list"><h4>Alcance individual sobre registros privados</h4>{userScopes.scopes.map((entry) => <label className="rbac-permission" key={entry.resource}><span><strong>{entry.resource_name}</strong><small>Ámbito efectivo actual: {entry.effective_scope}</small></span><select aria-label={`Ámbito ${entry.resource_name} para ${userScopes.username}`} value={entry.scope ?? ''} disabled={saving || !canChangePermissions} onChange={(event) => void changeUserScope(entry.resource, event.target.value ? event.target.value as 'all' | 'none' : null)}><option value="">Heredar</option><option value="none">Sin registros</option><option value="all">Todos los registros</option></select></label>)}</section>}
+        {canInspectSelectedUserPermissions && <div className="rbac-permission-list">{userPermissions?.permissions.map((permission) => <label className="rbac-permission" key={`${permission.resource}.${permission.action}`}><span><strong>{rbacResourceLabels[permission.resource] ?? permission.resource}</strong><small>{rbacActionLabels[permission.action] ?? permission.action_name ?? permission.action} · {permission.name}</small></span><select aria-label={`${permission.resource} ${permission.action} para ${userPermissions.username}`} value={permission.effect ?? ''} disabled={saving || !canChangePermissions} onChange={(event) => void changeUserPermission(permission, event.target.value ? event.target.value as 'allow' | 'deny' : null)}><option value="">Heredado</option><option value="allow">Permitir</option><option value="deny">Denegar</option></select></label>)}</div>}
+        {canManageScopes && userScopes && <section className="rbac-permission-list"><h4>Alcance individual sobre registros privados</h4>{userScopes.scopes.map((entry) => <label className="rbac-permission" key={entry.resource}><span><strong>{entry.resource_name}</strong><small>Ámbito efectivo actual: {entry.effective_scope}</small></span><select aria-label={`Ámbito ${entry.resource_name} para ${userScopes.username}`} value={entry.scope ?? ''} disabled={saving || !canChangePermissions} onChange={(event) => void changeUserScope(entry.resource, event.target.value ? event.target.value as 'all' | 'none' : null)}><option value="">Heredar</option><option value="none">Sin registros</option><option value="all">Todos los registros</option></select></label>)}</section>}
       </section>}
       {activeSection === 'navigation' && canViewNavigation && <RBACNavigationConfigurator
         currentUser={currentUser}

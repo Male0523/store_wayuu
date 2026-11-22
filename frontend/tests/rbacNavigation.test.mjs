@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { ensureSuperadminAccessEntry, firstAvailableNavigationRoute, navigationItemMatchesInput, rolesAllowedForRoute, updateNavigationRoleSelection } from '../src/lib/navigation.ts'
-import { hasNavigationDraftChanges, permissionRequestPending, roleCodesWithVisibility, routePermissions } from '../src/lib/navigationConfig.ts'
+import { adminNavigationTarget, ensureSuperadminAccessEntry, firstAvailableNavigationRoute, isAdminPanelSection, navigationItemMatchesInput, rolesAllowedForRoute, updateNavigationRoleSelection } from '../src/lib/navigation.ts'
+import { hasNavigationDraftChanges, permissionRequestPending, roleCodesWithVisibility, routePermissions, visibleRBACSections } from '../src/lib/navigationConfig.ts'
 
 const role = (code, active = true) => ({
   code, name: code, description: '', priority: 10, active, system: false, assigned_users: 0,
@@ -91,6 +91,23 @@ test('permission loading ends when a role request completes, including a failed 
   assert.equal(permissionRequestPending(true, 'admin', true, 'admin'), false)
   assert.equal(permissionRequestPending(true, 'craftswoman', true, 'admin'), true)
   assert.equal(permissionRequestPending(true, 'admin', false, null), false)
+})
+
+test('admin navigation recognizes the colon-delimited storefront route', () => {
+  assert.equal(adminNavigationTarget('store:catalog'), 'storefront')
+  assert.equal(adminNavigationTarget('admin.access'), 'access')
+  assert.equal(adminNavigationTarget('admin.unknown'), null)
+  assert.equal(adminNavigationTarget('craftswoman.orders'), null)
+  assert.equal(isAdminPanelSection('storefront'), false)
+  assert.equal(isAdminPanelSection('access'), true)
+})
+
+test('RBAC tabs use independent view grants while superadmin remains global', () => {
+  const adminRead = ['roles.view', 'users.view', 'navigation.view', 'permissions.view', 'audit.view']
+  assert.deepEqual(visibleRBACSections('admin', adminRead), ['roles', 'users', 'navigation', 'catalog', 'audit'])
+  assert.deepEqual(visibleRBACSections('admin', ['roles.view']), ['roles'])
+  assert.deepEqual(visibleRBACSections('craftswoman', ['roles.view', 'audit.view']), ['roles', 'audit'])
+  assert.deepEqual(visibleRBACSections('superadmin', []), ['roles', 'users', 'navigation', 'catalog', 'audit'])
 })
 
 test('does not duplicate a configured superadmin access entry', () => {

@@ -1,5 +1,20 @@
 import type { RBACNavigationInput, RBACNavigationItem, RBACNavigationRoute, RBACRole } from '../types'
 
+export type AdminNavigationTarget = 'dashboard' | 'products' | 'inventory' | 'orders' | 'categories' | 'access' | 'storefront'
+
+export function isAdminPanelSection(target: AdminNavigationTarget): target is Exclude<AdminNavigationTarget, 'storefront'> {
+  return target !== 'storefront'
+}
+
+export function adminNavigationTarget(routeName: string): AdminNavigationTarget | null {
+  if (routeName === 'store:catalog') return 'storefront'
+  if (!routeName.startsWith('admin.')) return null
+  const target = routeName.slice('admin.'.length)
+  return ['dashboard', 'products', 'inventory', 'orders', 'categories', 'access'].includes(target)
+    ? target as Exclude<AdminNavigationTarget, 'storefront'>
+    : null
+}
+
 export function firstAvailableNavigationRoute(
   routes: RBACNavigationRoute[],
   items: RBACNavigationItem[],
