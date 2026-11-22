@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from './lib/api'
-import { CRUD_ACTIONS, hasNavigationDraftChanges, permissionRequestPending, roleCodesWithVisibility, routePermissions } from './lib/navigationConfig'
+import { canAssignNavigationWithoutDataAccess, CRUD_ACTIONS, hasNavigationDraftChanges, permissionRequestPending, roleCodesWithVisibility, routePermissions } from './lib/navigationConfig'
 import type { RBACAction, RBACCatalogEntry, RBACNavigationInput, RBACNavigationItem, RBACNavigationRoute, RBACPermission, RBACRole, RBACRolePermissions, SessionUser } from './types'
 import './RBACNavigationConfigurator.css'
 
@@ -113,7 +113,8 @@ export function RBACNavigationConfigurator({ currentUser, roles, items, routes, 
   const missingOptionalPermission = Boolean(canViewPermissions && optionalPermissionKey && !selectedRoute?.required_permissions.some((entry) => `${entry.resource}.${entry.action}` === optionalPermissionKey)
     && (optionalPermissionEffect === 'deny' || (optionalPermissionEffect !== 'allow' && !optionalPermission?.allowed)))
   const visibleBlocked = missingRequirements.length > 0 || missingScopes.length > 0 || missingOptionalPermission
-  const canSaveVisibility = (visible === serverVisible || (item ? canChangeNavigation : canAddNavigation)) && (!visible || !visibleBlocked)
+  const visibilityIndependent = canAssignNavigationWithoutDataAccess(selectedRouteName)
+  const canSaveVisibility = (visible === serverVisible || (item ? canChangeNavigation : canAddNavigation)) && (!visible || !visibleBlocked || visibilityIndependent)
   const navigationDirty = metadataDirty || visible !== serverVisible
   const canSaveNavigation = !navigationDirty || (item ? canChangeNavigation : canAddNavigation)
   const metadataValid = Boolean(metadata.label.trim())
@@ -340,7 +341,7 @@ export function RBACNavigationConfigurator({ currentUser, roles, items, routes, 
         <label className="form-label">Pantalla *<select aria-label="Pantalla para configurar" value={selectedRouteName} onChange={(event) => selectRoute(event.target.value)} disabled={!routes.length || saving}>
           {routes.map((route) => <option key={route.value} value={route.value}>{route.label}</option>)}
         </select></label>
-        <label className="rbac-vistas-toggle"><strong>Visible en el menú</strong><span><input type="checkbox" aria-label="Visible en el menú para el rol seleccionado" checked={visible} disabled={saving || isLoadingPermissions || (selectedRouteName === 'admin.access' && selectedRoleCode === 'superadmin') || sharedInactiveAssignment || (!visible && visibleBlocked)} onChange={(event) => setVisibleDraft(event.target.checked)} /> Sí, mostrar en el menú</span>{selectedRouteName === 'admin.access' && selectedRoleCode === 'superadmin' && <small>La entrada del superadministrador permanece protegida.</small>}</label>
+        <label className="rbac-vistas-toggle"><strong>Visible en el menú</strong><span><input type="checkbox" aria-label="Visible en el menú para el rol seleccionado" checked={visible} disabled={saving || isLoadingPermissions || (selectedRouteName === 'admin.access' && selectedRoleCode === 'superadmin') || sharedInactiveAssignment || (!visible && visibleBlocked && !visibilityIndependent)} onChange={(event) => setVisibleDraft(event.target.checked)} /> Sí, mostrar en el menú</span>{selectedRouteName === 'admin.access' && selectedRoleCode === 'superadmin' && <small>La entrada del superadministrador permanece protegida.</small>}</label>
         <label className="form-label">Nombre visible<input maxLength={80} value={metadata.label} disabled={saving || !(item ? canChangeNavigation : canAddNavigation)} onChange={(event) => setMetadataDraft((current) => ({ ...serverMetadata, ...current, label: event.target.value }))} /></label>
         <label className="form-label">Orden del menú<input type="number" min="0" max="32767" value={metadata.order} disabled={saving || !(item ? canChangeNavigation : canAddNavigation)} onChange={(event) => setMetadataDraft((current) => ({ ...serverMetadata, ...current, order: Number(event.target.value) }))} /></label>
         <label className="form-label">Descripción<input maxLength={220} value={metadata.description} disabled={saving || !(item ? canChangeNavigation : canAddNavigation)} onChange={(event) => setMetadataDraft((current) => ({ ...serverMetadata, ...current, description: event.target.value }))} /></label>
@@ -362,6 +363,7 @@ export function RBACNavigationConfigurator({ currentUser, roles, items, routes, 
           return <label key={key}><span>{permission.action_name ?? permission.action} · {permission.resource_name ?? permission.resource}</span><select value={value} disabled={saving || isLoadingPermissions || !canChangePermissions} onChange={(event) => setEffects((current) => ({ ...current, [key]: event.target.value }))}><option value="inherit">Sin grant</option><option value="allow" disabled={value !== 'allow' && !effective(currentUser, key)}>Permitir</option><option value="deny">Denegar</option></select></label>
         })}</div></details>}
         {routeWarnings.map((warning) => <p className="rbac-warning" role="status" key={warning}>{warning} La visibilidad no sustituye este requisito.</p>)}
+        {visibilityIndependent && visibleBlocked && <p className="rbac-info" role="status">La asignación se guardará sin grants. La pantalla solo aparecerá cuando el rol tenga los permisos y alcances requeridos; las operaciones siguen protegidas por el servidor.</p>}
         {sharedInactiveAssignment && <p className="rbac-warning" role="status">Esta pantalla está desactivada globalmente y asignada a otros roles. No se activará desde aquí para evitar cambiar su visibilidad compartida.</p>}
         {metadataDirty && !metadataValid && <p className="rbac-warning" role="alert">Completa un nombre visible y selecciona recurso y acción requeridos juntos, o deja ambos sin requisito adicional.</p>}
         {!canChangePermissions && canViewPermissions && <p className="rbac-info">Consulta habilitada. Para modificar capacidades necesitas permissions.change; los cambios se rechazan también en el servidor.</p>}

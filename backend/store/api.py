@@ -819,14 +819,27 @@ NAVIGATION_ROUTE_CATALOG = {
     'admin.access': {'label': 'Roles y permisos', 'panel': 'admin', 'section': 'access', 'django_url_name': None, 'requires': (('roles', 'view'),)},
 }
 
+# These routes may be assigned independently from data and action grants.
+# The menu and the resource endpoints still enforce effective permissions.
+NAVIGATION_ASSIGNMENT_INDEPENDENT_ROUTES = frozenset({'admin.access', 'admin.categories'})
+
 def navigation_role_codes(route_name):
-    """Return active roles; route-level permission requirements are validated separately."""
+    """Return all active roles; rendering and data access are checked separately."""
     if route_name not in NAVIGATION_ROUTE_CATALOG:
         return []
-    roles = AccessRole.objects.filter(active=True)
-    if route_name == 'admin.access':
-        roles = roles.exclude(code__in=(AccessRole.Code.CUSTOMER, AccessRole.Code.CRAFTSWOMAN))
-    return list(roles.order_by('priority', 'name').values_list('code', flat=True))
+    return list(AccessRole.objects.filter(active=True).order_by('priority', 'name').values_list('code', flat=True))
+
+
+def navigation_user_can_render_route(user, role, route_name):
+    """Keep RBAC management links in administration, even for incompatible legacy grants."""
+    if route_name != 'admin.access':
+        return True
+    if role is None or role.code in (AccessRole.Code.CUSTOMER, AccessRole.Code.CRAFTSWOMAN):
+        return False
+    return not (
+        Customer.objects.filter(user=user).exists()
+        or Craftswoman.objects.filter(user=user).exists()
+    )
 
 
 def navigation_requirements(route_name):
@@ -980,7 +993,7 @@ class NavigationItemWriteSerializer(serializers.Serializer):
                 raise serializers.ValidationError({
                     'role_codes': f'Estos roles no son compatibles con la pantalla seleccionada: {", ".join(sorted(incompatible))}.',
                 })
-        if route_name and attrs.get('active', getattr(self.instance, 'active', True)):
+        if route_name and route_name not in NAVIGATION_ASSIGNMENT_INDEPENDENT_ROUTES and attrs.get('active', getattr(self.instance, 'active', True)):
             selected_roles = set(role_codes) if role_codes is not None else (
                 set(self.instance.roles.values_list('code', flat=True)) if self.instance else set()
             )
@@ -2194,7 +2207,7 @@ class RoleNavigationMenuView(APIView):
                 for resource in route.get('all_scope', ())
             ):
                 continue
-            if item.route_name == 'admin.access' and role.code in (AccessRole.Code.CUSTOMER, AccessRole.Code.CRAFTSWOMAN):
+            if not navigation_user_can_render_route(request.user, role, item.route_name):
                 continue
             if item.permission_id:
                 key = permission_key(item.permission)

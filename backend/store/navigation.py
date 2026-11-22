@@ -12,12 +12,14 @@ def navigation_menu(request):
 
     # Import at request time to avoid coupling the API module's route registry
     # to Django's template initialization order.
-    from .api import NAVIGATION_ROUTE_CATALOG, navigation_requirements, navigation_role_codes
+    from .api import NAVIGATION_ROUTE_CATALOG, navigation_requirements, navigation_role_codes, navigation_user_can_render_route
 
     items = []
     for item in NavigationItem.objects.filter(active=True, roles=role).distinct():
         route = NAVIGATION_ROUTE_CATALOG.get(item.route_name)
         if not route or role.code not in navigation_role_codes(item.route_name):
+            continue
+        if not navigation_user_can_render_route(request.user, role, item.route_name):
             continue
         if route['panel'] == 'customer' and role.code != 'customer' and not Customer.objects.filter(user=request.user).exists():
             continue

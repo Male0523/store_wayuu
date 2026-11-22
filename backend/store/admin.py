@@ -23,7 +23,7 @@ from .models import (
     UserPermissionGrant,
     UserRole,
 )
-from .api import NAVIGATION_ROUTE_CATALOG, missing_role_navigation_access, navigation_role_codes
+from .api import NAVIGATION_ASSIGNMENT_INDEPENDENT_ROUTES, NAVIGATION_ROUTE_CATALOG, missing_role_navigation_access, navigation_role_codes
 from .rbac import (
     has_permission as has_rbac_permission,
     has_role,
@@ -408,7 +408,7 @@ class NavigationItemAdminForm(forms.ModelForm):
         incompatible = {role.code for role in incompatible_candidates} - set(navigation_role_codes(route_name))
         if incompatible:
             self.add_error('roles', f'Estos roles no son compatibles con la pantalla seleccionada: {", ".join(sorted(incompatible))}.')
-        if active:
+        if active and route_name not in NAVIGATION_ASSIGNMENT_INDEPENDENT_ROUTES:
             assigned_permission = cleaned.get('permission')
             permission_changed = getattr(assigned_permission, 'pk', None) != self.instance.permission_id
             activating = bool(self.instance.pk and active and not self.instance.active)

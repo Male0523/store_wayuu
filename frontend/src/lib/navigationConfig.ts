@@ -1,6 +1,11 @@
 import type { RBACNavigationItem, RBACNavigationRoute, RBACPermission } from '../types'
 
 export const CRUD_ACTIONS = ['view', 'create', 'edit', 'delete'] as const
+export const VISIBILITY_INDEPENDENT_ROUTES = ['admin.access', 'admin.categories'] as const
+
+export function canAssignNavigationWithoutDataAccess(routeName: string): boolean {
+  return VISIBILITY_INDEPENDENT_ROUTES.includes(routeName as typeof VISIBILITY_INDEPENDENT_ROUTES[number])
+}
 
 export const RBAC_SECTIONS = ['roles', 'users', 'navigation', 'catalog', 'audit'] as const
 export type RBACSection = typeof RBAC_SECTIONS[number]

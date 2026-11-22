@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { adminNavigationTarget, canUseCustomerFeatures, canViewSharedCatalog, ensureSuperadminAccessEntry, firstAvailableNavigationRoute, isAdminPanelSection, navigationItemMatchesInput, rolesAllowedForRoute, updateNavigationRoleSelection } from '../src/lib/navigation.ts'
-import { hasNavigationDraftChanges, permissionRequestPending, roleCodesWithVisibility, routePermissions, visibleRBACSections } from '../src/lib/navigationConfig.ts'
+import { canAssignNavigationWithoutDataAccess, hasNavigationDraftChanges, permissionRequestPending, roleCodesWithVisibility, routePermissions, visibleRBACSections } from '../src/lib/navigationConfig.ts'
 
 const role = (code, active = true) => ({
   code, name: code, description: '', priority: 10, active, system: false, assigned_users: 0,
@@ -13,16 +13,15 @@ test('route picker uses backend compatibility and includes active dynamic roles'
   assert.deepEqual(rolesAllowedForRoute(roles, route).map((entry) => entry.code), ['customer', 'orders_viewer'])
 })
 
-test('admin access is assignable only to administration-panel roles and remains permission-gated', () => {
+test('admin access and categories can be assigned to any active role without granting data permissions', () => {
   const roles = [role('superadmin'), role('craftswoman'), role('roles_auditor'), role('inactive_role', false)]
-  const route = {
-    value: 'admin.access', label: 'Roles y permisos',
-    panel: 'admin', section: 'access', django_url_name: null, required_scopes: [],
-    role_codes: ['superadmin', 'roles_auditor', 'inactive_role'],
+  const allRoles = ['superadmin', 'craftswoman', 'roles_auditor', 'inactive_role']
+  for (const routeName of ['admin.access', 'admin.categories']) {
+    const route = { value: routeName, label: routeName, role_codes: allRoles }
+    assert.deepEqual(rolesAllowedForRoute(roles, route).map((entry) => entry.code), ['superadmin', 'craftswoman', 'roles_auditor'])
+    assert.equal(canAssignNavigationWithoutDataAccess(routeName), true)
   }
-  assert.deepEqual(rolesAllowedForRoute(roles, route).map((entry) => entry.code), [
-    'superadmin', 'roles_auditor',
-  ])
+  assert.equal(canAssignNavigationWithoutDataAccess('admin.products'), false)
 })
 
 test('role assignment adds and removes one role without losing other active assignments', () => {
