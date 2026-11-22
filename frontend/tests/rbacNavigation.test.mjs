@@ -123,10 +123,11 @@ test('delegated roles only receive assigned categories and access entries in the
   for (const role of ['customer', 'craftswoman', 'custom_role']) {
     assert.deepEqual(
       adminPanelNavigationForRole(routes, role).map((item) => item.route_name),
-      ['admin.categories', 'admin.access'],
+      ['admin.categories', 'admin.access', 'store:catalog'],
     )
   }
   assert.equal(adminPanelNavigationForRole(routes, 'customer').some((item) => item.route_name === 'admin.products'), false)
+  assert.equal(adminNavigationTarget(routes[4]), 'storefront')
   assert.equal(adminPanelNavigationForRole(routes, 'admin'), routes)
   assert.equal(adminPanelNavigationForRole(routes, 'superadmin'), routes)
 })

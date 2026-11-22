@@ -21,7 +21,10 @@ export function rolePanelNavigationSection(item: Pick<RBACNavigationItem, 'panel
 
 export function adminPanelNavigationForRole(items: RBACNavigationItem[], roleCode: string): RBACNavigationItem[] {
   if (roleCode === 'admin' || roleCode === 'superadmin') return items
-  return items.filter((item) => rolePanelNavigationSection(item) !== null)
+  return items.filter((item) =>
+    rolePanelNavigationSection(item) !== null
+    || (item.panel === 'shared' && item.section === 'catalog'),
+  )
 }
 
 export function isAdminPanelSection(target: AdminNavigationTarget): target is Exclude<AdminNavigationTarget, 'storefront'> {
