@@ -2,16 +2,15 @@ import type { RBACNavigationInput, RBACNavigationItem, RBACNavigationRoute, RBAC
 
 export type AdminNavigationTarget = 'dashboard' | 'products' | 'inventory' | 'orders' | 'categories' | 'access' | 'storefront'
 
-export function rolePanelSectionPath(section: string): string | null {
-  if (section !== 'categories' && section !== 'access') return null
-  return `/panel?section=${encodeURIComponent(section)}`
-}
+export type EmbeddedRolePanel = 'customer' | 'craftswoman'
+export type DelegatedAdminSection = 'categories' | 'access'
 
-export function navigateToRolePanelSection(section: string): boolean {
-  const destination = rolePanelSectionPath(section)
-  if (!destination) return false
-  window.dispatchEvent(new CustomEvent('wayuu:navigate', { detail: destination }))
-  return true
+export function embeddedRolePanelSelection(
+  parentPanel: EmbeddedRolePanel,
+  item: Pick<RBACNavigationItem, 'panel' | 'section'>,
+): { parentPanel: EmbeddedRolePanel; section: DelegatedAdminSection } | null {
+  const section = rolePanelNavigationSection(item)
+  return section ? { parentPanel, section } : null
 }
 
 export function rolePanelNavigationSection(item: Pick<RBACNavigationItem, 'panel' | 'section'>): 'categories' | 'access' | null {

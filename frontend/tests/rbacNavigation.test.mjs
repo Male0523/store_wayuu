@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { adminNavigationTarget, adminPanelNavigationForRole, canUseCustomerFeatures, canViewSharedCatalog, ensureSuperadminAccessEntry, firstAvailableNavigationRoute, isAdminPanelSection, navigationItemMatchesInput, rolePanelNavigationSection, rolePanelSectionPath, rolesAllowedForRoute, updateNavigationRoleSelection } from '../src/lib/navigation.ts'
+import { adminNavigationTarget, adminPanelNavigationForRole, canUseCustomerFeatures, canViewSharedCatalog, embeddedRolePanelSelection, ensureSuperadminAccessEntry, firstAvailableNavigationRoute, isAdminPanelSection, navigationItemMatchesInput, rolePanelNavigationSection, rolesAllowedForRoute, updateNavigationRoleSelection } from '../src/lib/navigation.ts'
 import { canAssignNavigationWithoutDataAccess, hasNavigationDraftChanges, permissionRequestPending, roleCodesWithVisibility, routePermissions, visibleRBACSections } from '../src/lib/navigationConfig.ts'
 
 const role = (code, active = true) => ({
@@ -104,12 +104,25 @@ test('admin navigation recognizes the colon-delimited storefront route', () => {
   for (const section of ['access', 'categories']) {
     const item = { panel: 'admin', section }
     assert.equal(rolePanelNavigationSection(item), section)
-    assert.equal(rolePanelSectionPath(section), `/panel?section=${section}`)
+    assert.equal(embeddedRolePanelSelection('customer', item).section, section)
+    assert.equal(embeddedRolePanelSelection('craftswoman', item).section, section)
   }
   assert.equal(rolePanelNavigationSection({ panel: 'admin', section: 'orders' }), null)
-  assert.equal(rolePanelSectionPath('orders'), null)
+  assert.equal(embeddedRolePanelSelection('customer', { panel: 'admin', section: 'orders' }), null)
   assert.equal(isAdminPanelSection('storefront'), false)
   assert.equal(isAdminPanelSection('access'), true)
+})
+
+test('delegated sections retain the active parent panel instead of switching to a route', () => {
+  for (const parentPanel of ['customer', 'craftswoman']) {
+    for (const section of ['categories', 'access']) {
+      assert.deepEqual(
+        embeddedRolePanelSelection(parentPanel, { panel: 'admin', section }),
+        { parentPanel, section },
+      )
+    }
+  }
+  assert.equal(embeddedRolePanelSelection('customer', { panel: 'shared', section: 'catalog' }), null)
 })
 
 test('delegated roles only receive assigned categories and access entries in the admin panel', () => {

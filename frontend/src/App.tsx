@@ -141,7 +141,7 @@ export default function App() {
 	let page: ReactNode
 	switch (path.replace(/\/$/, '') || '/') {
 		case '/': page = <><DemoNotice /><PublicSite /></>; break
-		case '/cliente': page = protectedPage('customer', <CustomerPanel />, true); break
+		case '/cliente': page = protectedPage('customer', <CustomerPanel renderDelegatedSection={(section) => <ConnectedShop key={`customer-${section}`} initialScreen="embeddedAdmin" delegatedSection={section} />} />, true); break
 		case '/catalogo-compartido': page = !sessionLoaded
 			? <div className="route-loading" role="status">Comprobando sesión…</div>
 			: <RolePage user={user} role="customer" onLogin={login} canAccess={canViewSharedCatalog} connected><CustomerPanel catalogOnly={user?.role !== 'customer'} /></RolePage>; break

@@ -1,19 +1,23 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { ArrowLeft, Boxes, Heart, Home, LockKeyhole, LogOut, Minus, Plus, Search, ShoppingBag, ShoppingCart, UserRound, X } from 'lucide-react'
 import { api, ApiError } from './lib/api'
 import { resolveImageUrl } from './lib/imageUrl'
-import { canUseCustomerFeatures, navigateToRolePanelSection, rolePanelNavigationSection } from './lib/navigation'
+import { canUseCustomerFeatures, embeddedRolePanelSelection, rolePanelNavigationSection, type DelegatedAdminSection } from './lib/navigation'
 import { useUserSession } from './context/user-context'
 import type { Cart, Category, CustomDesign, Order, Product, RBACNavigationItem, UserProfile } from './types'
 import LegacyCartNotice from './LegacyCartNotice'
 import './CustomerPanel.css'
 
-type View = 'catalog' | 'favorites' | 'cart' | 'account' | 'detail'
+type View = 'catalog' | 'favorites' | 'cart' | 'account' | 'detail' | 'delegated'
 type AccountSection = 'orders' | 'designs' | 'profile'
 const money = (value: string | number) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(Number(value || 0))
 const messageOf = (error: unknown) => error instanceof ApiError ? error.message : 'No fue posible completar la operación. Comprueba que Django esté activo e inténtalo de nuevo.'
 
-export default function CustomerPanel({ catalogOnly = false, embedded = false }: { catalogOnly?: boolean; embedded?: boolean }) {
+export default function CustomerPanel({ catalogOnly = false, embedded = false, renderDelegatedSection }: {
+  catalogOnly?: boolean
+  embedded?: boolean
+  renderDelegatedSection?: (section: DelegatedAdminSection) => ReactNode
+}) {
   const { user, logout } = useUserSession()
   const customerFeaturesAvailable = canUseCustomerFeatures(user, catalogOnly)
   const [view, setView] = useState<View>('catalog')
@@ -24,6 +28,7 @@ export default function CustomerPanel({ catalogOnly = false, embedded = false }:
   const [orders, setOrders] = useState<Order[]>([])
   const [designs, setDesigns] = useState<CustomDesign[]>([])
   const [navigationItems, setNavigationItems] = useState<RBACNavigationItem[]>([])
+  const [delegatedSelection, setDelegatedSelection] = useState<ReturnType<typeof embeddedRolePanelSelection> | null>(null)
   const [accountSection, setAccountSection] = useState<AccountSection>('orders')
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [selected, setSelected] = useState<Product | null>(null)
@@ -231,6 +236,14 @@ export default function CustomerPanel({ catalogOnly = false, embedded = false }:
     setSelected(null)
   }
 
+  function openDelegatedSection(item: RBACNavigationItem) {
+    const selection = embeddedRolePanelSelection('customer', item)
+    if (!selection || !delegatedAdminNavigation.some((entry) => entry.id === item.id)) return
+    setDelegatedSelection(selection)
+    setSelected(null)
+    setView('delegated')
+  }
+
   const fullName = profile?.name || user?.name || user?.username || 'Cliente'
   const accountNavigation = navigationItems.filter((item) => item.panel === 'customer' && ['orders', 'designs', 'profile'].includes(item.section ?? ''))
   const delegatedAdminNavigation = customerFeaturesAvailable
@@ -247,7 +260,7 @@ export default function CustomerPanel({ catalogOnly = false, embedded = false }:
         {customerFeaturesAvailable && <button className={view === 'favorites' ? 'active' : ''} onClick={() => navigate('favorites')}><Heart size={17}/>Mis favoritos</button>}
         {customerFeaturesAvailable && <button className={view === 'cart' ? 'active' : ''} onClick={() => navigate('cart')}><ShoppingCart size={17}/>Mi carrito <span>{cart.count}</span></button>}
         {customerFeaturesAvailable && accountNavigation.length > 0 && <button className={view === 'account' ? 'active' : ''} onClick={openAccount} disabled={busy}><UserRound size={17}/>Mi cuenta</button>}
-        {delegatedAdminNavigation.map((item) => <button key={item.id} onClick={() => navigateToRolePanelSection(item.section ?? '')}>
+        {delegatedAdminNavigation.map((item) => <button key={item.id} className={view === 'delegated' && delegatedSelection?.section === item.section ? 'active' : ''} onClick={() => openDelegatedSection(item)}>
           {item.section === 'access' ? <LockKeyhole size={17}/> : <Boxes size={17}/>}{item.label}
         </button>)}
       </nav>
@@ -255,8 +268,10 @@ export default function CustomerPanel({ catalogOnly = false, embedded = false }:
     </aside>}
 
     <main className="customer-main">
-      <header className="customer-topbar"><div><span className="customer-kicker">TIENDA ARTESANAL WAYÚU</span><h1>{view === 'catalog' ? 'Descubre nuestras piezas' : view === 'favorites' ? 'Mis favoritos' : view === 'cart' ? 'Mi carrito' : view === 'account' ? 'Mi cuenta y pedidos' : selected?.name}</h1></div><label className="customer-search"><Search size={17}/><input value={query} onChange={(event) => { setQuery(event.target.value); setView('catalog') }} placeholder="Buscar piezas..." /></label></header>
+      <header className="customer-topbar"><div><span className="customer-kicker">TIENDA ARTESANAL WAYÚU</span><h1>{view === 'catalog' ? 'Descubre nuestras piezas' : view === 'favorites' ? 'Mis favoritos' : view === 'cart' ? 'Mi carrito' : view === 'account' ? 'Mi cuenta y pedidos' : view === 'delegated' ? delegatedSelection?.section === 'categories' ? 'Categorías' : 'Roles y permisos' : selected?.name}</h1></div><label className="customer-search"><Search size={17}/><input value={query} onChange={(event) => { setQuery(event.target.value); setView('catalog') }} placeholder="Buscar piezas..." /></label></header>
       {notice && <div className="customer-notice" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Cerrar aviso"><X size={15}/></button></div>}
+
+      {view === 'delegated' && delegatedSelection?.parentPanel === 'customer' && renderDelegatedSection?.(delegatedSelection.section)}
 
       {(view === 'catalog' || view === 'favorites') && <>
         <section className="customer-welcome"><div><span>HECHO A MANO, CON IDENTIDAD</span><h2>Tradición que se teje<br/>con cada hilo.</h2><p>Explora piezas artesanales elaboradas por manos Wayúu.</p><button onClick={() => navigate('catalog')}>Explorar colección <ArrowLeft size={15}/></button></div><div className="customer-welcome-art" aria-hidden="true"><span>✳</span><span>✳</span><span>◇</span></div></section>
