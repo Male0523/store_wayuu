@@ -15,8 +15,8 @@ export function permissionRequestPending(canViewPermissions: boolean, roleCode: 
   return canViewPermissions && Boolean(roleCode && hasSelectedRoute && completedRoleCode !== roleCode)
 }
 
-export function routePermissions(route: RBACNavigationRoute, permissions: RBACPermission[]) {
-  const resources = [...new Set(route.required_permissions.map((entry) => entry.resource))]
+export function routePermissions(route: RBACNavigationRoute, permissions: RBACPermission[], additionalResource?: string | null) {
+  const resources = [...new Set([...route.required_permissions.map((entry) => entry.resource), ...(additionalResource ? [additionalResource] : [])])]
   return permissions.filter((permission) => resources.includes(permission.resource))
 }
 

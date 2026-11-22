@@ -83,28 +83,43 @@ export function RBACNavigationConfigurator({ currentUser, roles, items, routes, 
   const metadata = metadataDraft ?? serverMetadata
   const serverVisible = Boolean(item?.active && item.role_codes.includes(selectedRoleCode))
   const visible = visibleDraft ?? serverVisible
-  const visiblePermissions = useMemo(() => selectedRoute && rolePermissions?.role === selectedRoleCode ? routePermissions(selectedRoute, rolePermissions.permissions) : [], [selectedRoute, rolePermissions, selectedRoleCode])
+  const visiblePermissions = selectedRoute && rolePermissions?.role === selectedRoleCode
+    ? routePermissions(selectedRoute, rolePermissions.permissions, metadata.permission_resource)
+    : []
+  const permissionBaselines = Object.fromEntries(visiblePermissions.map((permission) => {
+    const key = `${permission.resource}.${permission.action}`
+    return [key, Object.prototype.hasOwnProperty.call(initialEffects, key) ? initialEffects[key] : permission.effect ?? 'inherit']
+  }))
   const rolePermissionsAvailable = Boolean(rolePermissions?.role === selectedRoleCode && permissionsLoadedFor === selectedRoleCode)
   const metadataDirty = Object.keys(serverMetadata).some((key) => serverMetadata[key as keyof typeof serverMetadata] !== metadata[key as keyof typeof metadata])
-  const dirty = hasNavigationDraftChanges(serverVisible, visible, initialEffects, effects) || metadataDirty
+  const dirty = hasNavigationDraftChanges(serverVisible, visible, permissionBaselines, effects) || metadataDirty
   const sharedInactiveAssignment = Boolean(item && !item.active && item.role_codes.some((code) => code !== selectedRoleCode))
   const isLoadingPermissions = loadingPermissions || permissionRequestPending(canViewPermissions, selectedRoleCode, Boolean(selectedRoute), permissionsLoadedFor)
   const missingRequirements = selectedRoute && selectedRole ? selectedRoute.required_permissions.filter((requirement) => {
     const key = `${requirement.resource}.${requirement.action}`
-    const draft = effects[key] ?? initialEffects[key]
+    const draft = effects[key] ?? permissionBaselines[key]
     if (draft === 'allow') return false
     if (draft === 'deny') return true
     return (selectedRoute.missing_permissions[selectedRole.code] ?? []).some((missing) => missing.resource === requirement.resource && missing.action === requirement.action)
   }) : []
   const missingScopes = selectedRoute && selectedRole ? selectedRoute.missing_scopes[selectedRole.code] ?? [] : []
-  const visibleBlocked = missingRequirements.length > 0 || missingScopes.length > 0
+  const optionalPermissionKey = metadata.permission_resource && metadata.permission_action
+    ? `${metadata.permission_resource}.${metadata.permission_action}`
+    : ''
+  const optionalPermission = optionalPermissionKey
+    ? rolePermissions?.permissions.find((permission) => `${permission.resource}.${permission.action}` === optionalPermissionKey)
+    : undefined
+  const optionalPermissionEffect = optionalPermissionKey ? effects[optionalPermissionKey] ?? permissionBaselines[optionalPermissionKey] : undefined
+  const missingOptionalPermission = Boolean(canViewPermissions && optionalPermissionKey && !selectedRoute?.required_permissions.some((entry) => `${entry.resource}.${entry.action}` === optionalPermissionKey)
+    && (optionalPermissionEffect === 'deny' || (optionalPermissionEffect !== 'allow' && !optionalPermission?.allowed)))
+  const visibleBlocked = missingRequirements.length > 0 || missingScopes.length > 0 || missingOptionalPermission
   const canSaveVisibility = (visible === serverVisible || (item ? canChangeNavigation : canAddNavigation)) && (!visible || !visibleBlocked)
   const navigationDirty = metadataDirty || visible !== serverVisible
   const canSaveNavigation = !navigationDirty || (item ? canChangeNavigation : canAddNavigation)
   const metadataValid = Boolean(metadata.label.trim())
     && metadata.order >= 0 && metadata.order <= 32767
     && Boolean(metadata.permission_resource) === Boolean(metadata.permission_action)
-  const canSavePermissions = !Object.keys(effects).some((key) => initialEffects[key] !== effects[key]) || canChangePermissions
+  const canSavePermissions = !Object.keys(effects).some((key) => permissionBaselines[key] !== effects[key]) || canChangePermissions
   const canSave = dirty && canSaveVisibility && canSaveNavigation && canSavePermissions && (!metadataDirty || metadataValid) && !saving && !isLoadingPermissions && Boolean(selectedRoute && selectedRole)
   const selectedAssignedItems = items.filter((entry) => entry.role_codes.includes(selectedRoleCode))
   const query = search.trim().toLocaleLowerCase('es')
@@ -136,7 +151,7 @@ export function RBACNavigationConfigurator({ currentUser, roles, items, routes, 
     setRouteName(next)
     setVisibleDraft(null)
     setMetadataDraft(null)
-    setEffects(initialEffects)
+    setEffects({})
     setFailure('')
     setPermissionLoadError('')
     setMessage('')
@@ -180,7 +195,7 @@ export function RBACNavigationConfigurator({ currentUser, roles, items, routes, 
     if (!confirmDiscard()) return
     setVisibleDraft(null)
     setMetadataDraft(null)
-    setEffects(initialEffects)
+    setEffects(permissionBaselines)
     setFailure('')
     setMessage('Cambios descartados. Se conserva la configuración guardada.')
   }
@@ -196,7 +211,7 @@ export function RBACNavigationConfigurator({ currentUser, roles, items, routes, 
     try {
       const changed = visiblePermissions.filter((permission) => {
         const key = `${permission.resource}.${permission.action}`
-        return initialEffects[key] !== effects[key]
+        return permissionBaselines[key] !== effects[key]
       }).map((permission) => ({
         resource: permission.resource,
         action: permission.action,
@@ -205,7 +220,7 @@ export function RBACNavigationConfigurator({ currentUser, roles, items, routes, 
       if (changed.length) {
         const updatedPermissions = await api.updateRolePermissions(selectedRole.code, changed)
         setRolePermissions(updatedPermissions)
-        const savedEffects = Object.fromEntries(routePermissions(selectedRoute, updatedPermissions.permissions).map((entry) => [`${entry.resource}.${entry.action}`, entry.effect ?? 'inherit']))
+        const savedEffects = Object.fromEntries(routePermissions(selectedRoute, updatedPermissions.permissions, metadata.permission_resource).map((entry) => [`${entry.resource}.${entry.action}`, entry.effect ?? 'inherit']))
         setInitialEffects(savedEffects)
         setEffects(savedEffects)
         permissionsSaved = true
@@ -237,7 +252,7 @@ export function RBACNavigationConfigurator({ currentUser, roles, items, routes, 
       if (changed.length) {
         const freshPermissions = await api.rolePermissions(selectedRole.code)
         setRolePermissions(freshPermissions)
-        const next = Object.fromEntries(routePermissions(selectedRoute, freshPermissions.permissions).map((entry) => [`${entry.resource}.${entry.action}`, entry.effect ?? 'inherit']))
+        const next = Object.fromEntries(routePermissions(selectedRoute, freshPermissions.permissions, metadata.permission_resource).map((entry) => [`${entry.resource}.${entry.action}`, entry.effect ?? 'inherit']))
         setInitialEffects(next)
         setEffects(next)
       }
@@ -295,6 +310,7 @@ export function RBACNavigationConfigurator({ currentUser, roles, items, routes, 
   const routeWarnings = [
     ...missingRequirements.map((entry) => `Falta ${entry.resource_name} · consultar.`),
     ...missingScopes.map((resource) => `El alcance de ${resource} debe permitir los registros requeridos.`),
+    ...(missingOptionalPermission ? [`Falta el permiso ${metadata.permission_action} sobre ${metadata.permission_resource} que exige esta opción de menú.`] : []),
   ]
 
   function permissionValue(permission: RBACPermission) {
@@ -356,7 +372,7 @@ export function RBACNavigationConfigurator({ currentUser, roles, items, routes, 
         {filteredRows.length ? <div className="rbac-vistas-table-scroll"><table className="rbac-vistas-table"><thead><tr><th>Pantalla</th><th>Ruta</th><th>Rol</th><th>Visible en menú</th><th>Permisos CRUD</th><th>Acciones</th></tr></thead><tbody>{filteredRows.map((row) => {
           const rowRoute = routes.find((route) => route.value === row.route_name)
           const isVisible = row.active
-          const crud = rowRoute && rolePermissionsAvailable && rolePermissions?.role === selectedRoleCode ? routePermissions(rowRoute, rolePermissions.permissions).filter((permission) => CRUD_ACTIONS.includes(permission.action as typeof CRUD_ACTIONS[number]) && permission.effect === 'allow') : []
+          const crud = rowRoute && rolePermissionsAvailable && rolePermissions?.role === selectedRoleCode ? routePermissions(rowRoute, rolePermissions.permissions, row.permission_resource).filter((permission) => CRUD_ACTIONS.includes(permission.action as typeof CRUD_ACTIONS[number]) && permission.effect === 'allow') : []
           return <tr key={`${row.id}-${selectedRoleCode}`}><td><strong>{rowRoute?.label ?? row.label}</strong></td><td>{row.route_name}</td><td>{selectedRole?.name ?? selectedRoleCode}</td><td><span className={isVisible ? 'rbac-vistas-badge is-visible' : 'rbac-vistas-badge'}>{isVisible ? 'Visible' : 'Oculto'}</span></td><td>{crud.map((permission) => permission.action === 'view' ? 'Ver' : permission.action === 'create' ? 'Crear' : permission.action === 'edit' ? 'Editar' : 'Eliminar').join(' · ') || 'Sin grants CRUD'}</td><td><button type="button" className="button button-outline" disabled={saving} onClick={() => selectRoute(row.route_name)}>Editar</button>{canChangeNavigation && !(row.route_name === 'admin.access' && selectedRoleCode === 'superadmin') && <button type="button" className="button button-outline" disabled={saving} onClick={() => void removeRoleAssignment(row)}>Quitar rol</button>}{canDeleteNavigation && row.route_name !== 'admin.access' && row.role_codes.length === 1 && <button type="button" className="button button-outline" disabled={saving} onClick={() => void deleteSoleAssignment(row)}>Eliminar pantalla</button>}</td></tr>
         })}</tbody></table></div> : <p className="muted-copy">No hay vistas configuradas para este rol o la búsqueda no encontró coincidencias.</p>}
       </section>

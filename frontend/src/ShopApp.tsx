@@ -243,7 +243,7 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
         const configuredNavigation = await api.roleNavigation()
         if (cancelled) return
         setRoleNavigation(configuredNavigation)
-        const sections = configuredNavigation.map((item) => item.route_name.split('.')[1])
+        const sections = configuredNavigation.filter((item) => item.panel === 'craftswoman').map((item) => item.section).filter((section): section is string => Boolean(section))
         const [data, ownProducts, ownProfile] = await Promise.all([
           sections.some((section) => ['dashboard', 'orders'].includes(section)) ? api.craftswomanDashboard() : Promise.resolve(null),
           sections.some((section) => ['dashboard', 'products', 'inventory'].includes(section)) ? api.craftswomanProducts() : Promise.resolve([]),
@@ -440,9 +440,12 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
       if (user.role === 'admin' || user.role === 'superadmin') {
         await loadAdminData()
         setScreen('admin')
-      } else if (user.role === 'craftswoman' || configuredNavigation.some((item) => item.route_name.startsWith('craftswoman.'))) {
+      } else if (user.role !== 'craftswoman' && configuredNavigation.some((item) => item.panel === 'admin')) {
+        await loadAdminData()
+        setScreen('admin')
+      } else if (user.role === 'craftswoman' || configuredNavigation.some((item) => item.panel === 'craftswoman')) {
         setCraftswomanProfile(null)
-        const visibleSections = configuredNavigation.map((item) => item.route_name.split('.')[1])
+        const visibleSections = configuredNavigation.filter((item) => item.panel === 'craftswoman').map((item) => item.section).filter((section): section is string => Boolean(section))
         const [craftswomanDashboard, ownProducts, ownProfile] = await Promise.all([
           visibleSections.some((section) => ['dashboard', 'orders'].includes(section)) ? api.craftswomanDashboard() : Promise.resolve(null),
           visibleSections.some((section) => ['dashboard', 'products', 'inventory'].includes(section)) ? api.craftswomanProducts() : Promise.resolve([]),
@@ -452,13 +455,11 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
         setCraftswomanProducts(ownProducts)
         setCraftswomanProfile(ownProfile)
         setScreen('craftswoman')
-      } else if (configuredNavigation.some((item) => item.route_name.startsWith('admin.'))) {
-        await loadAdminData()
-        setScreen('admin')
-      } else if (user.role !== 'customer' && configuredNavigation.some((item) => item.route_name === 'store:catalog')) {
+      } else if (user.role !== 'customer' && configuredNavigation.some((item) => item.panel === 'shared' && item.section === 'catalog')) {
         openSharedCatalog()
-      } else if (user.role === 'customer' || configuredNavigation.some((item) => item.route_name.startsWith('customer.'))) {
-        const visibleSections = configuredNavigation.map((item) => item.route_name.split('.')[1])
+      } else if (user.role === 'customer' || configuredNavigation.some((item) => item.panel === 'customer')) {
+        const customerNavigation = configuredNavigation.filter((item) => item.panel === 'customer')
+        const visibleSections = customerNavigation.map((item) => item.section)
         const requests = await Promise.all([
           visibleSections.includes('orders') ? api.orders() : Promise.resolve({ results: [] as Order[] }),
           visibleSections.includes('designs') ? api.designs() : Promise.resolve([] as CustomDesign[]),
@@ -468,21 +469,14 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
         setOrders(orderPage.results)
         setDesigns(customerDesigns)
         setProfileDraft(customerProfile)
-        const firstSection = configuredNavigation.find((item) => ['orders', 'designs', 'profile'].includes(item.route_name.split('.')[1]))?.route_name.split('.')[1] as AccountSection | undefined
+        const firstSection = customerNavigation.find((item) => ['orders', 'designs', 'profile'].includes(item.section ?? ''))?.section as AccountSection | undefined
         setAccountSection(firstSection ?? 'orders')
         setScreen('orders')
       } else {
-        const visibleSections = configuredNavigation.map((item) => item.route_name.split('.')[1])
-        const [orderPage, customerDesigns, customerProfile] = await Promise.all([
-          visibleSections.includes('orders') ? api.orders() : Promise.resolve({ results: [] as Order[] }),
-          visibleSections.includes('designs') ? api.designs() : Promise.resolve([] as CustomDesign[]),
-          visibleSections.includes('profile') ? api.profile() : Promise.resolve(null),
-        ])
-        setOrders(orderPage.results)
-        setDesigns(customerDesigns)
-        setProfileDraft(customerProfile)
-        const firstSection = configuredNavigation.find((item) => ['orders', 'designs', 'profile'].includes(item.route_name.split('.')[1]))?.route_name.split('.')[1] as AccountSection | undefined
-        setAccountSection(firstSection ?? 'orders')
+        setOrders([])
+        setDesigns([])
+        setProfileDraft(null)
+        setNotice('Tu cuenta no tiene pantallas habilitadas. Solicita al administrador que revise las asignaciones.')
         setScreen('orders')
       }
     } catch (error) { setNotice(errorMessage(error)) } finally { setBusy(false) }
@@ -747,11 +741,11 @@ function CustomerAccountView({ user, navigationItems, orders, designs, profile, 
   const canChangeProfile = hasEffectivePermission(user, 'customers.change')
   return <main className="inner-page account-page">
     <div className="account-heading"><div><p className="eyebrow"><span className="eyebrow-line" /> MI CUENTA</p><h1>Hola, <em>{accountName}.</em></h1><p>Pedidos, diseños y datos de entrega en un mismo lugar.</p></div><button className="text-button" onClick={onSignOut}>Cerrar sesión <ArrowUpRight size={15} /></button></div>
-    <div className="account-tabs"><div className="account-tab-buttons">{navigationItems.filter((item) => ['orders', 'designs', 'profile'].includes(item.route_name.split('.')[1])).map((item) => { const target = item.route_name.split('.')[1] as AccountSection; return <button key={item.id} className={section === target ? 'active' : ''} onClick={() => onSection(target)}>{item.label}{target === 'orders' && <span>{orders.length}</span>}{target === 'designs' && <span>{designs.length}</span>}</button> })}</div><span>{user.email}</span></div>
-    {section === 'orders' && navigationItems.some((item) => item.route_name.split('.')[1] === 'orders') && (orders.length ? <div className="orders-list">{orders.map((order) => <OrderCard key={order.id} order={order} />)}</div> : <div className="empty-account"><ShoppingBag size={30} strokeWidth={1.4} /><h2>Aún no tienes pedidos.</h2><p>Cuando encuentres la pieza indicada, la guardaremos aquí.</p><button className="button button-dark" onClick={onShop}>Explorar la colección <ArrowRight size={15} /></button></div>)}
-    {section === 'designs' && navigationItems.some((item) => item.route_name.split('.')[1] === 'designs') && (designs.length ? <div className="design-list">{designs.map((design) => <DesignSummary key={design.id} design={design} />)}</div> : <div className="empty-account"><Heart size={29} strokeWidth={1.4} /><h2>Aún no has creado diseños.</h2><p>Combina patrón y colores para imaginar una manta propia.</p><button className="button button-dark" onClick={onShop}>Diseñar una manta <ArrowRight size={15} /></button></div>)}
-    {navigationItems.filter((item) => ['orders', 'designs', 'profile'].includes(item.route_name.split('.')[1])).length === 0 && <div className="empty-account"><LockKeyhole size={28} /><h2>No tienes secciones habilitadas</h2><p>El superadministrador debe asignarte las opciones y permisos correspondientes.</p></div>}
-    {section === 'profile' && navigationItems.some((item) => item.route_name.split('.')[1] === 'profile') && <form className="profile-form" onSubmit={onProfileSubmit}><div className="profile-form-heading"><div><p className="eyebrow">DATOS DE ENTREGA</p><h2>Tu información</h2></div><p>La usaremos para preparar tus pedidos.</p></div><label className="form-label">Nombre completo<input name="name" required maxLength={150} defaultValue={resolveUserDisplayName(user, profile)} autoComplete="name" disabled={!canChangeProfile} /></label><label className="form-label">Correo electrónico<input value={user.email} readOnly /></label><label className="form-label">Teléfono<input name="phone" maxLength={30} defaultValue={profile?.phone ?? ''} autoComplete="tel" disabled={!canChangeProfile} /></label><div className="profile-address-row"><label className="form-label">Dirección<input name="address" defaultValue={profile?.address ?? ''} autoComplete="street-address" disabled={!canChangeProfile} /></label><label className="form-label">Ciudad<input name="city" maxLength={100} defaultValue={profile?.city ?? ''} autoComplete="address-level2" disabled={!canChangeProfile} /></label></div>{canChangeProfile && <button className="button button-dark" disabled={busy}>{busy ? <LoaderCircle className="spin" size={16} /> : <Check size={15} />} Guardar datos</button>}</form>}
+    <div className="account-tabs"><div className="account-tab-buttons">{navigationItems.filter((item) => item.panel === 'customer' && ['orders', 'designs', 'profile'].includes(item.section ?? '')).map((item) => { const target = item.section as AccountSection; return <button key={item.id} className={section === target ? 'active' : ''} onClick={() => onSection(target)}>{item.label}{target === 'orders' && <span>{orders.length}</span>}{target === 'designs' && <span>{designs.length}</span>}</button> })}</div><span>{user.email}</span></div>
+    {section === 'orders' && navigationItems.some((item) => item.panel === 'customer' && item.section === 'orders') && (orders.length ? <div className="orders-list">{orders.map((order) => <OrderCard key={order.id} order={order} />)}</div> : <div className="empty-account"><ShoppingBag size={30} strokeWidth={1.4} /><h2>Aún no tienes pedidos.</h2><p>Cuando encuentres la pieza indicada, la guardaremos aquí.</p><button className="button button-dark" onClick={onShop}>Explorar la colección <ArrowRight size={15} /></button></div>)}
+    {section === 'designs' && navigationItems.some((item) => item.panel === 'customer' && item.section === 'designs') && (designs.length ? <div className="design-list">{designs.map((design) => <DesignSummary key={design.id} design={design} />)}</div> : <div className="empty-account"><Heart size={29} strokeWidth={1.4} /><h2>Aún no has creado diseños.</h2><p>Combina patrón y colores para imaginar una manta propia.</p><button className="button button-dark" onClick={onShop}>Diseñar una manta <ArrowRight size={15} /></button></div>)}
+    {navigationItems.filter((item) => item.panel === 'customer' && ['orders', 'designs', 'profile'].includes(item.section ?? '')).length === 0 && <div className="empty-account"><LockKeyhole size={28} /><h2>No tienes secciones habilitadas</h2><p>El superadministrador debe asignarte las opciones y permisos correspondientes.</p></div>}
+    {section === 'profile' && navigationItems.some((item) => item.panel === 'customer' && item.section === 'profile') && <form className="profile-form" onSubmit={onProfileSubmit}><div className="profile-form-heading"><div><p className="eyebrow">DATOS DE ENTREGA</p><h2>Tu información</h2></div><p>La usaremos para preparar tus pedidos.</p></div><label className="form-label">Nombre completo<input name="name" required maxLength={150} defaultValue={resolveUserDisplayName(user, profile)} autoComplete="name" disabled={!canChangeProfile} /></label><label className="form-label">Correo electrónico<input value={user.email} readOnly /></label><label className="form-label">Teléfono<input name="phone" maxLength={30} defaultValue={profile?.phone ?? ''} autoComplete="tel" disabled={!canChangeProfile} /></label><div className="profile-address-row"><label className="form-label">Dirección<input name="address" defaultValue={profile?.address ?? ''} autoComplete="street-address" disabled={!canChangeProfile} /></label><label className="form-label">Ciudad<input name="city" maxLength={100} defaultValue={profile?.city ?? ''} autoComplete="address-level2" disabled={!canChangeProfile} /></label></div>{canChangeProfile && <button className="button button-dark" disabled={busy}>{busy ? <LoaderCircle className="spin" size={16} /> : <Check size={15} />} Guardar datos</button>}</form>}
   </main>
 }
 
@@ -789,10 +783,10 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, profile, pro
   type CraftswomanNavId = 'dashboard' | 'products' | 'inventory' | 'orders' | 'profile' | 'storefront'
   const craftswomanSections = ['dashboard', 'products', 'inventory', 'orders', 'profile'] as const
   const navItems: { id: CraftswomanNavId; label: string; icon: ReactNode }[] = navigationItems.flatMap((item) => {
-    const suffix = item.route_name.startsWith('craftswoman.') ? item.route_name.slice('craftswoman.'.length) : ''
-    const id: CraftswomanNavId | null = item.route_name === 'store:catalog'
-      ? 'storefront'
-      : craftswomanSections.includes(suffix as typeof craftswomanSections[number]) ? suffix as typeof craftswomanSections[number] : null
+    const section = item.panel === 'shared' && item.section === 'catalog' ? 'storefront' : item.panel === 'craftswoman' ? item.section : null
+    const id: CraftswomanNavId | null = craftswomanSections.includes(section as typeof craftswomanSections[number])
+      ? section as typeof craftswomanSections[number]
+      : section === 'storefront' ? 'storefront' : null
     if (!id) return []
     const icon = id === 'dashboard' ? <LayoutDashboard size={17} /> : id === 'products' || id === 'storefront' ? <ShoppingBag size={17} /> : id === 'inventory' ? <Boxes size={17} /> : id === 'profile' ? <CircleUserRound size={17} /> : <ShoppingCart size={17} />
     return [{ id, label: item.label, icon }]
@@ -994,7 +988,7 @@ function AdminAccountView({ user, isSuperadmin, navigationItems, navigationError
   }
 
   const navItems = navigationItems.map((item) => {
-    const id = adminNavigationTarget(item.route_name)
+    const id = adminNavigationTarget(item)
     if (!id) return null
     const icon = id === 'dashboard' ? <LayoutDashboard size={17} /> : id === 'products' ? <ShoppingBag size={17} /> : id === 'orders' ? <ShoppingCart size={17} /> : id === 'access' ? <LockKeyhole size={17} /> : <Boxes size={17} />
     return { id, label: item.label, icon }

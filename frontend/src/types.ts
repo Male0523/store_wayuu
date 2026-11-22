@@ -221,6 +221,10 @@ export interface CraftswomanDashboard {
 export interface RBACNavigationRoute {
   value: string
   label: string
+  panel: 'shared' | 'customer' | 'craftswoman' | 'admin' | null
+  section: string | null
+  django_url_name: string | null
+  required_scopes: { resource: string; scope: 'all' }[]
   role_codes: string[]
   required_permissions: { resource: string; action: string; resource_name: string }[]
   missing_permissions: Record<string, { resource: string; action: string; resource_name: string; granted: boolean }[]>
@@ -357,6 +361,10 @@ export interface RBACNavigationItem {
   id: number
   label: string
   route_name: string
+  panel: 'shared' | 'customer' | 'craftswoman' | 'admin' | null
+  section: string | null
+  django_url_name: string | null
+  required_scopes: { resource: string; scope: 'all' }[]
   anchor: string
   description: string
   role_codes: string[]

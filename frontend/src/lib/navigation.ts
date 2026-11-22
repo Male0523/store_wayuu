@@ -14,12 +14,11 @@ export function canUseCustomerFeatures(user: SessionUser | null | undefined, cat
   return Boolean(user?.role === 'customer' && !catalogOnly)
 }
 
-export function adminNavigationTarget(routeName: string): AdminNavigationTarget | null {
-  if (routeName === 'store:catalog') return 'storefront'
-  if (!routeName.startsWith('admin.')) return null
-  const target = routeName.slice('admin.'.length)
-  return ['dashboard', 'products', 'inventory', 'orders', 'categories', 'access'].includes(target)
-    ? target as Exclude<AdminNavigationTarget, 'storefront'>
+export function adminNavigationTarget(item: Pick<RBACNavigationItem, 'panel' | 'section'>): AdminNavigationTarget | null {
+  if (item.panel === 'shared' && item.section === 'catalog') return 'storefront'
+  if (item.panel !== 'admin') return null
+  return ['dashboard', 'products', 'inventory', 'orders', 'categories', 'access'].includes(item.section ?? '')
+    ? item.section as Exclude<AdminNavigationTarget, 'storefront'>
     : null
 }
 
@@ -65,6 +64,10 @@ export function ensureSuperadminAccessEntry(
     id: -1,
     label: 'Roles y permisos',
     route_name: 'admin.access',
+    panel: 'admin',
+    section: 'access',
+    django_url_name: null,
+    required_scopes: [],
     anchor: '',
     description: 'Administración de roles, permisos y navegación.',
     role_codes: ['superadmin'],

@@ -13,14 +13,15 @@ test('route picker uses backend compatibility and includes active dynamic roles'
   assert.deepEqual(rolesAllowedForRoute(roles, route).map((entry) => entry.code), ['customer', 'orders_viewer'])
 })
 
-test('roles with the required view grant can be selected for admin access', () => {
+test('admin access is assignable only to administration-panel roles and remains permission-gated', () => {
   const roles = [role('superadmin'), role('craftswoman'), role('roles_auditor'), role('inactive_role', false)]
   const route = {
     value: 'admin.access', label: 'Roles y permisos',
-    role_codes: ['superadmin', 'craftswoman', 'roles_auditor', 'inactive_role'],
+    panel: 'admin', section: 'access', django_url_name: null, required_scopes: [],
+    role_codes: ['superadmin', 'roles_auditor', 'inactive_role'],
   }
   assert.deepEqual(rolesAllowedForRoute(roles, route).map((entry) => entry.code), [
-    'superadmin', 'craftswoman', 'roles_auditor',
+    'superadmin', 'roles_auditor',
   ])
 })
 
@@ -63,14 +64,16 @@ test('superadmin keeps an access entry if the navigation response omits it', () 
   assert.deepEqual(ensureSuperadminAccessEntry(configured, 'admin'), configured)
 })
 
-test('route CRUD capabilities are taken only from resources required by the real route catalog', () => {
+test('route CRUD capabilities use route resources and an optional item-specific resource', () => {
   const route = { required_permissions: [{ resource: 'orders', action: 'view', resource_name: 'Pedidos' }] }
   const permissions = [
     { resource: 'orders', action: 'view' },
     { resource: 'orders', action: 'assign' },
     { resource: 'products', action: 'edit' },
+    { resource: 'designs', action: 'view' },
   ]
   assert.deepEqual(routePermissions(route, permissions), permissions.slice(0, 2))
+  assert.deepEqual(routePermissions(route, permissions, 'designs'), [permissions[0], permissions[1], permissions[3]])
 })
 
 test('visibility assignment changes only the selected role and avoids duplicates', () => {
@@ -94,10 +97,10 @@ test('permission loading ends when a role request completes, including a failed 
 })
 
 test('admin navigation recognizes the colon-delimited storefront route', () => {
-  assert.equal(adminNavigationTarget('store:catalog'), 'storefront')
-  assert.equal(adminNavigationTarget('admin.access'), 'access')
-  assert.equal(adminNavigationTarget('admin.unknown'), null)
-  assert.equal(adminNavigationTarget('craftswoman.orders'), null)
+  assert.equal(adminNavigationTarget({ panel: 'shared', section: 'catalog' }), 'storefront')
+  assert.equal(adminNavigationTarget({ panel: 'admin', section: 'access' }), 'access')
+  assert.equal(adminNavigationTarget({ panel: 'admin', section: 'unknown' }), null)
+  assert.equal(adminNavigationTarget({ panel: 'craftswoman', section: 'orders' }), null)
   assert.equal(isAdminPanelSection('storefront'), false)
   assert.equal(isAdminPanelSection('access'), true)
 })
