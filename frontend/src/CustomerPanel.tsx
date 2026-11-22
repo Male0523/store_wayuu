@@ -13,7 +13,7 @@ type AccountSection = 'orders' | 'designs' | 'profile'
 const money = (value: string | number) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(Number(value || 0))
 const messageOf = (error: unknown) => error instanceof ApiError ? error.message : 'No fue posible completar la operación. Comprueba que Django esté activo e inténtalo de nuevo.'
 
-export default function CustomerPanel({ catalogOnly = false }: { catalogOnly?: boolean }) {
+export default function CustomerPanel({ catalogOnly = false, embedded = false }: { catalogOnly?: boolean; embedded?: boolean }) {
   const { user, logout } = useUserSession()
   const customerFeaturesAvailable = canUseCustomerFeatures(user, catalogOnly)
   const [view, setView] = useState<View>('catalog')
@@ -235,8 +235,8 @@ export default function CustomerPanel({ catalogOnly = false }: { catalogOnly?: b
   const accountNavigation = navigationItems.filter((item) => item.panel === 'customer' && ['orders', 'designs', 'profile'].includes(item.section ?? ''))
   const canEditProfile = Boolean(user?.permissions?.includes('customers.change'))
 
-  return <div className="customer-shell">
-    <aside className="customer-sidebar">
+  return <div className={`customer-shell${embedded ? ' customer-shell-embedded' : ''}`}>
+    {!embedded && <aside className="customer-sidebar">
       <div className="customer-brand"><span className="customer-brand-mark">◇</span><div><strong>Wayúu</strong><small>{catalogOnly ? 'Catálogo comercial' : 'Portal del Cliente'}</small></div></div>
       <div className="customer-nav-label">NAVEGACIÓN PRINCIPAL</div>
       <nav className="customer-nav">
@@ -246,7 +246,7 @@ export default function CustomerPanel({ catalogOnly = false }: { catalogOnly?: b
         {customerFeaturesAvailable && accountNavigation.length > 0 && <button className={view === 'account' ? 'active' : ''} onClick={openAccount} disabled={busy}><UserRound size={17}/>Mi cuenta</button>}
       </nav>
       <div className="customer-sidebar-bottom"><div className="customer-user"><span className="customer-avatar">{fullName.slice(0,1).toUpperCase()}</span><div><strong>{fullName}</strong><small>{catalogOnly ? 'Catálogo autorizado' : 'Cliente'}</small></div></div><button className="customer-logout" onClick={signOut} disabled={busy}><LogOut size={16}/>Cerrar sesión</button></div>
-    </aside>
+    </aside>}
 
     <main className="customer-main">
       <header className="customer-topbar"><div><span className="customer-kicker">TIENDA ARTESANAL WAYÚU</span><h1>{view === 'catalog' ? 'Descubre nuestras piezas' : view === 'favorites' ? 'Mis favoritos' : view === 'cart' ? 'Mi carrito' : view === 'account' ? 'Mi cuenta y pedidos' : selected?.name}</h1></div><label className="customer-search"><Search size={17}/><input value={query} onChange={(event) => { setQuery(event.target.value); setView('catalog') }} placeholder="Buscar piezas..." /></label></header>

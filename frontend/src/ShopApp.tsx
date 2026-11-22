@@ -7,7 +7,8 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from './lib/api'
 import { resolveImageUrl } from './lib/imageUrl'
-import { adminNavigationTarget, ensureSuperadminAccessEntry, isAdminPanelSection } from './lib/navigation'
+import { adminNavigationTarget, ensureSuperadminAccessEntry } from './lib/navigation'
+import CustomerPanel from './CustomerPanel'
 import { visibleRBACSections, type RBACSection } from './lib/navigationConfig'
 import { useUserSession } from './context/user-context'
 import LegacyCartNotice from './LegacyCartNotice'
@@ -685,9 +686,9 @@ function ShopApp({ initialScreen = 'shop' }: ShopAppProps) {
 
     {screen === 'orders' && user && <CustomerAccountView user={user} navigationItems={roleNavigation} orders={orders} designs={designs} profile={profileDraft} section={accountSection} busy={busy} onSection={setAccountSection} onProfileSubmit={saveProfile} onSignOut={signOut} onShop={() => setScreen('shop')} />}
 
-    {screen === 'craftswoman' && user && <CraftswomanAccountView user={user} navigationItems={roleNavigation} dashboard={dashboard} profile={craftswomanProfile} products={craftswomanProducts} categories={categories} busy={busy} onCreateProduct={createCraftswomanProduct} onSaveProfile={saveCraftswomanProfile} onSignOut={signOut} onBrowseCatalog={openSharedCatalog} onAcceptWorkItem={acceptWorkItem} onWorkItemStatus={updateWorkItem} onDesignStatus={updateDesignStatus} />}
+    {screen === 'craftswoman' && user && <CraftswomanAccountView user={user} navigationItems={roleNavigation} dashboard={dashboard} profile={craftswomanProfile} products={craftswomanProducts} categories={categories} busy={busy} onCreateProduct={createCraftswomanProduct} onSaveProfile={saveCraftswomanProfile} onSignOut={signOut} onAcceptWorkItem={acceptWorkItem} onWorkItemStatus={updateWorkItem} onDesignStatus={updateDesignStatus} />}
 
-    {screen === 'admin' && user && <AdminAccountView user={user} isSuperadmin={user.role === 'superadmin'} navigationItems={roleNavigation} navigationError={roleNavigationError} onRetryNavigation={() => void refreshRoleNavigation(user)} onBrowseCatalog={openSharedCatalog} orderSummary={adminOrderSummary} products={adminProducts} categories={adminCategories} productCraftswomen={adminCraftswomen} busy={busy} onSignOut={signOut} onSaveProduct={saveAdminProduct} onCreateProduct={createAdminProduct} onCreateCategory={createAdminCategory} onSaveCategory={saveAdminCategory} onCategoryActive={updateAdminCategory} onOrderStatus={saveAdminOrderStatus} onNotice={setNotice} />}
+    {screen === 'admin' && user && <AdminAccountView user={user} isSuperadmin={user.role === 'superadmin'} navigationItems={roleNavigation} navigationError={roleNavigationError} onRetryNavigation={() => void refreshRoleNavigation(user)} orderSummary={adminOrderSummary} products={adminProducts} categories={adminCategories} productCraftswomen={adminCraftswomen} busy={busy} onSignOut={signOut} onSaveProduct={saveAdminProduct} onCreateProduct={createAdminProduct} onCreateCategory={createAdminCategory} onSaveCategory={saveAdminCategory} onCategoryActive={updateAdminCategory} onOrderStatus={saveAdminOrderStatus} onNotice={setNotice} />}
 
     {screen !== 'shop' && screen !== 'admin' && <Footer onInstagram={() => setNotice('Pronto encontrarás nuestras novedades en Instagram.')} />}
     {selectedProduct && <ProductDialog product={selectedProduct} busy={busy} onClose={() => setSelectedProduct(null)} onAdd={() => addToCart(selectedProduct.id)} />}
@@ -749,7 +750,7 @@ function CustomerAccountView({ user, navigationItems, orders, designs, profile, 
   </main>
 }
 
-function CraftswomanAccountView({ user, navigationItems, dashboard, profile, products, categories, busy, onCreateProduct, onSaveProfile, onSignOut, onBrowseCatalog, onAcceptWorkItem, onWorkItemStatus, onDesignStatus }: {
+function CraftswomanAccountView({ user, navigationItems, dashboard, profile, products, categories, busy, onCreateProduct, onSaveProfile, onSignOut, onAcceptWorkItem, onWorkItemStatus, onDesignStatus }: {
   user: SessionUser | null
   navigationItems: RBACNavigationItem[]
   dashboard: CraftswomanDashboard | null
@@ -764,12 +765,11 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, profile, pro
   }) => void
   onSaveProfile: (values: CraftswomanProfileInput) => Promise<void>
   onSignOut: () => void
-  onBrowseCatalog: () => void
   onAcceptWorkItem: (itemId: number) => Promise<void>
   onWorkItemStatus: (itemId: number, status: string) => Promise<void>
   onDesignStatus: (designId: number, status: string) => void
 }) {
-  const [activeSection, setActiveSection] = useState<'dashboard' | 'products' | 'inventory' | 'orders' | 'profile'>('dashboard')
+  const [activeSection, setActiveSection] = useState<'dashboard' | 'products' | 'inventory' | 'orders' | 'profile' | 'storefront'>('dashboard')
   const [showProductForm, setShowProductForm] = useState(false)
   const [acceptingOrderId, setAcceptingOrderId] = useState<number | null>(null)
   const canChangeOrders = Boolean(user && hasEffectivePermission(user, 'orders.edit'))
@@ -794,8 +794,8 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, profile, pro
   const canOpenSection = (section: string) => navItems.some((item) => item.id === section)
   const canEditProfile = Boolean(user && hasEffectivePermission(user, 'craftswomen.edit'))
   useEffect(() => {
-    const firstSection = navItems.find((item) => item.id !== 'storefront')?.id
-    if (!canOpenSection(activeSection) && firstSection && firstSection !== 'storefront') setActiveSection(firstSection)
+    const firstSection = navItems.find((item) => item.id !== 'storefront')?.id ?? navItems[0]?.id
+    if (!canOpenSection(activeSection) && firstSection) setActiveSection(firstSection)
   }, [navigationItems, activeSection])
   async function handleAcceptWorkItem(itemId: number) {
     if (acceptingOrderId !== null) return
@@ -828,7 +828,7 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, profile, pro
       <div className="craftswoman-brand"><span className="craftswoman-brand-mark"><Layers size={22} /></span><span><strong>Wayúu</strong><small>PORTAL DE TEJEDORA</small></span></div>
       <nav className="craftswoman-nav" aria-label="Menú de tejedora">
         <p>MENÚ PRINCIPAL</p>
-        {navItems.map((item) => <button key={item.id} className={item.id !== 'storefront' && activeSection === item.id ? 'active' : ''} onClick={() => { if (item.id === 'storefront') onBrowseCatalog(); else setActiveSection(item.id) }}>{item.icon}<span>{item.label}</span></button>)}
+        {navItems.map((item) => <button key={item.id} className={activeSection === item.id ? 'active' : ''} onClick={() => setActiveSection(item.id)}>{item.icon}<span>{item.label}</span></button>)}
       </nav>
       <div className="craftswoman-sidebar-profile"><span className="craftswoman-avatar">{initials || 'TW'}</span><div><strong>{accountName}</strong><small>Tejedora Wayúu</small></div><button onClick={onSignOut} aria-label="Cerrar sesión" title="Cerrar sesión"><LogOut size={16} /></button></div>
       <div className="craftswoman-sidebar-foot">SÜCHIKI KANAAS · LEGADO CULTURAL</div>
@@ -837,6 +837,7 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, profile, pro
       <header className="craftswoman-topbar"><div><span>ROL: TEJEDORA</span><b>/</b><strong>{navItems.find((item) => item.id === activeSection)?.label}</strong></div><div className="craftswoman-top-user"><span className="craftswoman-avatar">{initials || 'TW'}</span><span><strong>{accountName}</strong><small>Espacio de trabajo</small></span></div></header>
       <main className="craftswoman-content">
         {navItems.length === 0 ? <div className="craftswoman-empty"><LockKeyhole size={30} /><h2>No tienes secciones habilitadas</h2><p>El superadministrador debe asignarte las opciones y permisos correspondientes.</p></div> : user?.profile?.active === false || (!dashboard?.active && (canOpenSection('dashboard') || canOpenSection('orders'))) ? <div className="craftswoman-empty"><LockKeyhole size={30} /><h2>Cuenta pendiente de activación</h2><p>La administración debe activar tu perfil antes de asignarte pedidos.</p></div> : <>
+          {canOpenSection('storefront') && activeSection === 'storefront' && <CustomerPanel catalogOnly embedded />}
           {canOpenSection('dashboard') && activeSection === 'dashboard' && <div className="craftswoman-dashboard">
             <section className="craftswoman-welcome"><div><span><Sparkles size={14} /> SÜCHIKI KANAAS · LEGADO CULTURAL</span><h1>Jamaya, {accountName}!</h1><p>Tu trabajo conserva historias. Aquí puedes organizar tus tejidos, revisar tus pedidos y compartir nuevas piezas con la tienda.</p></div><div className="craftswoman-welcome-actions">{canOpenSection('products') && canAddProducts && <button onClick={() => { setActiveSection('products'); setShowProductForm(true) }}><Plus size={16} /> Registrar nuevo tejido</button>}{canOpenSection('orders') && <button className="secondary" onClick={() => setActiveSection('orders')}><ShoppingCart size={16} /> Ver mis pedidos</button>}</div></section>
             <section className="craftswoman-stats">
@@ -868,12 +869,11 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, profile, pro
   </div>
 }
 
-function AdminAccountView({ user, isSuperadmin, navigationItems, navigationError, onRetryNavigation, onBrowseCatalog, orderSummary, products, categories, productCraftswomen, busy, onSignOut, onSaveProduct, onCreateProduct, onCreateCategory, onSaveCategory, onCategoryActive, onOrderStatus, onNotice }: {
+function AdminAccountView({ user, isSuperadmin, navigationItems, navigationError, onRetryNavigation, orderSummary, products, categories, productCraftswomen, busy, onSignOut, onSaveProduct, onCreateProduct, onCreateCategory, onSaveCategory, onCategoryActive, onOrderStatus, onNotice }: {
   user: SessionUser
   navigationItems: RBACNavigationItem[]
   navigationError: string
   onRetryNavigation: () => void
-  onBrowseCatalog: () => void
   isSuperadmin: boolean
   orderSummary: AdminOrderSummary | null
   products: AdminProduct[]
@@ -889,7 +889,7 @@ function AdminAccountView({ user, isSuperadmin, navigationItems, navigationError
   onOrderStatus: (orderId: number, status: string) => void
   onNotice: (message: string) => void
 }) {
-  const [activeSection, setActiveSection] = useState<'dashboard' | 'products' | 'inventory' | 'orders' | 'categories' | 'access'>('dashboard')
+  const [activeSection, setActiveSection] = useState<'dashboard' | 'products' | 'inventory' | 'orders' | 'categories' | 'access' | 'storefront'>('dashboard')
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [orderSearch, setOrderSearch] = useState('')
   const deferredOrderSearch = useDeferredValue(orderSearch)
@@ -995,15 +995,15 @@ function AdminAccountView({ user, isSuperadmin, navigationItems, navigationError
   }).filter((item): item is NonNullable<typeof item> => item !== null)
   const canOpenSection = (section: string) => navItems.some((item) => item.id === section)
   useEffect(() => {
-    const firstAdminSection = navItems.map((item) => item.id).find(isAdminPanelSection)
-    if (!canOpenSection(activeSection) && firstAdminSection) setActiveSection(firstAdminSection)
+    const firstAvailableSection = navItems[0]?.id
+    if (!canOpenSection(activeSection) && firstAvailableSection) setActiveSection(firstAvailableSection)
   }, [navigationItems, activeSection])
   return <div className="craftswoman-workspace admin-workspace">
     <aside className="craftswoman-sidebar">
       <div className="craftswoman-brand"><span className="craftswoman-brand-mark"><Layers size={22} /></span><span><strong>Wayúu</strong><small>{isSuperadmin ? 'CONTROL GENERAL DEL SISTEMA' : 'ADMINISTRACIÓN DE TIENDA'}</small></span></div>
       <nav className="craftswoman-nav" aria-label="Menú de administración">
         <p>MENÚ PRINCIPAL</p>
-        {navItems.map((item) => <button key={item.id} className={isAdminPanelSection(item.id) && activeSection === item.id ? 'active' : ''} onClick={() => { if (!isAdminPanelSection(item.id)) { onBrowseCatalog(); return } setActiveSection(item.id); if (item.id === 'access') onRetryNavigation() }}>{item.icon}<span>{item.label}</span></button>)}
+        {navItems.map((item) => <button key={item.id} className={activeSection === item.id ? 'active' : ''} onClick={() => { setActiveSection(item.id); if (item.id === 'access') onRetryNavigation() }}>{item.icon}<span>{item.label}</span></button>)}
       </nav>
       <div className="craftswoman-sidebar-profile"><span className="craftswoman-avatar">{accountName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'AD'}</span><div><strong>{accountName}</strong><small>{isSuperadmin ? 'Superadministrador' : 'Administrador de tienda'}</small></div><button onClick={onSignOut} aria-label="Cerrar sesión" title="Cerrar sesión"><LogOut size={16} /></button></div>
       <div className="craftswoman-sidebar-foot">SÜCHIKI KANAAS · LEGADO CULTURAL</div>
@@ -1012,6 +1012,7 @@ function AdminAccountView({ user, isSuperadmin, navigationItems, navigationError
       <header className="craftswoman-topbar"><div><span>ROL: {isSuperadmin ? 'SUPERADMINISTRADOR' : 'ADMINISTRADOR'}</span><b>/</b><strong>{navItems.find((item) => item.id === activeSection)?.label}</strong></div><div className="craftswoman-top-user"><span className="craftswoman-avatar">{accountName.slice(0, 1).toUpperCase()}</span><span><strong>{accountName}</strong><small>Gestión comercial</small></span></div></header>
       <main className="craftswoman-content admin-content">
         {navigationError && <div className="rbac-warning" role="alert">No se pudo actualizar la navegación: {navigationError} Selecciona de nuevo «Roles y permisos» para reintentar.</div>}
+        {canOpenSection('storefront') && activeSection === 'storefront' && <CustomerPanel catalogOnly embedded />}
         {!isSuperadmin && navItems.length === 0 && <div className="craftswoman-empty"><LockKeyhole size={30} /><h2>No tienes secciones habilitadas</h2><p>El superadministrador debe asignarte las opciones y permisos correspondientes.</p></div>}
         {canOpenSection('dashboard') && activeSection === 'dashboard' && <div className="craftswoman-dashboard">
           <section className="craftswoman-welcome"><div><span><Sparkles size={14} /> SÜCHIKI KANAAS · GESTIÓN DE LA TIENDA</span><h1>Jamaya, {accountName}!</h1><p>Desde aquí puedes acompañar el trabajo de las tejedoras, revisar nuevas piezas y mantener organizada la tienda.</p></div><div className="craftswoman-welcome-actions">{canOpenSection('products') && <button onClick={() => setActiveSection('products')}><Eye size={16} /> Revisar tejidos</button>}{canOpenSection('orders') && <button className="secondary" onClick={() => setActiveSection('orders')}><ShoppingCart size={16} /> Ver pedidos</button>}</div></section>
