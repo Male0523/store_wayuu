@@ -145,7 +145,11 @@ export default function App() {
 		case '/catalogo-compartido': page = !sessionLoaded
 			? <div className="route-loading" role="status">Comprobando sesión…</div>
 			: <RolePage user={user} role="customer" onLogin={login} canAccess={canViewSharedCatalog} connected><CustomerPanel catalogOnly={user?.role !== 'customer'} /></RolePage>; break
-		case '/tienda': page = <ConnectedShop key="tienda" initialScreen="shop" />; break
+		case '/tienda': page = !sessionLoaded
+			? <div className="route-loading" role="status">Comprobando sesión…</div>
+			: user && !canViewSharedCatalog(user)
+				? <AccessGate user={user} onLogin={login} />
+				: <ConnectedShop key="tienda" initialScreen="shop" />; break
 		case '/tejedora': page = protectedPage('craftswoman', <ConnectedShop key="tejedora" initialScreen="craftswoman" />, true); break
 		case '/admin': page = protectedPage('admin', <ConnectedShop key="admin" initialScreen="admin" />, true); break
 		case '/superadmin': page = protectedPage('superadmin', <ConnectedShop key="superadmin" initialScreen="admin" />, true); break
