@@ -23,7 +23,7 @@ from .models import (
     UserPermissionGrant,
     UserRole,
 )
-from .api import NAVIGATION_ROUTE_CATALOG, missing_role_navigation_requirements
+from .api import NAVIGATION_ROUTE_CATALOG, missing_role_navigation_access, navigation_role_codes
 from .rbac import (
     has_permission as has_rbac_permission,
     has_role,
@@ -398,12 +398,24 @@ class NavigationItemAdminForm(forms.ModelForm):
         if duplicate_route.exists():
             self.add_error('route_name', 'Esa ruta ya está configurada; edita la opción existente y agrega los roles allí.')
         role_rows = list(roles)
+        same_route = bool(self.instance.pk and self.instance.route_name == route_name)
+        existing_role_codes = set(self.instance.roles.values_list('code', flat=True)) if same_route else set()
+        new_role_rows = [role for role in role_rows if role.code not in existing_role_codes]
         if any(not role.active for role in role_rows):
             self.add_error('roles', 'Las vistas solo pueden asignarse a roles activos.')
+        route_changed = bool(self.instance.pk and self.instance.route_name != route_name)
+        incompatible_candidates = role_rows if route_changed or not self.instance.pk else new_role_rows
+        incompatible = {role.code for role in incompatible_candidates} - set(navigation_role_codes(route_name))
+        if incompatible:
+            self.add_error('roles', f'Estos roles no son compatibles con la pantalla seleccionada: {", ".join(sorted(incompatible))}.')
         if active:
-            for role in role_rows:
-                missing = missing_role_navigation_requirements(role, route_name)
-                if missing:
+            assigned_permission = cleaned.get('permission')
+            permission_changed = getattr(assigned_permission, 'pk', None) != self.instance.permission_id
+            activating = bool(self.instance.pk and active and not self.instance.active)
+            roles_to_validate = role_rows if route_changed or not self.instance.pk or permission_changed or activating else new_role_rows
+            for role in roles_to_validate:
+                missing, missing_scopes = missing_role_navigation_access(role, route_name, assigned_permission)
+                if missing or missing_scopes:
                     view_name = NAVIGATION_ROUTE_CATALOG[route_name]['label'].split(' · ', 1)[-1]
                     missing_names = [
                         RBACResource.objects.filter(code=resource).values_list('name', flat=True).first() or resource
@@ -412,6 +424,8 @@ class NavigationItemAdminForm(forms.ModelForm):
                     message = f'Para habilitar esta pantalla por favor conceda el permiso de la vista {view_name} de consultar'
                     if len(missing_names) > 1:
                         message += f". Permisos faltantes: {', '.join(missing_names)}"
+                    if missing_scopes:
+                        message += f". Alcance requerido: todos los registros de {', '.join(missing_scopes)}"
                     self.add_error(
                         'roles',
                         message + '.',

@@ -1,6 +1,6 @@
-from django.urls import NoReverseMatch, reverse
+from django.urls import reverse
 
-from .models import NavigationItem
+from .models import Craftswoman, Customer, NavigationItem
 from .rbac import has_permission, permission_key, record_scope_for, role_for_user
 
 
@@ -19,7 +19,11 @@ def navigation_menu(request):
         route = NAVIGATION_ROUTE_CATALOG.get(item.route_name)
         if not route or role.code not in navigation_role_codes(item.route_name):
             continue
-        if item.route_name != 'admin.access' and any(
+        if route['panel'] == 'customer' and role.code != 'customer' and not Customer.objects.filter(user=request.user).exists():
+            continue
+        if route['panel'] == 'craftswoman' and not Craftswoman.objects.filter(user=request.user, active=True).exists():
+            continue
+        if any(
             not has_permission(request.user, resource, action)
             for resource, action in navigation_requirements(item.route_name)
         ):
@@ -36,12 +40,20 @@ def navigation_menu(request):
             resource, action = key
             if not has_permission(request.user, resource, action):
                 continue
-        try:
-            url = reverse(item.route_name)
-        except NoReverseMatch:
-            # La vista se mantiene editable sin hacer fallar el sitio si una ruta cambia.
+        # Most registered names are React screen identifiers, not Django URL names.
+        # Only routes explicitly mapped by the shared registry belong in templates.
+        django_url_name = route.get('django_url_name')
+        if not django_url_name:
             continue
+        url = reverse(django_url_name)
         if item.anchor:
             url = f'{url}#{item.anchor}'
-        items.append({'label': item.label, 'url': url, 'description': item.description, 'route_name': item.route_name})
+        items.append({
+            'label': item.label,
+            'url': url,
+            'description': item.description,
+            'route_name': item.route_name,
+            'panel': route['panel'],
+            'section': route['section'],
+        })
     return {'navigation_items': items, 'current_access_role': role}
