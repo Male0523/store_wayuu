@@ -830,18 +830,6 @@ def navigation_role_codes(route_name):
     return list(AccessRole.objects.filter(active=True).order_by('priority', 'name').values_list('code', flat=True))
 
 
-def navigation_user_can_render_route(user, role, route_name):
-    """Keep RBAC management links in administration, even for incompatible legacy grants."""
-    if route_name != 'admin.access':
-        return True
-    if role is None or role.code in (AccessRole.Code.CUSTOMER, AccessRole.Code.CRAFTSWOMAN):
-        return False
-    return not (
-        Customer.objects.filter(user=user).exists()
-        or Craftswoman.objects.filter(user=user).exists()
-    )
-
-
 def navigation_requirements(route_name):
     return NAVIGATION_ROUTE_CATALOG.get(route_name, {}).get('requires', ())
 
@@ -2206,8 +2194,6 @@ class RoleNavigationMenuView(APIView):
                 record_scope_for(request.user, resource) != 'all'
                 for resource in route.get('all_scope', ())
             ):
-                continue
-            if not navigation_user_can_render_route(request.user, role, item.route_name):
                 continue
             if item.permission_id:
                 key = permission_key(item.permission)
