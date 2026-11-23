@@ -1,3 +1,4 @@
+import logging
 from decimal import Decimal
 from html import escape as html_escape
 from io import BytesIO
@@ -6,7 +7,9 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
+from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.mail import send_mail
 from django.db import models, transaction
 from django.db.models import Count, Q, Sum
 from django.http import HttpResponse, JsonResponse
@@ -21,6 +24,7 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
+from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.views import APIView
 
 from .models import (
@@ -86,6 +90,8 @@ from .rbac import (
     set_user_permission,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class CategorySerializer(serializers.ModelSerializer):
     class Meta:
@@ -111,6 +117,51 @@ class PublicCraftswomanSerializer(serializers.ModelSerializer):
         model = Craftswoman
         fields = ('id', 'name', 'community', 'region', 'biography')
         read_only_fields = fields
+
+
+class PublicContactSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=120, trim_whitespace=True)
+    email = serializers.EmailField(max_length=254)
+    subject = serializers.CharField(max_length=160, trim_whitespace=True)
+    message = serializers.CharField(max_length=5000, trim_whitespace=True)
+    website = serializers.CharField(max_length=200, required=False, allow_blank=True, write_only=True)
+
+    def validate_name(self, value):
+        normalized = ' '.join(value.split())
+        if not normalized:
+            raise serializers.ValidationError('Este campo es obligatorio.')
+        return normalized
+
+    def validate_email(self, value):
+        local_part, domain = value.strip().rsplit('@', 1)
+        return f'{local_part}@{domain.lower()}'
+
+    def validate_subject(self, value):
+        normalized = ' '.join(value.split())
+        if not normalized:
+            raise serializers.ValidationError('Este campo es obligatorio.')
+        if '\r' in value or '\n' in value:
+            raise serializers.ValidationError('El asunto no puede contener saltos de línea.')
+        return normalized
+
+    def validate_message(self, value):
+        normalized = value.replace('\r\n', '\n').replace('\r', '\n').strip()
+        if not normalized:
+            raise serializers.ValidationError('Este campo es obligatorio.')
+        return normalized
+
+    def validate(self, attrs):
+        if attrs.get('website', '').strip():
+            raise serializers.ValidationError('No se pudo procesar la solicitud.')
+        return attrs
+
+
+class PublicContactRateThrottle(SimpleRateThrottle):
+    scope = 'contact'
+
+    def get_cache_key(self, request, view):
+        ident = self.get_ident(request)
+        return self.cache_format % {'scope': self.scope, 'ident': ident}
 
 
 MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024
@@ -1249,6 +1300,95 @@ def csrf_cookie(request):
         'detail': 'Token CSRF disponible para el origen autorizado.',
         'csrfToken': get_token(request),
     })
+
+
+class PublicContactView(APIView):
+    permission_classes = (AllowAny,)
+    authentication_classes = ()
+    throttle_classes = (PublicContactRateThrottle,)
+
+    @staticmethod
+    def email_configuration_ready():
+        return all((
+            settings.EMAIL_HOST,
+            settings.EMAIL_PORT,
+            settings.EMAIL_HOST_USER,
+            settings.EMAIL_HOST_PASSWORD,
+            settings.DEFAULT_FROM_EMAIL,
+            settings.EMAIL_USE_TLS or settings.EMAIL_USE_SSL,
+        ))
+
+    def post(self, request):
+        serializer = PublicContactSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        if not self.email_configuration_ready():
+            return Response(
+                {'detail': 'El servicio de contacto no está disponible en este momento.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        contact = serializer.validated_data
+        recipient = contact['email']
+        subject = contact['subject']
+        name = contact['name']
+        email = contact['email']
+        message = contact['message']
+        emails = (
+            (
+                f'Copia de tu consulta: {subject}',
+                '\n'.join((
+                    'Esta es una copia de la consulta que enviaste desde el sitio web de Tienda Wayúu.',
+                    '',
+                    f'Nombre: {name}',
+                    f'Correo: {email}',
+                    f'Asunto: {subject}',
+                    '',
+                    'Mensaje:',
+                    message,
+                )),
+            ),
+            (
+                'Gracias por contactar a Tienda Wayúu',
+                '\n'.join((
+                    f'Hola {name},',
+                    '',
+                    'Gracias por comunicarte con Tienda Wayúu. Valoramos tu interés en nuestro trabajo artesanal y en el legado textil Wayúu de La Guajira.',
+                    '',
+                    'Agradecemos que nos hayas escrito.',
+                    '',
+                    'Tienda Wayúu',
+                )),
+            ),
+        )
+
+        for email_kind, (email_subject, body) in enumerate(emails, start=1):
+            try:
+                sent_count = send_mail(
+                    subject=email_subject,
+                    message=body,
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[recipient],
+                    fail_silently=False,
+                )
+            except Exception:
+                logger.error('Contact email delivery failed for message %s.', email_kind)
+                return Response(
+                    {'detail': 'No fue posible procesar los correos. Intenta nuevamente más tarde.'},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+            if sent_count != 1:
+                logger.error('Contact email backend did not accept message %s.', email_kind)
+                return Response(
+                    {'detail': 'No fue posible procesar los correos. Intenta nuevamente más tarde.'},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+
+        return Response(
+            {'detail': 'La solicitud fue procesada correctamente.'},
+            status=status.HTTP_200_OK,
+        )
 
 
 class StandardResultsSetPagination(PageNumberPagination):

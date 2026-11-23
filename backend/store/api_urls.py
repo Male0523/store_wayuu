@@ -9,6 +9,7 @@ urlpatterns = [
     path('csrf/', api.csrf_cookie, name='csrf'),
     path('categories/', api.CategoryListView.as_view(), name='categories'),
     path('craftswomen/', api.PublicCraftswomanListView.as_view(), name='public-craftswomen'),
+    path('contact/', api.PublicContactView.as_view(), name='public-contact'),
     path('products/', api.ProductListView.as_view(), name='products'),
     path('products/<int:product_id>/', api.ProductDetailView.as_view(), name='product-detail'),
     path('admin/categories/', api.AdminCategoryListView.as_view(), name='admin-categories'),

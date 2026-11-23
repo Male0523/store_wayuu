@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { useUserSession } from './frontend/src/context/user-context';
-import { api } from './frontend/src/lib/api';
+import { ApiError, api } from './frontend/src/lib/api';
+import { contactPayloadFromForm, createContactSubmitter, type ContactSubmissionState } from './frontend/src/lib/contactForm';
 import { loadPublicCatalog, type PublicCatalogItem } from './frontend/src/lib/publicCatalog';
 import { resolveImageUrl } from './frontend/src/lib/imageUrl';
 import type { Category, PublicCraftswoman } from './frontend/src/types';
@@ -100,8 +101,12 @@ export default function App() {
   const [regErrors, setRegErrors] = useState<{ [key: string]: string }>({});
   const [regSuccess, setRegSuccess] = useState(false);
 
-  // Estado de envío del formulario de contacto demostrativo
-  const [contactSent, setContactSent] = useState(false);
+  const [contactStatus, setContactStatus] = useState<ContactSubmissionState>('idle');
+  const [contactError, setContactError] = useState('');
+  const contactSubmitter = useRef<ReturnType<typeof createContactSubmitter> | null>(null);
+  if (contactSubmitter.current === null) {
+    contactSubmitter.current = createContactSubmitter((payload) => api.contact(payload));
+  }
 
   // Estado del menú móvil para la barra de navegación
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -939,18 +944,18 @@ export default function App() {
                     Envíanos un mensaje
                   </h3>
                   <p className="text-xs text-[#3D1E16]/70 mb-6">
-                    Completa el formulario de contacto para demostración del sistema.
+                    Envíanos tu consulta y recibirás una copia junto con un mensaje de agradecimiento.
                   </p>
 
-                  {contactSent ? (
+                  {contactStatus === 'success' ? (
                     <div className="p-6 rounded-2xl bg-[#E8C5C8]/40 border border-[#E8C5C8] text-center space-y-3">
                       <CheckCircle2 className="w-10 h-10 text-[#5C1D24] mx-auto" />
-                      <h4 className="text-sm font-bold text-[#5C1D24]">¡Mensaje enviado con éxito!</h4>
+                      <h4 role="status" className="text-sm font-bold text-[#5C1D24]">¡Tu consulta fue procesada!</h4>
                       <p className="text-xs text-[#3D1E16]/80">
-                        Gracias por comunicarte con la tienda artesanal Wayúu. Esta es una interacción de demostración.
+                        El sistema procesó tu consulta y los dos mensajes para el correo electrónico que indicaste.
                       </p>
                       <button
-                        onClick={() => setContactSent(false)}
+                        onClick={() => { setContactStatus('idle'); setContactError(''); }}
                         className="px-4 py-2 bg-[#C85A32] text-white text-xs font-bold rounded-xl mt-2"
                       >
                         Enviar otro mensaje
@@ -958,18 +963,50 @@ export default function App() {
                     </div>
                   ) : (
                     <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        setContactSent(true);
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        const payload = contactPayloadFromForm(new FormData(event.currentTarget));
+                        void contactSubmitter.current?.(payload, (state, error) => {
+                          setContactStatus(state);
+                          if (state === 'error') {
+                            if (error instanceof ApiError && error.status === 400) {
+                              setContactError('Revisa la información ingresada e intenta nuevamente.');
+                            } else if (error instanceof ApiError && error.status === 503) {
+                              setContactError('No fue posible procesar los correos. Intenta nuevamente más tarde.');
+                            } else if (error instanceof ApiError && error.status === 429) {
+                              setContactError('Recibimos varias solicitudes desde esta conexión. Intenta nuevamente más tarde.');
+                            } else if (error instanceof ApiError) {
+                              setContactError('No fue posible procesar tu consulta. Conservamos tus datos para que puedas intentar de nuevo.');
+                            } else {
+                              setContactError('No fue posible conectar con el servicio. Conservamos tus datos para que puedas intentar de nuevo.');
+                            }
+                          } else {
+                            setContactError('');
+                          }
+                        });
+                      }}
+                      onChange={() => {
+                        if (contactStatus === 'error') {
+                          setContactStatus('idle');
+                          setContactError('');
+                        }
                       }}
                       className="space-y-4"
+                      aria-busy={contactStatus === 'sending'}
                     >
+                      <div aria-hidden="true" className="absolute -left-[10000px] h-px w-px overflow-hidden">
+                        <label htmlFor="contact-website">No completar este campo</label>
+                        <input id="contact-website" type="text" name="website" tabIndex={-1} autoComplete="off" />
+                      </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-xs font-bold text-[#3D1E16] mb-1">Nombre completo *</label>
                           <input
                             type="text"
+                            name="name"
                             required
+                            maxLength={120}
+                            autoComplete="name"
                             placeholder="Ej. Ana María Gómez"
                             className="w-full p-3 bg-[#FDFBF7] border border-[#EFE6DC] rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-[#C85A32]"
                           />
@@ -979,7 +1016,10 @@ export default function App() {
                           <label className="block text-xs font-bold text-[#3D1E16] mb-1">Correo electrónico *</label>
                           <input
                             type="email"
+                            name="email"
                             required
+                            maxLength={254}
+                            autoComplete="email"
                             placeholder="ejemplo@correo.com"
                             className="w-full p-3 bg-[#FDFBF7] border border-[#EFE6DC] rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-[#C85A32]"
                           />
@@ -990,7 +1030,9 @@ export default function App() {
                         <label className="block text-xs font-bold text-[#3D1E16] mb-1">Asunto *</label>
                         <input
                           type="text"
+                          name="subject"
                           required
+                            maxLength={160}
                           placeholder="Consulta sobre productos o envíos"
                           className="w-full p-3 bg-[#FDFBF7] border border-[#EFE6DC] rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-[#C85A32]"
                         />
@@ -999,19 +1041,24 @@ export default function App() {
                       <div>
                         <label className="block text-xs font-bold text-[#3D1E16] mb-1">Mensaje *</label>
                         <textarea
+                          name="message"
                           rows={4}
                           required
+                          maxLength={5000}
                           placeholder="Escribe tu mensaje aquí..."
                           className="w-full p-3 bg-[#FDFBF7] border border-[#EFE6DC] rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-[#C85A32]"
                         ></textarea>
                       </div>
 
+                      {contactError && <p role="alert" className="text-xs text-[#8F1D2C]">{contactError}</p>}
+
                       <button
                         type="submit"
+                        disabled={contactStatus === 'sending'}
                         className="w-full py-3.5 bg-[#C85A32] hover:bg-[#A03C1B] text-white text-xs font-bold uppercase tracking-wider rounded-xl shadow transition-colors flex items-center justify-center gap-2"
                       >
                         <Send className="w-4 h-4" />
-                        <span>Enviar mensaje demostrativo</span>
+                        <span>{contactStatus === 'sending' ? 'Enviando…' : 'Enviar mensaje'}</span>
                       </button>
                     </form>
                   )}

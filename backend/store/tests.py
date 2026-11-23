@@ -8,9 +8,12 @@ from datetime import timedelta
 from io import BytesIO, StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from django.contrib import admin as django_admin
 from django.contrib.auth.models import Permission, User
+from django.core import mail
+from django.core.cache import cache
 from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
@@ -4724,3 +4727,151 @@ class RBACProtectionTransactionTests(TransactionTestCase):
         role.active = False
         with self.assertRaises(ValidationError):
             role.save(update_fields=('active',))
+
+
+@override_settings(
+    EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend',
+    EMAIL_HOST='smtp.example.test',
+    EMAIL_PORT=587,
+    EMAIL_HOST_USER='sender@example.test',
+    EMAIL_HOST_PASSWORD='non-secret-test-value',
+    EMAIL_USE_TLS=True,
+    EMAIL_USE_SSL=False,
+    DEFAULT_FROM_EMAIL='Tienda Wayúu <sender@example.test>',
+)
+class ContactFormAPITests(TestCase):
+    url = '/api/v1/contact/'
+
+    def setUp(self):
+        cache.clear()
+        mail.outbox.clear()
+        self.payload = {
+            'name': 'Ana María Wayúu',
+            'email': 'ana@example.test',
+            'subject': 'Consulta sobre una manta',
+            'message': 'Quisiera conocer más sobre esta pieza artesanal.',
+            'website': '',
+        }
+
+    def post_contact(self, payload=None):
+        return self.client.post(
+            self.url,
+            data=json.dumps(payload if payload is not None else self.payload),
+            content_type='application/json',
+        )
+
+    def test_valid_contact_sends_exactly_two_messages_to_the_visitor(self):
+        response = self.post_contact()
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json(), {'detail': 'La solicitud fue procesada correctamente.'})
+        self.assertEqual(len(mail.outbox), 2)
+        self.assertEqual([message.to for message in mail.outbox], [['ana@example.test'], ['ana@example.test']])
+        self.assertTrue(all(message.from_email == 'Tienda Wayúu <sender@example.test>' for message in mail.outbox))
+        self.assertIn('Copia de tu consulta', mail.outbox[0].subject)
+        for value in ('Ana María Wayúu', 'ana@example.test', 'Consulta sobre una manta', 'Quisiera conocer más sobre esta pieza artesanal.'):
+            self.assertIn(value, mail.outbox[0].body)
+        self.assertIn('sitio web de Tienda Wayúu', mail.outbox[0].body)
+        self.assertIn('Gracias por comunicarte con Tienda Wayúu', mail.outbox[1].body)
+        self.assertIn('legado textil Wayúu de La Guajira', mail.outbox[1].body)
+        self.assertNotIn('contacto.demo@tiendawayuu.co', mail.outbox[1].body)
+        self.assertNotIn('+57 300 000 0000', mail.outbox[1].body)
+
+    def test_client_cannot_override_recipient_or_sender(self):
+        response = self.post_contact({
+            **self.payload,
+            'to': ['attacker@example.test'],
+            'recipient_list': ['attacker@example.test'],
+            'from_email': 'attacker@example.test',
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(len(mail.outbox), 2)
+        self.assertTrue(all(message.to == ['ana@example.test'] for message in mail.outbox))
+        self.assertTrue(all(message.from_email == 'Tienda Wayúu <sender@example.test>' for message in mail.outbox))
+
+    def test_normalizes_email_domain_without_changing_local_part(self):
+        response = self.post_contact({**self.payload, 'email': 'Ana.Contacto@EXAMPLE.TEST'})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(all(message.to == ['Ana.Contacto@example.test'] for message in mail.outbox))
+        self.assertIn('Ana.Contacto@example.test', mail.outbox[0].body)
+
+    def test_required_fields_and_invalid_email_are_rejected(self):
+        for field in ('name', 'email', 'subject', 'message'):
+            with self.subTest(field=field):
+                cache.clear()
+                mail.outbox.clear()
+                payload = {**self.payload, field: ''}
+                response = self.post_contact(payload)
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(mail.outbox, [])
+
+        invalid_email = self.post_contact({**self.payload, 'email': 'correo-invalido'})
+        self.assertEqual(invalid_email.status_code, 400)
+        self.assertEqual(mail.outbox, [])
+
+    def test_excessive_lengths_and_header_newlines_are_rejected(self):
+        for field, value in (
+            ('name', 'n' * 121),
+            ('email', f'{"a" * 245}@example.test'),
+            ('subject', 's' * 161),
+            ('message', 'm' * 5001),
+            ('subject', 'Consulta\nBcc: intruso@example.test'),
+        ):
+            with self.subTest(field=field, length=len(value)):
+                cache.clear()
+                mail.outbox.clear()
+                response = self.post_contact({**self.payload, field: value})
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(mail.outbox, [])
+
+    def test_honeypot_rejects_automated_submission_without_sending(self):
+        response = self.post_contact({**self.payload, 'website': 'https://bot.example'})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(mail.outbox, [])
+        self.assertNotIn('SMTP', response.content.decode())
+
+    def test_missing_authenticated_smtp_configuration_returns_generic_unavailable(self):
+        with override_settings(
+            EMAIL_HOST='', EMAIL_HOST_USER='', EMAIL_HOST_PASSWORD='',
+            DEFAULT_FROM_EMAIL='', EMAIL_USE_TLS=False, EMAIL_USE_SSL=False,
+        ):
+            response = self.post_contact()
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {'detail': 'El servicio de contacto no está disponible en este momento.'})
+        self.assertEqual(mail.outbox, [])
+
+    def test_first_message_failure_never_reports_success_or_exposes_exception(self):
+        with patch('store.api.send_mail', side_effect=RuntimeError('private SMTP configuration detail')) as sender:
+            with self.assertLogs('store.api', level='ERROR') as logs:
+                response = self.post_contact()
+
+        self.assertEqual(sender.call_count, 1)
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn('private SMTP configuration detail', response.content.decode())
+        self.assertNotIn('private SMTP configuration detail', '\n'.join(logs.output))
+
+    def test_second_message_failure_never_reports_success(self):
+        with patch('store.api.send_mail', side_effect=[1, RuntimeError('private SMTP detail')]) as sender:
+            with self.assertLogs('store.api', level='ERROR'):
+                response = self.post_contact()
+
+        self.assertEqual(sender.call_count, 2)
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn('private SMTP detail', response.content.decode())
+
+    def test_backend_refusal_for_either_message_is_not_reported_as_success(self):
+        with patch('store.api.send_mail', side_effect=[1, 0]):
+            with self.assertLogs('store.api', level='ERROR'):
+                response = self.post_contact()
+
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn('credential', response.content.decode().lower())
+
+    def test_contact_endpoint_limits_repeated_requests(self):
+        responses = [self.post_contact() for _ in range(6)]
+
+        self.assertEqual([response.status_code for response in responses[:5]], [200] * 5)
+        self.assertEqual(responses[5].status_code, 429)
