@@ -1133,3 +1133,95 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Sprint 3.2: agrupar los ajustes de cuentas sin cambiar sus controles. */
+.rbac-panel .rbac-account-configuration {
+  display: grid;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.rbac-panel .rbac-account-configuration > .rbac-user-form {
+  margin: 0;
+  border-color: #e7d8d0;
+  background: #fff;
+}
+
+.rbac-panel .rbac-account-access {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #e5d6ce;
+  border-radius: 9px;
+  background: #f8f2ed;
+}
+
+.rbac-panel .rbac-account-access:empty {
+  display: none;
+}
+
+.rbac-panel .rbac-account-access .rbac-permission-list {
+  max-height: 360px;
+  padding: 0 12px;
+  border: 1px solid #e7d8d0;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.rbac-panel .rbac-account-access .rbac-permission-list > h4 {
+  margin: 12px 0 6px;
+  color: #5c1d24;
+  font-size: 12px;
+}
+
+.rbac-panel .rbac-account-access .rbac-permission-list > p {
+  margin: 0 0 8px;
+  color: #6d5658;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+/* Catálogo: recursos, acciones y capacidades comparten un grupo visual. */
+.rbac-panel .rbac-catalog-forms {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+  margin-top: 12px;
+  padding: 6px 14px;
+  border: 1px solid #e5d6ce;
+  border-radius: 9px;
+  background: #f8f2ed;
+}
+
+.rbac-panel .rbac-catalog-forms > .rbac-user-form {
+  min-width: 0;
+  padding: 15px 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.rbac-panel .rbac-catalog-forms > .rbac-user-form:nth-child(2) {
+  padding-left: 16px;
+  border-left: 1px solid #e5d6ce;
+}
+
+.rbac-panel .rbac-catalog-forms > .rbac-user-form:nth-child(3) {
+  grid-column: 1 / -1;
+  padding-top: 16px;
+  border-top: 1px solid #e5d6ce;
+}
+
+@media (max-width: 760px) {
+  .rbac-panel .rbac-catalog-forms {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 8px 12px;
+  }
+
+  .rbac-panel .rbac-catalog-forms > .rbac-user-form:nth-child(2) {
+    padding-left: 4px;
+    border-top: 1px solid #e5d6ce;
+    border-left: 0;
+  }
+}
