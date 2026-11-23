@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "test": "node --experimental-strip-types --test tests/resolveImageUrl.test.mjs tests/http.test.mjs tests/rbacNavigation.test.mjs tests/publicCatalog.test.mjs tests/contactForm.test.mjs",
+    "test": "node --experimental-strip-types --test tests/resolveImageUrl.test.mjs tests/http.test.mjs tests/rbacNavigation.test.mjs tests/publicCatalog.test.mjs tests/publicContactSection.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

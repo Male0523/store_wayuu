@@ -33,7 +33,6 @@ import type {
   SuperadminUserInput,
   UserProfile,
 } from '../types'
-import type { ContactSubmission } from './contactForm'
 import { RequestTimeoutError, withTimeout } from './http'
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '/api/v1').replace(/\/$/, '')
@@ -126,8 +125,6 @@ function adminProductBody(values: AdminProductInput): BodyInit {
 
 export const api = {
   health: () => request<{ status: string }>('/'),
-  contact: (values: ContactSubmission) =>
-    request<{ detail: string }>('/contact/', { method: 'POST', body: json(values) }),
   categories: () => request<Category[]>('/categories/'),
   publicCraftswomen: () => request<PublicCraftswoman[]>('/craftswomen/'),
   products: (params: URLSearchParams) => request<Page<Product>>(`/products/?${params}`),
