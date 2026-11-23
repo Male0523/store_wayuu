@@ -1,5 +1,9 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useUserSession } from './frontend/src/context/user-context';
+import { api } from './frontend/src/lib/api';
+import { loadPublicCatalog, type PublicCatalogItem } from './frontend/src/lib/publicCatalog';
+import { resolveImageUrl } from './frontend/src/lib/imageUrl';
+import type { Category } from './frontend/src/types';
 import {
   ShoppingBag,
   Heart,
@@ -35,25 +39,6 @@ import {
   Clock
 } from 'lucide-react';
 
-// ============================================================================
-// DATA DE DEMOSTRACIÓN (PRODUCTOS, ARTESANAS Y CONTENIDO CULTURAL WAYÚU)
-// ============================================================================
-
-interface Product {
-  id: string;
-  name: string;
-  category: string;
-  price: number;
-  image: string;
-  shortDescription: string;
-  fullDescription: string;
-  technique: string;
-  artisan: string;
-  rancheria: string;
-  material: string;
-  symbolism: string;
-}
-
 interface Artisan {
   id: string;
   name: string;
@@ -65,102 +50,21 @@ interface Artisan {
   clan: string;
 }
 
-const CATEGORIES = [
-  'Todas',
-  'Mochilas (Susu)',
-  'Mantas Wayúu',
-  'Chinchorros (Anatas)',
-  'Sombreros (Kumu)',
-  'Bisutería (Kanaas)',
-  'Calzado y Accesorios'
-];
+function CatalogProductImage({ src, alt, className }: { src: string; alt: string; className: string }) {
+  const [failed, setFailed] = useState(!src);
 
-const PRODUCTS: Product[] = [
-  {
-    id: 'PRD-WAY-001',
-    name: 'Mochila Susu Kanaas Sol Naciente',
-    category: 'Mochilas (Susu)',
-    price: 320000,
-    image: 'https://images.unsplash.com/photo-1590874103328-eac38a683ce7?auto=format&fit=crop&q=80&w=800',
-    shortDescription: 'Tejida a una sola hebra con símbolos geométricos Kanaas que evocan el amanecer.',
-    fullDescription: 'Esta emblemática mochila Susu representa la cosmovisión tradicional Wayúu. Cada hilo es seleccionado minuciosamente y tejido a una hebra durante semanas de dedicada labor en la enramada. Cuenta con una gasa paleteada de alta resistencia y cordón trenzado con borlas esponjosas.',
-    technique: 'Tejido a una hebra (Susu wane puliruü)',
-    artisan: 'Marta Uriana',
-    rancheria: 'Ranchería Mayapo, Manaure',
-    material: 'Hilo acrílico de alta durabilidad y solidez de color',
-    symbolism: 'El diseño Kanaas "Jiwatou" simula el rastro del sol sobre las dunas y la sabiduría transmitida entre generaciones.'
-  },
-  {
-    id: 'PRD-WAY-002',
-    name: 'Manta Wayúu Elegante Atardecer Terracota',
-    category: 'Mantas Wayúu',
-    price: 380000,
-    image: 'https://images.unsplash.com/photo-1584917865442-de89df76afd3?auto=format&fit=crop&q=80&w=800',
-    shortDescription: 'Manta holgada de seda fría con bordados sutiles en escote y caída fluida.',
-    fullDescription: 'Confeccionada en tela liviana, fresca y de excelente caída, ideal para climas cálidos y eventos especiales. Presenta detalles de pechera bordada a mano con la técnica nido de abeja tradicional de La Guajira.',
-    technique: 'Pliegues y bordados a mano en telar',
-    artisan: 'Aura Barros Pushaina',
-    rancheria: 'Ranchería Cabo de la Vela',
-    material: 'Seda fría y seda dacrón de textura suave',
-    symbolism: 'El color terracota rinde tributo a la tierra arcillosa y la calidez del paisaje guajiro.'
-  },
-  {
-    id: 'PRD-WAY-003',
-    name: 'Chinchorro Anatas Pulowi Doble',
-    category: 'Chinchorros (Anatas)',
-    price: 1450000,
-    image: 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?auto=format&fit=crop&q=80&w=800',
-    shortDescription: 'Chinchorro de cabecera con textura elástica de panal y cañuelotas caladas.',
-    fullDescription: 'El chinchorro es la máxima representación del confort y lujo textil Wayúu. A diferencia de una hamaca tradicional, su tejido de malla abierta permite que el aire fluya libremente, brindando un descanso fresco. Incluye faldones laterales (cañuelotas) elaborados a mano con diseños geométricos complejos.',
-    technique: 'Tejido suelto de malla elástica y cañuela calada',
-    artisan: 'Rosa Pushaina',
-    rancheria: 'Ranchería Uribia Central',
-    material: 'Hilo hilado grueso de algodón y acrílico superior',
-    symbolism: 'La cañuela imita la constelación nocturna y las redes del mar que alimentan a la comunidad.'
-  },
-  {
-    id: 'PRD-WAY-004',
-    name: 'Sombrero Kumu Mawisa Tradicional',
-    category: 'Sombreros (Kumu)',
-    price: 1200000 / 10, // 120,000 COP
-    image: 'https://images.unsplash.com/photo-1521369909029-2afed882baee?auto=format&fit=crop&q=80&w=800',
-    shortDescription: 'Tejido finamente en paja Mawisa recolectada en las dunas de la alta Guajira.',
-    fullDescription: 'Sombrero protector para el intenso sol del desierto. La paja Mawisa es trenzada a mano creando una estructura liviana y resistente. Viene decorado con una cinta tejida en gasa con motivos multicolores.',
-    technique: 'Sarga e hileras trenzadas en fibra Mawisa',
-    artisan: 'Sonia Epinayú',
-    rancheria: 'Ranchería Manaure',
-    material: 'Fibra vegetal natural Mawisa y cinta acrílica',
-    symbolism: 'La copa circular simboliza el astro solar que guía el caminar diario del pueblo Wayúu.'
-  },
-  {
-    id: 'PRD-WAY-005',
-    name: 'Pulsera Kanaas Iwouya (Estrella de Lluvia)',
-    category: 'Bisutería (Kanaas)',
-    price: 48000,
-    image: 'https://images.unsplash.com/photo-1611591475179-420dac0319db?auto=format&fit=crop&q=80&w=800',
-    shortDescription: 'Brazalete ajustador tejido con hilos pulidos y patrón de la estrella vespertina.',
-    fullDescription: 'Un accesorio elegante y cargado de significado. Tejida de forma artesanal con hilo delgado que no decolora. Su cierre graduable se adapta cómodamente a cualquier muñeca.',
-    technique: 'Tejido en peineta de telar pequeño',
-    artisan: 'Luz Marina Jayaliyu',
-    rancheria: 'Ranchería Maicao',
-    material: 'Hilo fino mercerizado',
-    symbolism: 'Iwouya representa la estrella que anuncia el florecer del desierto con la llegada de las lluvias.'
-  },
-  {
-    id: 'PRD-WAY-006',
-    name: 'Calzado Alpargatas Wayúu Kanaas',
-    category: 'Calzado y Accesorios',
-    price: 165000,
-    image: 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&q=80&w=800',
-    shortDescription: 'Alpargatas tradicionales con capellada tejida a mano y suela confort.',
-    fullDescription: 'El calzado tradicional de la mujer y el hombre guajiro renovado con suela cómoda para uso diario. Capellada superior tejida con símbolos Kanaas e hilos de colores vibrantes.',
-    technique: 'Tejido denso en capellada y montaje artesanal',
-    artisan: 'Kenia Iguarán',
-    rancheria: 'Ranchería Riohacha',
-    material: 'Capellada acrílica tejida, suela sintética de alta fricción',
-    symbolism: 'Protección para los pies que recorren los senderos de arena de la península.'
+  useEffect(() => setFailed(!src), [src]);
+
+  if (failed) {
+    return (
+      <div className={`${className} flex items-center justify-center text-[#5C1D24]/50`} role="img" aria-label={`Imagen no disponible: ${alt}`}>
+        <ShoppingBag className="w-10 h-10" aria-hidden="true" />
+      </div>
+    );
   }
-];
+
+  return <img src={resolveImageUrl(src)} alt={alt} className={className} onError={() => setFailed(true)} />;
+}
 
 const ARTISANS: Artisan[] = [
   {
@@ -201,11 +105,18 @@ export default function App() {
   const [currentView, setCurrentView] = useState<'home' | 'login' | 'register'>('home');
 
   // Estado del Modal para "Ver Producto" (Muestra detalle de producto sin ser una 4ta vista principal)
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [selectedProduct, setSelectedProduct] = useState<PublicCatalogItem | null>(null);
 
   // Filtros de categoría y búsqueda en la tienda
-  const [selectedCategory, setSelectedCategory] = useState<string>('Todas');
+  const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [catalogProducts, setCatalogProducts] = useState<PublicCatalogItem[]>([]);
+  const [catalogCategories, setCatalogCategories] = useState<Category[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState('');
+  const [categoriesError, setCategoriesError] = useState('');
+  const [catalogRetry, setCatalogRetry] = useState(0);
 
   // Formulario de Iniciar Sesión
   const [loginEmail, setLoginEmail] = useState('');
@@ -240,17 +151,38 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [currentView]);
 
-  // Filtrado de productos por categoría y búsqueda
-  const filteredProducts = useMemo(() => {
-    return PRODUCTS.filter((p) => {
-      const matchesCategory = selectedCategory === 'Todas' || p.category === selectedCategory;
-      const matchesSearch =
-        p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.shortDescription.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.artisan.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchesCategory && matchesSearch;
-    });
-  }, [selectedCategory, searchQuery]);
+  useEffect(() => {
+    let active = true;
+    setCategoriesLoading(true);
+    setCategoriesError('');
+    api.categories()
+      .then((categories) => { if (active) setCatalogCategories(categories); })
+      .catch(() => {
+        if (active) setCategoriesError('Intenta nuevamente en unos momentos.');
+      })
+      .finally(() => { if (active) setCategoriesLoading(false); });
+    return () => { active = false; };
+  }, [catalogRetry]);
+
+  useEffect(() => {
+    let active = true;
+    const timer = window.setTimeout(() => {
+      setCatalogLoading(true);
+      setCatalogError('');
+      void loadPublicCatalog(api, searchQuery, selectedCategory)
+        .then((products) => { if (active) setCatalogProducts(products); })
+        .catch(() => {
+          if (!active) return;
+          setCatalogProducts([]);
+          setCatalogError('Revisa tu conexión e inténtalo nuevamente en unos momentos.');
+        })
+        .finally(() => { if (active) setCatalogLoading(false); });
+    }, 250);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [catalogRetry, searchQuery, selectedCategory]);
 
   // Navegación suave por secciones dentro de la Página Principal
   const scrollToSection = (sectionId: string) => {
@@ -778,7 +710,7 @@ export default function App() {
                     Nuestros Productos Artesanales
                   </h2>
                   <p className="text-xs text-[#3D1E16]/80 max-w-xl">
-                    Explora nuestra variada selección de artesanías Wayúu: desde icónicas mochilas Susu y elegantes mantas hasta chinchorros de lujo y accesorios.
+                    Explora las piezas disponibles en el catálogo y consulta la información registrada para cada producto.
                   </p>
                 </div>
 
@@ -787,7 +719,7 @@ export default function App() {
                   <Search className="w-4 h-4 text-[#3D1E16]/40 absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
-                    placeholder="Buscar producto o artesana..."
+                    placeholder="Buscar producto..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full pl-10 pr-4 py-2.5 bg-[#FDFBF7] border border-[#EFE6DC] rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-[#C85A32]"
@@ -796,26 +728,47 @@ export default function App() {
               </div>
 
               {/* Botones de Filtro por Categorías */}
+              {categoriesError && <p className="text-xs text-[#8B1E2D] mb-3" role="alert">No fue posible cargar las categorías. {categoriesError} <button className="underline font-bold" onClick={() => setCatalogRetry((value) => value + 1)}>Reintentar</button></p>}
               <div className="flex items-center gap-2 overflow-x-auto pb-4 mb-8">
-                {CATEGORIES.map((cat) => (
+                <button
+                  key="all"
+                  onClick={() => setSelectedCategory(null)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold shrink-0 transition-all ${
+                    selectedCategory === null
+                      ? 'bg-[#5C1D24] text-white shadow'
+                      : 'bg-[#FDFBF7] text-[#3D1E16] hover:bg-[#F5EFE6] border border-[#EFE6DC]'
+                  }`}
+                >
+                  Todas
+                </button>
+                {catalogCategories.map((category) => (
                   <button
-                    key={cat}
-                    onClick={() => setSelectedCategory(cat)}
+                    key={category.id}
+                    onClick={() => setSelectedCategory(category.id)}
                     className={`px-4 py-2 rounded-xl text-xs font-bold shrink-0 transition-all ${
-                      selectedCategory === cat
+                      selectedCategory === category.id
                         ? 'bg-[#5C1D24] text-white shadow'
                         : 'bg-[#FDFBF7] text-[#3D1E16] hover:bg-[#F5EFE6] border border-[#EFE6DC]'
                     }`}
                   >
-                    {cat}
+                    {category.name}
                   </button>
                 ))}
               </div>
 
               {/* Grid de Productos */}
-              {filteredProducts.length > 0 ? (
+              {categoriesLoading && <p className="text-xs text-[#3D1E16]/60 mb-4" role="status">Cargando categorías…</p>}
+              {catalogLoading ? (
+                <div className="bg-[#FDFBF7] p-12 rounded-3xl border border-[#EFE6DC] text-center text-sm text-[#3D1E16]/70" role="status">Cargando productos…</div>
+              ) : catalogError ? (
+                <div className="bg-[#FDFBF7] p-12 rounded-3xl border border-[#EFE6DC] text-center space-y-3" role="alert">
+                  <p className="text-sm font-bold text-[#5C1D24]">No fue posible cargar los productos.</p>
+                  <p className="text-xs text-[#3D1E16]/70">{catalogError}</p>
+                  <button onClick={() => setCatalogRetry((value) => value + 1)} className="mt-2 px-4 py-2 bg-[#C85A32] text-white text-xs font-bold rounded-xl">Reintentar</button>
+                </div>
+              ) : catalogProducts.length > 0 ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-                  {filteredProducts.map((product) => (
+                  {catalogProducts.map((product) => (
                     <div
                       key={product.id}
                       className="bg-[#FDFBF7] rounded-3xl border border-[#EFE6DC] overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col justify-between group"
@@ -823,13 +776,13 @@ export default function App() {
                       <div>
                         {/* Contenedor Imagen */}
                         <div className="relative h-64 overflow-hidden bg-[#EFE6DC]">
-                          <img
-                            src={product.image}
+                          <CatalogProductImage
+                            src={product.imageUrl}
                             alt={product.name}
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                           />
                           <span className="absolute top-3 left-3 bg-[#FDFBF7]/90 backdrop-blur-md text-[#5C1D24] text-[10px] font-black uppercase tracking-wider px-3 py-1 rounded-full border border-[#EFE6DC]">
-                            {product.category}
+                            {product.categoryName}
                           </span>
                         </div>
 
@@ -839,12 +792,12 @@ export default function App() {
                             {product.name}
                           </h3>
                           <p className="text-xs text-[#3D1E16]/75 line-clamp-2">
-                            {product.shortDescription}
+                            {product.description || 'Sin descripción disponible.'}
                           </p>
 
                           <div className="pt-2 flex items-center justify-between text-xs border-t border-[#EFE6DC]">
                             <span className="text-[#3D1E16]/60">Tejedora:</span>
-                            <span className="font-bold text-[#3D1E16]">{product.artisan}</span>
+                            <span className="font-bold text-[#3D1E16]">{product.craftswomanName || 'Sin información registrada'}</span>
                           </div>
                         </div>
                       </div>
@@ -854,7 +807,7 @@ export default function App() {
                         <div>
                           <span className="text-[10px] text-[#3D1E16]/60 uppercase block">Precio COP</span>
                           <span className="text-base font-extrabold text-[#5C1D24]">
-                            ${product.price.toLocaleString()}
+                            ${Number(product.price).toLocaleString('es-CO')}
                           </span>
                         </div>
 
@@ -880,7 +833,7 @@ export default function App() {
                   </p>
                   <button
                     onClick={() => {
-                      setSelectedCategory('Todas');
+                      setSelectedCategory(null);
                       setSearchQuery('');
                     }}
                     className="mt-2 px-4 py-2 bg-[#C85A32] text-white text-xs font-bold rounded-xl"
@@ -1493,14 +1446,14 @@ export default function App() {
               {/* Imagen Producto */}
               <div className="sm:col-span-5">
                 <div className="rounded-2xl overflow-hidden border border-[#EFE6DC] bg-[#EFE6DC] h-64 sm:h-72">
-                  <img
-                    src={selectedProduct.image}
+                  <CatalogProductImage
+                    src={selectedProduct.imageUrl}
                     alt={selectedProduct.name}
                     className="w-full h-full object-cover"
                   />
                 </div>
                 <span className="inline-block mt-3 bg-[#E8C5C8]/40 border border-[#E8C5C8] text-[#5C1D24] text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full">
-                  {selectedProduct.category}
+                  {selectedProduct.categoryName}
                 </span>
               </div>
 
@@ -1514,26 +1467,31 @@ export default function App() {
                     {selectedProduct.name}
                   </h3>
                   <p className="text-lg font-black text-[#5C1D24] mt-1">
-                    ${selectedProduct.price.toLocaleString()} COP
+                    ${Number(selectedProduct.price).toLocaleString('es-CO')} COP
                   </p>
                 </div>
 
                 <p className="text-xs text-[#3D1E16]/80 leading-relaxed">
-                  {selectedProduct.fullDescription}
+                  {selectedProduct.description || 'Sin descripción disponible.'}
                 </p>
 
-                {/* Símbolo Kanaas */}
+                {/* Disponibilidad reportada por el catálogo */}
                 <div className="p-3.5 rounded-2xl bg-[#FAF6F0] border border-[#EFE6DC] space-y-1">
-                  <p className="text-xs font-bold text-[#3D1E16]">Simbología Kanaas:</p>
-                  <p className="text-xs text-[#3D1E16]/75 italic">{selectedProduct.symbolism}</p>
+                  <p className="text-xs font-bold text-[#3D1E16]">Disponibilidad:</p>
+                  <p className="text-xs text-[#3D1E16]/75">
+                    {selectedProduct.stock > 0
+                      ? `${selectedProduct.stock} unidades disponibles`
+                      : selectedProduct.madeToOrder ? 'Disponible por encargo' : 'Agotado'}
+                  </p>
                 </div>
 
-                {/* Ficha Tejedora */}
+                {/* Ficha con los datos registrados para el producto */}
                 <div className="space-y-1 text-xs text-[#3D1E16]/80 border-t border-[#EFE6DC] pt-3">
-                  <p><strong>Artesana:</strong> {selectedProduct.artisan}</p>
-                  <p><strong>Ranchería:</strong> {selectedProduct.rancheria}</p>
-                  <p><strong>Técnica:</strong> {selectedProduct.technique}</p>
-                  <p><strong>Materiales:</strong> {selectedProduct.material}</p>
+                  {selectedProduct.craftswomanName && <p><strong>Tejedora:</strong> {selectedProduct.craftswomanName}</p>}
+                  {selectedProduct.region && <p><strong>Región:</strong> {selectedProduct.region}</p>}
+                  {selectedProduct.color && <p><strong>Color:</strong> {selectedProduct.color}</p>}
+                  {selectedProduct.size && <p><strong>Talla:</strong> {selectedProduct.size}</p>}
+                  {selectedProduct.productionTime && <p><strong>Tiempo de elaboración:</strong> {selectedProduct.productionTime}</p>}
                 </div>
               </div>
 
@@ -1542,7 +1500,7 @@ export default function App() {
             {/* Footer Modal con Acción */}
             <div className="pt-4 border-t border-[#EFE6DC] flex flex-col sm:flex-row items-center justify-between gap-3">
               <span className="text-xs text-[#3D1E16]/60">
-                Pieza artesanal garantizada con sello de origen.
+                Información del producto según el catálogo de la tienda.
               </span>
 
               <div className="flex items-center gap-2 w-full sm:w-auto">
