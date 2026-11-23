@@ -254,7 +254,7 @@ export default function CustomerPanel({ catalogOnly = false, embedded = false, r
 
   return <div className={`customer-shell${embedded ? ' customer-shell-embedded' : ''}`}>
     {!embedded && <aside className="customer-sidebar">
-      <div className="customer-brand"><span className="customer-brand-mark"><BrandLogo variant="icon" alt="" className="h-8 w-8" /></span><div><small>{catalogOnly ? 'Catálogo comercial' : 'Portal del Cliente'}</small></div></div>
+      <div className="customer-brand"><span className="customer-brand-mark"><BrandLogo variant="icon" monochrome alt="" className="h-8 w-8" /></span><div><small>{catalogOnly ? 'Catálogo comercial' : 'Portal del Cliente'}</small></div></div>
       <div className="customer-nav-label">NAVEGACIÓN PRINCIPAL</div>
       <nav className="customer-nav">
         <button className={view === 'catalog' || view === 'detail' ? 'active' : ''} onClick={() => navigate('catalog')}><Home size={17}/>Inicio y catálogo</button>

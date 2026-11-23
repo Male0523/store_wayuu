@@ -947,7 +947,7 @@ export default function App() {
             
             {/* Header del Formulario */}
             <div className="bg-[#5C1D24] text-white p-8 text-center relative overflow-hidden">
-              <BrandLogo variant="full" alt="Tienda Wayúu" className="h-12 w-[126px] mx-auto mb-3" />
+              <BrandLogo variant="icon" monochrome alt="" className="h-12 w-12 mx-auto mb-3" />
               <p className="text-xs text-[#E8C5C8] mt-1 font-medium">Acceso de Clientes</p>
             </div>
 
@@ -1430,7 +1430,7 @@ export default function App() {
             {/* Logo y Descripción */}
             <div className="md:col-span-4 space-y-4">
               <div className="flex items-center gap-3">
-                <BrandLogo variant="full" alt="Tienda Wayúu" className="h-9 w-[116px]" />
+                <BrandLogo variant="full" monochrome alt="Tienda Wayúu" className="h-9 w-[94px]" />
               </div>
               <p className="text-xs text-[#EFE6DC]/80 leading-relaxed">
                 Tienda pública de artesanías y tejidos elaborados por tejedoras de las rancherías de La Guajira, Colombia. Conservación cultural y comercio justo.

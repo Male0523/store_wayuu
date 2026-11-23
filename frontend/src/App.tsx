@@ -161,7 +161,7 @@ export default function App() {
 	return (
 		<>
 			<header className="unified-header">
-				<a className="unified-brand" href="/" onClick={(event) => navigate(event, '/')} aria-label="Ir al sitio de Tienda Wayúu"><BrandLogo variant="icon" className="h-6 w-6" /></a>
+				<a className="unified-brand" href="/" onClick={(event) => navigate(event, '/')} aria-label="Ir al sitio de Tienda Wayúu"><BrandLogo variant="icon" className="h-8 w-8" /></a>
 				<nav aria-label="Navegación de la aplicación">
 					<a href="/" onClick={(event) => navigate(event, '/')}>Sitio público</a>
 					{roleRoutes.filter((route) => route.role === user?.role).map((route) => (

@@ -681,7 +681,7 @@ function ShopApp({ initialScreen = 'shop', delegatedSection }: ShopAppProps) {
 
   return <div className="app-shell">
     {screen !== 'craftswoman' && screen !== 'admin' && <header className="site-header">
-      <button className="wordmark" onClick={() => setScreen('shop')} aria-label="Ir al inicio"><BrandLogo variant="full" alt="Tienda Wayúu" className="h-10 w-[132px]" /></button>
+      <button className="wordmark" onClick={() => setScreen('shop')} aria-label="Ir al inicio"><BrandLogo variant="full" alt="Tienda Wayúu" className="h-10 w-[105px]" /></button>
       <nav className="main-nav" aria-label="Navegación principal"><button className={screen === 'shop' ? 'active' : ''} onClick={() => setScreen('shop')}>Colección</button>{canRequestDesign && <button className={screen === 'design' ? 'active' : ''} onClick={() => setScreen('design')}>Diseña tu manta</button>}<button className="nav-story" onClick={() => document.getElementById('origen')?.scrollIntoView({ behavior: 'smooth' })}>Nuestro origen</button></nav>
       <div className="header-actions"><label className="header-search" aria-label="Buscar en la colección"><Search size={17} /><input value={query} onChange={(event) => { setQuery(event.target.value); setScreen('shop') }} placeholder="Buscar" /></label><button className="icon-action account-action" onClick={openAccount} title={user ? `Cuenta de ${resolveUserDisplayName(user, profileDraft)}` : 'Iniciar sesión'} aria-label={user ? 'Abrir mi cuenta' : 'Iniciar sesión'}><CircleUserRound size={20} strokeWidth={1.6} /></button><button className="icon-action bag-action" onClick={openCart} title="Abrir carrito" aria-label="Abrir carrito"><ShoppingBag size={20} strokeWidth={1.6} /><span className="bag-count">{cart?.count ?? 0}</span></button></div>
     </header>}
@@ -847,7 +847,7 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, profile, pro
   }
   return <div className="craftswoman-workspace">
     <aside className="craftswoman-sidebar">
-      <div className="craftswoman-brand"><span className="craftswoman-brand-mark"><BrandLogo variant="icon" alt="" className="h-7 w-7" /></span><span><small>PORTAL DE TEJEDORA</small></span></div>
+      <div className="craftswoman-brand"><span className="craftswoman-brand-mark"><BrandLogo variant="icon" monochrome alt="" className="h-8 w-8" /></span><span><small>PORTAL DE TEJEDORA</small></span></div>
       <nav className="craftswoman-nav" aria-label="Menú de tejedora">
         <p>MENÚ PRINCIPAL</p>
         {navItems.map((item) => <button key={item.id} className={activeSection === item.id ? 'active' : ''} onClick={() => {
@@ -1038,7 +1038,7 @@ function AdminAccountView({ user, isSuperadmin, initialSection, embedded = false
   const ContentContainer = embedded ? 'div' : 'main'
   return <div className={embedded ? 'admin-embedded-content' : 'craftswoman-workspace admin-workspace'}>
     {!embedded && <aside className="craftswoman-sidebar">
-      <div className="craftswoman-brand"><span className="craftswoman-brand-mark"><BrandLogo variant="icon" alt="" className="h-7 w-7" /></span><span><small>{isSuperadmin ? 'CONTROL GENERAL DEL SISTEMA' : 'ADMINISTRACIÓN DE TIENDA'}</small></span></div>
+      <div className="craftswoman-brand"><span className="craftswoman-brand-mark"><BrandLogo variant="icon" monochrome alt="" className="h-8 w-8" /></span><span><small>{isSuperadmin ? 'CONTROL GENERAL DEL SISTEMA' : 'ADMINISTRACIÓN DE TIENDA'}</small></span></div>
       <nav className="craftswoman-nav" aria-label="Menú de administración">
         <p>MENÚ PRINCIPAL</p>
         {navItems.map((item) => <button key={item.id} className={activeSection === item.id ? 'active' : ''} onClick={() => { setActiveSection(item.id); if (item.id === 'access') onRetryNavigation() }}>{item.icon}<span>{item.label}</span></button>)}
@@ -1729,5 +1729,5 @@ function OrderSuccess({ order, onClose, onOrders }: { order: Order; onClose: () 
 }
 
 function Footer({ onInstagram }: { onInstagram: () => void }) {
-  return <footer className="site-footer"><div className="footer-main"><div className="footer-brand"><BrandLogo variant="full" alt="Tienda Wayúu" className="h-10 w-[132px]" /></div><p className="footer-note">Cada pieza lleva consigo el tiempo y la mirada de quien la teje.</p><button className="social-button" onClick={onInstagram} aria-label="Instagram"><Camera size={18} /></button></div><div className="footer-bottom"><span>© TIENDA WAYÚU · LA GUAJIRA, COLOMBIA</span><span>HECHO A MANO, CON RESPETO</span><a href="#coleccion">VOLVER ARRIBA <ArrowUpRight size={12} /></a></div></footer>
+  return <footer className="site-footer"><div className="footer-main"><div className="footer-brand"><BrandLogo variant="full" alt="Tienda Wayúu" className="h-10 w-[105px]" /></div><p className="footer-note">Cada pieza lleva consigo el tiempo y la mirada de quien la teje.</p><button className="social-button" onClick={onInstagram} aria-label="Instagram"><Camera size={18} /></button></div><div className="footer-bottom"><span>© TIENDA WAYÚU · LA GUAJIRA, COLOMBIA</span><span>HECHO A MANO, CON RESPETO</span><a href="#coleccion">VOLVER ARRIBA <ArrowUpRight size={12} /></a></div></footer>
 }
