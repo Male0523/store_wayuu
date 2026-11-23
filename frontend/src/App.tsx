@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState, type ComponentType, type FormEvent
 import { useUserSession } from './context/user-context'
 import { canViewSharedCatalog } from './lib/navigation'
 import type { SessionUser } from './types'
+import BrandLogo from './BrandLogo'
 
 const legacyViews = import.meta.glob<ComponentType>('../../*.tsx', { import: 'default' })
 const PublicSite = lazy(() => legacyViews['../../sitio_p_blico_tienda_artesanal_way_u.tsx']().then((module) => ({ default: module })))
@@ -160,7 +161,7 @@ export default function App() {
 	return (
 		<>
 			<header className="unified-header">
-				<a className="unified-brand" href="/" onClick={(event) => navigate(event, '/')}>STORE WAYUU</a>
+				<a className="unified-brand" href="/" onClick={(event) => navigate(event, '/')} aria-label="Ir al sitio de Tienda Wayúu"><BrandLogo variant="icon" className="h-6 w-6" /></a>
 				<nav aria-label="Navegación de la aplicación">
 					<a href="/" onClick={(event) => navigate(event, '/')}>Sitio público</a>
 					{roleRoutes.filter((route) => route.role === user?.role).map((route) => (

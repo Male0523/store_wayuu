@@ -3,6 +3,7 @@ import { useUserSession } from './frontend/src/context/user-context';
 import { api } from './frontend/src/lib/api';
 import { loadPublicCatalog, type PublicCatalogItem } from './frontend/src/lib/publicCatalog';
 import { resolveImageUrl } from './frontend/src/lib/imageUrl';
+import BrandLogo from './frontend/src/BrandLogo';
 import type { Category, PublicCraftswoman } from './frontend/src/types';
 import {
   ShoppingBag,
@@ -262,17 +263,7 @@ export default function App() {
             onClick={() => setCurrentView('home')}
             className="flex items-center gap-3 cursor-pointer group"
           >
-            <div className="w-10 h-10 rounded-2xl bg-[#5C1D24] text-[#FDFBF7] flex items-center justify-center shadow-md border border-[#A03C1B]/20 group-hover:bg-[#C85A32] transition-colors">
-              <Feather className="w-5 h-5 text-[#FDFBF7]" />
-            </div>
-            <div>
-              <span className="text-xl font-extrabold tracking-wide text-[#3D1E16] block leading-tight font-serif">
-                WAYÚU
-              </span>
-              <span className="text-[10px] uppercase font-bold tracking-widest text-[#C85A32] block">
-                Tienda Artesanal
-              </span>
-            </div>
+            <BrandLogo variant="full" alt="Tienda Wayúu" className="h-[57px] w-[148px]" />
           </div>
 
           {/* Menú Desktop (Visible en pantallas medianas/grandes) */}
@@ -956,10 +947,7 @@ export default function App() {
             
             {/* Header del Formulario */}
             <div className="bg-[#5C1D24] text-white p-8 text-center relative overflow-hidden">
-              <div className="w-12 h-12 rounded-2xl bg-white/10 text-[#FDFBF7] flex items-center justify-center mx-auto mb-3 border border-white/20">
-                <Feather className="w-6 h-6" />
-              </div>
-              <h1 className="text-xl font-bold font-serif">Tienda Wayúu</h1>
+              <BrandLogo variant="full" alt="Tienda Wayúu" className="h-12 w-[126px] mx-auto mb-3" />
               <p className="text-xs text-[#E8C5C8] mt-1 font-medium">Acceso de Clientes</p>
             </div>
 
@@ -1442,10 +1430,7 @@ export default function App() {
             {/* Logo y Descripción */}
             <div className="md:col-span-4 space-y-4">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-[#C85A32] text-white flex items-center justify-center">
-                  <Feather className="w-5 h-5" />
-                </div>
-                <span className="text-lg font-bold tracking-wide font-serif">WAYÚU</span>
+                <BrandLogo variant="full" alt="Tienda Wayúu" className="h-9 w-[116px]" />
               </div>
               <p className="text-xs text-[#EFE6DC]/80 leading-relaxed">
                 Tienda pública de artesanías y tejidos elaborados por tejedoras de las rancherías de La Guajira, Colombia. Conservación cultural y comercio justo.

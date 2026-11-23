@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 're
 import { ArrowLeft, Boxes, Heart, Home, LockKeyhole, LogOut, Minus, Plus, Search, ShoppingBag, ShoppingCart, UserRound, X } from 'lucide-react'
 import { api, ApiError } from './lib/api'
 import { resolveImageUrl } from './lib/imageUrl'
+import BrandLogo from './BrandLogo'
 import { canUseCustomerFeatures, embeddedRolePanelSelection, rolePanelNavigationSection, type DelegatedAdminSection } from './lib/navigation'
 import { useUserSession } from './context/user-context'
 import type { Cart, Category, CustomDesign, Order, Product, RBACNavigationItem, UserProfile } from './types'
@@ -253,7 +254,7 @@ export default function CustomerPanel({ catalogOnly = false, embedded = false, r
 
   return <div className={`customer-shell${embedded ? ' customer-shell-embedded' : ''}`}>
     {!embedded && <aside className="customer-sidebar">
-      <div className="customer-brand"><span className="customer-brand-mark">◇</span><div><strong>Wayúu</strong><small>{catalogOnly ? 'Catálogo comercial' : 'Portal del Cliente'}</small></div></div>
+      <div className="customer-brand"><span className="customer-brand-mark"><BrandLogo variant="icon" alt="" className="h-8 w-8" /></span><div><small>{catalogOnly ? 'Catálogo comercial' : 'Portal del Cliente'}</small></div></div>
       <div className="customer-nav-label">NAVEGACIÓN PRINCIPAL</div>
       <nav className="customer-nav">
         <button className={view === 'catalog' || view === 'detail' ? 'active' : ''} onClick={() => navigate('catalog')}><Home size={17}/>Inicio y catálogo</button>
