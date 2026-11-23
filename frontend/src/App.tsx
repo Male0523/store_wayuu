@@ -20,7 +20,6 @@ const roleRoutes: { path: string; label: string; role: Role }[] = [
 function DemoNotice() {
 	return (
 		<div className="demo-notice" role="note">
-			Interfaz original · datos demostrativos temporales; los cambios no se guardan en Django.
 		</div>
 	)
 }
