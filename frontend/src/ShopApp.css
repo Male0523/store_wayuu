@@ -1083,3 +1083,53 @@
 .cart-drawer {
   border-left: 1px solid #e7d8d0;
 }
+
+/* Sprint 3.1: delimitar visualmente la matriz RBAC sin cambiar sus controles. */
+.rbac-panel .rbac-main-block {
+  padding: 20px;
+  border-color: #e5d6ce;
+  background: #f8f2ed;
+}
+
+.rbac-panel .rbac-main-block .rbac-user-form {
+  padding: 16px;
+  border-color: #e7d8d0;
+  background: #fff;
+}
+
+.rbac-panel .rbac-main-block .rbac-user-form[hidden] {
+  display: none !important;
+}
+
+.rbac-panel .rbac-main-block .rbac-resource-card {
+  padding: 15px;
+  border-color: #e6d7cf;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.rbac-panel .rbac-main-block .rbac-action-option {
+  min-width: 0;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid #eee3dd;
+  border-radius: 6px;
+  background: #fffdfa;
+  line-height: 1.4;
+}
+
+.rbac-panel .rbac-main-block .rbac-action-option > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+  .rbac-panel .rbac-main-block .rbac-user-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rbac-panel .rbac-main-block .rbac-actions-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
