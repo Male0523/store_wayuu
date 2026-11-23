@@ -206,6 +206,45 @@ class StoreAPITests(TestCase):
         self.assertEqual(catalog.json()['results'][0]['id'], self.product.id)
         self.assertEqual(self.client.get(f'/api/v1/products/{self.product.id}/').status_code, 200)
 
+    def test_public_craftswomen_returns_only_active_target_profiles_and_public_fields(self):
+        expected_names = ('Zharik', 'Dayana', 'Thania')
+        for name in expected_names:
+            Craftswoman.objects.create(
+                name=name,
+                community='Comunidad de prueba',
+                region='Región de prueba',
+                phone='3001234567',
+                biography='Biografía de prueba',
+                active=True,
+            )
+        Craftswoman.objects.create(name='Otra tejedora', active=True)
+        Craftswoman.objects.create(name='Perfil inactivo', active=False)
+
+        response = self.client.get('/api/v1/craftswomen/')
+
+        self.assertEqual(response.status_code, 200)
+        profiles = response.json()
+        self.assertEqual([profile['name'] for profile in profiles], list(expected_names))
+        self.assertEqual(
+            set(profiles[0]),
+            {'id', 'name', 'community', 'region', 'biography'},
+        )
+        self.assertNotIn('phone', profiles[0])
+        self.assertNotIn('user', profiles[0])
+        self.assertNotIn('Otra tejedora', [profile['name'] for profile in profiles])
+        self.assertNotIn('Perfil inactivo', [profile['name'] for profile in profiles])
+
+    def test_public_craftswomen_omits_names_with_ambiguous_active_profiles(self):
+        Craftswoman.objects.create(name='Zharik', active=True)
+        Craftswoman.objects.create(name='Zharik', active=True)
+        Craftswoman.objects.create(name='Dayana', active=True)
+        Craftswoman.objects.create(name='Thania', active=True)
+
+        response = self.client.get('/api/v1/craftswomen/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([profile['name'] for profile in response.json()], ['Dayana', 'Thania'])
+
     def test_public_product_preserves_real_craftswoman_profile_and_image_reference(self):
         craft_user = self.create_role_user('profile-on-public-product', AccessRole.Code.CRAFTSWOMAN)
         craftswoman = Craftswoman.objects.create(

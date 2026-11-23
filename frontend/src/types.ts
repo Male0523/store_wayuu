@@ -17,6 +17,10 @@ export interface CraftswomanSummary {
   biography?: string
 }
 
+export interface PublicCraftswoman extends CraftswomanSummary {
+  biography: string
+}
+
 export interface Product {
   id: number
   sku: string

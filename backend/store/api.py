@@ -106,6 +106,13 @@ class CraftswomanSummarySerializer(serializers.ModelSerializer):
         fields = ('id', 'name', 'community', 'region', 'biography')
 
 
+class PublicCraftswomanSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Craftswoman
+        fields = ('id', 'name', 'community', 'region', 'biography')
+        read_only_fields = fields
+
+
 MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_PRODUCT_IMAGE_PIXELS = 25_000_000
 PRODUCT_IMAGE_FORMATS = {'JPEG': '.jpg', 'PNG': '.png', 'WEBP': '.webp'}
@@ -1267,6 +1274,27 @@ class CategoryListView(APIView):
     def get(self, request):
         categories = Category.objects.filter(active=True, is_internal=False).order_by('name', 'id')
         return Response(CategorySerializer(categories, many=True).data)
+
+
+class PublicCraftswomanListView(APIView):
+    permission_classes = (AllowAny,)
+    public_names = ('Zharik', 'Dayana', 'Thania')
+
+    def get(self, request):
+        candidates = list(
+            Craftswoman.objects.filter(active=True, name__in=self.public_names).order_by('name', 'id')
+        )
+        profiles_by_name: dict[str, list[Craftswoman]] = {}
+        for profile in candidates:
+            profiles_by_name.setdefault(profile.name.casefold(), []).append(profile)
+
+        # If a target name is ambiguous, omit it instead of choosing an identity arbitrarily.
+        profiles = [
+            matches[0]
+            for name in self.public_names
+            if len(matches := profiles_by_name.get(name.casefold(), [])) == 1
+        ]
+        return Response(PublicCraftswomanSerializer(profiles, many=True).data)
 
 
 class ProductListView(PaginatedAPIView):

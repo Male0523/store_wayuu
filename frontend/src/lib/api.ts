@@ -15,6 +15,7 @@ import type {
   Order,
   Page,
   Product,
+  PublicCraftswoman,
   RBACAction,
   RBACCatalogEntry,
   RBACDelegation,
@@ -125,6 +126,7 @@ function adminProductBody(values: AdminProductInput): BodyInit {
 export const api = {
   health: () => request<{ status: string }>('/'),
   categories: () => request<Category[]>('/categories/'),
+  publicCraftswomen: () => request<PublicCraftswoman[]>('/craftswomen/'),
   products: (params: URLSearchParams) => request<Page<Product>>(`/products/?${params}`),
   product: (id: number) => request<Product>(`/products/${id}/`),
   me: () => request<{ user: SessionUser }>('/auth/me/'),

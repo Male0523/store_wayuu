@@ -3,7 +3,7 @@ import { useUserSession } from './frontend/src/context/user-context';
 import { api } from './frontend/src/lib/api';
 import { loadPublicCatalog, type PublicCatalogItem } from './frontend/src/lib/publicCatalog';
 import { resolveImageUrl } from './frontend/src/lib/imageUrl';
-import type { Category } from './frontend/src/types';
+import type { Category, PublicCraftswoman } from './frontend/src/types';
 import {
   ShoppingBag,
   Heart,
@@ -39,17 +39,6 @@ import {
   Clock
 } from 'lucide-react';
 
-interface Artisan {
-  id: string;
-  name: string;
-  rancheria: string;
-  experienceYears: number;
-  specialty: string;
-  quote: string;
-  image: string;
-  clan: string;
-}
-
 function CatalogProductImage({ src, alt, className }: { src: string; alt: string; className: string }) {
   const [failed, setFailed] = useState(!src);
 
@@ -65,39 +54,6 @@ function CatalogProductImage({ src, alt, className }: { src: string; alt: string
 
   return <img src={resolveImageUrl(src)} alt={alt} className={className} onError={() => setFailed(true)} />;
 }
-
-const ARTISANS: Artisan[] = [
-  {
-    id: 'ART-01',
-    name: 'Marta Uriana',
-    rancheria: 'Ranchería Mayapo',
-    experienceYears: 24,
-    specialty: 'Mochilas Susu a una hebra y gasas paleteadas',
-    quote: 'El tejido es nuestro lenguaje silencioso. A través de las manos expresamos nuestras alegrías, vivencias y el respeto por nuestros ancestros.',
-    image: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=600',
-    clan: 'Casta Uriana (Tigre)'
-  },
-  {
-    id: 'ART-02',
-    name: 'Aura Barros Pushaina',
-    rancheria: 'Ranchería Cabo de la Vela',
-    experienceYears: 30,
-    specialty: 'Mantas tradicionales y vestidos ceremoniales',
-    quote: 'Aprendí a tejer en mi encierro de señorita con mi abuela. Cada manta lleva el viento del mar y la dignidad de la mujer Wayúu.',
-    image: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&q=80&w=600',
-    clan: 'Casta Pushaina (Warrat - Culebra sabanera)'
-  },
-  {
-    id: 'ART-03',
-    name: 'Rosa Pushaina Epinayú',
-    rancheria: 'Ranchería Uribia',
-    experienceYears: 18,
-    specialty: 'Chinchorros de cabecera y cañuelotas complejas',
-    quote: 'Un chinchorro requiere meses de paciencia y dedicación. Cuando alguien descansa en él, se abriga con la paz de nuestro territorio.',
-    image: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&q=80&w=600',
-    clan: 'Casta Epinayú (Venado)'
-  }
-];
 
 export default function App() {
   const { login, register, user } = useUserSession();
@@ -117,6 +73,10 @@ export default function App() {
   const [catalogError, setCatalogError] = useState('');
   const [categoriesError, setCategoriesError] = useState('');
   const [catalogRetry, setCatalogRetry] = useState(0);
+  const [publicCraftswomen, setPublicCraftswomen] = useState<PublicCraftswoman[]>([]);
+  const [craftswomenLoading, setCraftswomenLoading] = useState(true);
+  const [craftswomenError, setCraftswomenError] = useState('');
+  const [craftswomenRetry, setCraftswomenRetry] = useState(0);
 
   // Formulario de Iniciar Sesión
   const [loginEmail, setLoginEmail] = useState('');
@@ -183,6 +143,22 @@ export default function App() {
       window.clearTimeout(timer);
     };
   }, [catalogRetry, searchQuery, selectedCategory]);
+
+  useEffect(() => {
+    let active = true;
+    setCraftswomenLoading(true);
+    setCraftswomenError('');
+    api.publicCraftswomen()
+      .then((profiles) => { if (active) setPublicCraftswomen(profiles); })
+      .catch(() => {
+        if (active) {
+          setPublicCraftswomen([]);
+          setCraftswomenError('No fue posible cargar los perfiles. Intenta nuevamente en unos momentos.');
+        }
+      })
+      .finally(() => { if (active) setCraftswomenLoading(false); });
+    return () => { active = false; };
+  }, [craftswomenRetry]);
 
   // Navegación suave por secciones dentro de la Página Principal
   const scrollToSection = (sectionId: string) => {
@@ -862,33 +838,40 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                {ARTISANS.map((artisan) => (
+                {craftswomenLoading ? (
+                  <p className="md:col-span-3 text-center text-xs text-[#3D1E16]/70" role="status">Cargando perfiles…</p>
+                ) : craftswomenError ? (
+                  <div className="md:col-span-3 text-center text-xs text-[#8B1E2D]" role="alert">
+                    <p>{craftswomenError}</p>
+                    <button className="underline font-bold mt-2" onClick={() => setCraftswomenRetry((value) => value + 1)}>Reintentar</button>
+                  </div>
+                ) : publicCraftswomen.length === 0 ? (
+                  <p className="md:col-span-3 text-center text-xs text-[#3D1E16]/70">No hay perfiles activos disponibles en este momento.</p>
+                ) : publicCraftswomen.map((artisan) => (
                   <div
                     key={artisan.id}
                     className="bg-[#FAF6F0] rounded-3xl border border-[#EFE6DC] overflow-hidden shadow-sm hover:shadow-md transition-shadow p-6 space-y-4 flex flex-col justify-between"
                   >
                     <div className="space-y-4">
                       <div className="flex items-center gap-4">
-                        <img
-                          src={artisan.image}
-                          alt={artisan.name}
-                          className="w-16 h-16 rounded-2xl object-cover border-2 border-[#C85A32]"
-                        />
+                        <div className="w-16 h-16 rounded-2xl border-2 border-[#C85A32] bg-[#E8C5C8]/40 text-[#5C1D24] flex items-center justify-center" aria-hidden="true">
+                          <User className="w-7 h-7" />
+                        </div>
                         <div>
                           <h3 className="text-base font-extrabold text-[#3D1E16]">{artisan.name}</h3>
-                          <p className="text-xs font-bold text-[#C85A32]">{artisan.clan}</p>
-                          <p className="text-[11px] text-[#3D1E16]/60">{artisan.rancheria}</p>
+                          {artisan.community && <p className="text-xs font-bold text-[#C85A32]">{artisan.community}</p>}
+                          {artisan.region && <p className="text-[11px] text-[#3D1E16]/60">{artisan.region}</p>}
                         </div>
                       </div>
 
                       <div className="p-3.5 rounded-xl bg-[#FDFBF7] border border-[#EFE6DC] text-xs text-[#3D1E16]/80 italic">
-                        "{artisan.quote}"
+                        {artisan.biography || 'Información biográfica no registrada.'}
                       </div>
                     </div>
 
                     <div className="pt-3 border-t border-[#EFE6DC] flex items-center justify-between text-xs text-[#3D1E16]/70">
-                      <span>Especialidad:</span>
-                      <span className="font-bold text-[#3D1E16]">{artisan.specialty}</span>
+                      <span>Perfil:</span>
+                      <span className="font-bold text-[#3D1E16]">Activo</span>
                     </div>
                   </div>
                 ))}
