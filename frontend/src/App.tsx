@@ -18,10 +18,7 @@ const roleRoutes: { path: string; label: string; role: Role }[] = [
 ]
 
 function DemoNotice() {
-	return (
-		<div className="demo-notice" role="note">
-		</div>
-	)
+	return null
 }
 
 function AccessGate({ user, onLogin }: {

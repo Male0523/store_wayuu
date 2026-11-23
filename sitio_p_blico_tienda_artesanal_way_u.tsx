@@ -498,17 +498,14 @@ export default function App() {
                 <div className="lg:col-span-5 relative">
                   <div className="relative rounded-3xl overflow-hidden shadow-2xl border-4 border-[#FAF6F0] bg-[#EFE6DC]">
                     <img
-                      src="https://images.unsplash.com/photo-1590874103328-eac38a683ce7?auto=format&fit=crop&q=80&w=800"
-                      alt="Artesanía y Tejido Wayúu"
+                      src="/images/legado-cultural-wayuu.jpg"
+                      alt="Mujer Wayúu con vestimenta tradicional"
                       className="w-full h-[420px] object-cover hover:scale-105 transition-transform duration-700"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-[#3D1E16]/80 via-transparent to-transparent flex items-end p-6">
                       <div className="text-[#FDFBF7] space-y-1">
-                        <span className="text-[10px] font-bold uppercase tracking-widest bg-[#C85A32] px-2.5 py-0.5 rounded-md">
-                          Simbología Kanaas
-                        </span>
-                        <p className="text-sm font-bold font-serif">Mochila Susu de una hebra</p>
-                        <p className="text-xs text-[#EFE6DC]/90">Elaborada en la Ranchería Mayapo</p>
+                        <p className="text-sm font-bold font-serif">El legado de una cultura que permanece viva</p>
+                        <p className="text-xs text-[#EFE6DC]/90">En cada color, cada forma y cada detalle se expresa una identidad que trasciende generaciones. La cultura Wayúu vive en sus mujeres, en sus tradiciones y en el arte que conserva la memoria de su pueblo.</p>
                       </div>
                     </div>
                   </div>
@@ -573,7 +570,7 @@ export default function App() {
                 <div className="lg:col-span-6 relative">
                   <div className="rounded-3xl overflow-hidden shadow-xl border-4 border-[#FAF6F0]">
                     <img
-                      src="https://images.unsplash.com/photo-1584917865442-de89df76afd3?auto=format&fit=crop&q=80&w=800"
+                      src="/images/historia-waleekeru.jpg"
                       alt="Historia del Tejido Wayúu"
                       className="w-full h-[400px] object-cover"
                     />
@@ -601,7 +598,8 @@ export default function App() {
                       <Feather className="w-5 h-5" />
                     </div>
                     <p className="text-xs italic text-[#3D1E16]/90 font-medium">
-                      "Un tejido Wayúu nunca es igual a otro; cada mochila refleja el pensamiento de la tejedora el día que la creó."
+                      <strong className="not-italic block">Una herencia que se transmite de generación en generación.</strong>
+                      La tradición Wayúu es memoria, creatividad y sabiduría colectiva. En sus expresiones culturales permanece viva la historia de un pueblo que transforma sus conocimientos en un legado para el futuro.
                     </p>
                   </div>
                 </div>
@@ -928,14 +926,15 @@ export default function App() {
                   <span className="text-xs font-bold uppercase tracking-widest text-[#C85A32]">Nuestra Identidad</span>
                   <h3 className="text-xl font-extrabold text-[#3D1E16] font-serif mt-3 mb-4">Nuestro Propósito</h3>
                   <p className="text-sm text-[#3D1E16]/80 leading-relaxed">
-                    Somos una tienda artesanal nacida con la misión de salvaguardar el legado textil de la etnia Wayúu, garantizando un canal comercial transparente, digno y sostenible para las comunidades de La Guajira.
+                    Somos una tienda artesanal nacida con la misión de salvaguardar el legado textil de la etnia Wayúu, garantizando un canal comercial transparente, digno y sostenible para las comunidades de La Guajira. Un tejido Wayúu nunca es igual a otro; cada mochila refleja el pensamiento de la tejedora el día que la creó.
                   </p>
                   <div className="mt-8 p-5 rounded-2xl bg-[#F5EFE6] border border-[#EFE6DC] flex items-start gap-4">
                     <div className="p-2.5 rounded-xl bg-[#5C1D24] text-white shrink-0">
                       <Feather className="w-5 h-5" aria-hidden="true" />
                     </div>
                     <p className="text-sm italic text-[#3D1E16]/90 leading-relaxed">
-                      &quot;Un tejido Wayúu nunca es igual a otro; cada mochila refleja el pensamiento de la tejedora el día que la creó.&quot;
+                      <strong className="not-italic block">Conectamos historias, compartimos raíces.</strong>
+                      Detrás de cada encuentro hay una historia que merece ser escuchada. Queremos acercarte a la riqueza cultural Wayúu y construir contigo nuevas formas de valorar y compartir nuestras tradiciones.
                     </p>
                   </div>
                 </div>
