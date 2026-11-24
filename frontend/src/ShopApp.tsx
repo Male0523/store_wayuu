@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from './lib/api'
 import { resolveImageUrl } from './lib/imageUrl'
+import { buildWhatsAppOrderUrl } from './lib/whatsappOrder'
 import BrandLogo from './BrandLogo'
 import { adminNavigationTarget, adminPanelNavigationForRole, embeddedRolePanelSelection, ensureSuperadminAccessEntry, rolePanelNavigationSection, type DelegatedAdminSection } from './lib/navigation'
 import CustomerPanel from './CustomerPanel'
@@ -1756,7 +1757,7 @@ function WorkItemSummary({ item }: { item: OrderItem }) {
 }
 
 function OrderSuccess({ order, onClose, onOrders }: { order: Order; onClose: () => void; onOrders: () => void }) {
-  return <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="success-dialog" role="dialog" aria-modal="true" aria-labelledby="success-title"><div className="success-icon"><Check size={24} /></div><p className="eyebrow">PEDIDO #{String(order.id).padStart(4, '0')}</p><h2 id="success-title">Tu elección ya<br /><em>está en camino.</em></h2><p>Guardamos tu pedido. El pago y la entrega se coordinan contigo.</p><div className="success-total"><span>Total del pedido</span><strong>{money(order.total)}</strong></div><button className="button button-dark full-button" onClick={onOrders}>Seguir mi pedido <ArrowRight size={15} /></button><button className="text-button success-close" onClick={onClose}>Volver a la tienda</button></section></div>
+  return <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="success-dialog" role="dialog" aria-modal="true" aria-labelledby="success-title"><div className="success-icon"><Check size={24} /></div><p className="eyebrow">PEDIDO #{String(order.id).padStart(4, '0')}</p><h2 id="success-title">Tu elección ya<br /><em>está en camino.</em></h2><p>Guardamos tu pedido. El pago y la entrega se coordinan contigo.</p><div className="success-total"><span>Total del pedido</span><strong>{money(order.total)}</strong></div>{order.status === 'pending' && <button className="button button-outline full-button" type="button" onClick={() => { const url = buildWhatsAppOrderUrl(order); if (url) window.open(url, '_blank', 'noopener,noreferrer') }}>Continuar por WhatsApp</button>}<button className="button button-dark full-button" onClick={onOrders}>Seguir mi pedido <ArrowRight size={15} /></button><button className="text-button success-close" onClick={onClose}>Volver a la tienda</button></section></div>
 }
 
 function Footer({ onInstagram }: { onInstagram: () => void }) {
