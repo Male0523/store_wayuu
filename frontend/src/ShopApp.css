@@ -1270,3 +1270,80 @@
     grid-column: auto;
   }
 }
+
+/* Sprint 3.4: disclosures independientes para alcance y matriz RBAC. */
+.rbac-panel .rbac-role-scopes,
+.rbac-panel .rbac-permission-matrix {
+  margin-top: 12px;
+  border: 1px solid #e5d6ce;
+  border-radius: 9px;
+  background: #f8f2ed;
+}
+
+.rbac-panel .rbac-role-scopes > .rbac-config-disclosure-content,
+.rbac-panel .rbac-permission-matrix > .rbac-config-disclosure-content {
+  padding: 0 14px 14px;
+}
+
+.rbac-panel .rbac-role-scopes .rbac-permission-list {
+  max-height: 310px;
+  padding: 0 12px;
+  border: 1px solid #e7d8d0;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.rbac-panel .rbac-permission-matrix .rbac-search {
+  margin: 0 0 12px;
+  background: #fff;
+}
+
+.rbac-panel .rbac-permission-matrix .rbac-groups {
+  gap: 10px;
+}
+
+.rbac-panel .rbac-main-block .rbac-resource-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.rbac-panel .rbac-resource-card > .rbac-resource-heading {
+  min-height: 52px;
+  padding: 12px 14px;
+  border-bottom: 0;
+  color: #5c1d24;
+  text-align: left;
+}
+
+.rbac-panel .rbac-resource-card[open] > .rbac-resource-heading {
+  border-bottom: 1px solid #e6d7cf;
+}
+
+.rbac-panel .rbac-resource-card > .rbac-resource-heading strong {
+  text-align: left;
+}
+
+.rbac-panel .rbac-resource-card > .rbac-resource-heading span {
+  flex: 0 1 auto;
+  text-align: right;
+}
+
+.rbac-panel .rbac-resource-permissions {
+  padding: 0 14px 14px;
+  background: #fff;
+}
+
+@media (max-width: 760px) {
+  .rbac-panel .rbac-permission-matrix > .rbac-config-disclosure-content,
+  .rbac-panel .rbac-role-scopes > .rbac-config-disclosure-content {
+    padding: 0 9px 10px;
+  }
+
+  .rbac-panel .rbac-resource-card > .rbac-resource-heading {
+    align-items: flex-start;
+  }
+
+  .rbac-panel .rbac-resource-card > .rbac-resource-heading span {
+    max-width: 48%;
+  }
+}
