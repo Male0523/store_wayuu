@@ -2,5 +2,7 @@
 .legacy-cart-notice p { margin: 0 0 8px; line-height: 1.5; }
 .legacy-cart-notice ul { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
 .legacy-cart-notice li { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.legacy-cart-notice button { padding: 5px 9px; border: 1px solid #cda7a2; background: #fffaf8; color: #5c1d24; font: inherit; cursor: pointer; }
-.legacy-cart-notice button:disabled { opacity: .55; cursor: wait; }
+.legacy-cart-notice button { min-height: 40px; padding: 7px 10px; border: 1px solid #5C1D24; border-radius: 8px; background: #fff; color: #5C1D24; font: inherit; cursor: pointer; }
+.legacy-cart-notice button:hover:not(:disabled) { background: #f8efed; }
+.legacy-cart-notice button:focus-visible { outline: 3px solid rgba(200,90,50,.45); outline-offset: 2px; }
+.legacy-cart-notice button:disabled { opacity: .55; cursor: not-allowed; }
