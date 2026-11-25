@@ -123,6 +123,23 @@ function adminProductBody(values: AdminProductInput): BodyInit {
   return body
 }
 
+type CraftswomanProductInput = {
+  sku: string; name: string; category: number; description?: string; region?: string;
+  color?: string; size?: string; production_time?: string; price: string | number;
+  stock: number; image_url?: string; image?: File; made_to_order?: boolean;
+}
+
+function craftswomanProductBody(values: CraftswomanProductInput): BodyInit {
+  if (!values.image) return json(values)
+  const body = new FormData()
+  Object.entries(values).forEach(([key, value]) => {
+    if (value === undefined || key === 'image') return
+    body.append(key, value === null ? '' : String(value))
+  })
+  body.append('image', values.image)
+  return body
+}
+
 export const api = {
   health: () => request<{ status: string }>('/'),
   categories: () => request<Category[]>('/categories/'),
@@ -165,11 +182,8 @@ export const api = {
   createDesign: (values: Record<string, string | number>) =>
     request('/designs/', { method: 'POST', body: json(values) }),
   craftswomanProducts: () => request<Product[]>('/craftswoman/products/'),
-  createCraftswomanProduct: (values: {
-    sku: string; name: string; category: number; description?: string; region?: string;
-    color?: string; size?: string; production_time?: string; price: string | number;
-    stock: number; image_url?: string; made_to_order?: boolean;
-  }) => request<Product>('/craftswoman/products/', { method: 'POST', body: json(values) }),
+  createCraftswomanProduct: (values: CraftswomanProductInput) =>
+    request<Product>('/craftswoman/products/', { method: 'POST', body: craftswomanProductBody(values) }),
   updateCraftswomanProduct: (id: number, values: Record<string, string | number | boolean>) =>
     request<Product>(`/craftswoman/products/${id}/`, { method: 'PATCH', body: json(values) }),
   craftswomanDashboard: () => request<CraftswomanDashboard>('/craftswoman/dashboard/'),

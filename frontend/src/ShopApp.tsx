@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import {
   ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, Check, ChevronDown, Eye,
   Camera, CircleUserRound, Heart, LoaderCircle, LockKeyhole, Minus,
@@ -20,6 +20,15 @@ import './ShopApp.css'
 type Screen = 'shop' | 'orders' | 'craftswoman' | 'design' | 'admin' | 'account' | 'embeddedAdmin'
 type AuthMode = 'login' | 'register' | 'craftswoman'
 type AccountSection = 'orders' | 'designs' | 'profile'
+type CraftswomanProductInput = {
+  sku: string; name: string; category: number; description?: string; region?: string;
+  color?: string; size?: string; production_time?: string; price: string | number;
+  stock: number; image: File; image_url?: string; made_to_order?: boolean;
+}
+
+const CRAFTSWOMAN_IMAGE_MAX_BYTES = 5 * 1024 * 1024
+const CRAFTSWOMAN_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
+const CRAFTSWOMAN_IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp'])
 
 type ShopAppProps = {
   initialScreen?: Screen
@@ -537,11 +546,7 @@ function ShopApp({ initialScreen = 'shop', delegatedSection }: ShopAppProps) {
     } catch (error) { setNotice(errorMessage(error)) } finally { setBusy(false) }
   }
 
-  async function createCraftswomanProduct(values: {
-    sku: string; name: string; category: number; description?: string; region?: string;
-    color?: string; size?: string; production_time?: string; price: string | number;
-    stock: number; image_url?: string; made_to_order?: boolean;
-  }) {
+  async function createCraftswomanProduct(values: CraftswomanProductInput) {
     setBusy(true)
     try {
       const created = await api.createCraftswomanProduct(values)
@@ -774,11 +779,7 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, profile, pro
   products: Product[]
   categories: Category[]
   busy: boolean
-  onCreateProduct: (values: {
-    sku: string; name: string; category: number; description?: string; region?: string;
-    color?: string; size?: string; production_time?: string; price: string | number;
-    stock: number; image_url?: string; made_to_order?: boolean;
-  }) => void
+  onCreateProduct: (values: CraftswomanProductInput) => void
   onSaveProfile: (values: CraftswomanProfileInput) => Promise<void>
   onSignOut: () => void
   onOpenDelegatedSection: () => void
@@ -789,6 +790,10 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, profile, pro
 }) {
   const [activeSection, setActiveSection] = useState<'dashboard' | 'products' | 'inventory' | 'orders' | 'profile' | 'categories' | 'access' | 'storefront'>('dashboard')
   const [showProductForm, setShowProductForm] = useState(false)
+  const [productImage, setProductImage] = useState<File | null>(null)
+  const [productImagePreview, setProductImagePreview] = useState('')
+  const [productImageError, setProductImageError] = useState('')
+  const productImagePreviewRef = useRef('')
   const [acceptingOrderId, setAcceptingOrderId] = useState<number | null>(null)
   const canChangeOrders = Boolean(user && hasEffectivePermission(user, 'orders.edit'))
   const canAssignOrders = Boolean(user && hasEffectivePermission(user, 'orders.assign'))
@@ -798,6 +803,9 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, profile, pro
   const pending = products.length - published
   const stock = products.reduce((total, product) => total + product.stock, 0)
   const initials = accountName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()
+  useEffect(() => () => {
+    if (productImagePreviewRef.current) URL.revokeObjectURL(productImagePreviewRef.current)
+  }, [])
   type CraftswomanNavId = 'dashboard' | 'products' | 'inventory' | 'orders' | 'profile' | 'categories' | 'access' | 'storefront'
   const craftswomanSections = ['dashboard', 'products', 'inventory', 'orders', 'profile'] as const
   const navItems: { id: CraftswomanNavId; label: string; icon: ReactNode; navigationItem: RBACNavigationItem }[] = navigationItems.flatMap((item) => {
@@ -824,17 +832,54 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, profile, pro
     setAcceptingOrderId(itemId)
     try { await onAcceptWorkItem(itemId) } finally { setAcceptingOrderId(null) }
   }
+  function clearProductImage() {
+    if (productImagePreviewRef.current) URL.revokeObjectURL(productImagePreviewRef.current)
+    productImagePreviewRef.current = ''
+    setProductImage(null)
+    setProductImagePreview('')
+    setProductImageError('')
+  }
+  function selectProductImage(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0] ?? null
+    clearProductImage()
+    if (!file) return
+    const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
+    const validImageType = file.type
+      ? CRAFTSWOMAN_IMAGE_TYPES.has(file.type)
+      : CRAFTSWOMAN_IMAGE_EXTENSIONS.has(extension)
+    if (!validImageType) {
+      setProductImageError('Selecciona una imagen JPEG, PNG o WebP.')
+      event.currentTarget.value = ''
+      return
+    }
+    if (file.size > CRAFTSWOMAN_IMAGE_MAX_BYTES) {
+      setProductImageError('La imagen supera el tamaño máximo de 5 MB.')
+      event.currentTarget.value = ''
+      return
+    }
+    const preview = URL.createObjectURL(file)
+    productImagePreviewRef.current = preview
+    setProductImage(file)
+    setProductImagePreview(preview)
+  }
   function submitProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const values = Object.fromEntries(new FormData(event.currentTarget).entries()) as Record<string, string>
+    const formData = new FormData(event.currentTarget)
+    const image = formData.get('image')
+    if (!(image instanceof File) || image.size === 0 || !productImage || productImageError) {
+      setProductImageError('Selecciona una imagen válida para enviar tu tejido.')
+      return
+    }
+    const value = (key: string) => String(formData.get(key) ?? '')
     onCreateProduct({
-      sku: values.sku.trim(), name: values.name.trim(), category: Number(values.category),
-      price: values.price, stock: Number(values.stock), size: values.size || 'M',
-      region: values.region.trim(), color: values.color.trim(),
-      production_time: values.production_time.trim(), description: values.description.trim(),
-      image_url: values.image_url.trim(), made_to_order: values.made_to_order === 'on',
+      sku: value('sku').trim(), name: value('name').trim(), category: Number(value('category')),
+      price: value('price'), stock: Number(value('stock')), size: value('size') || 'M',
+      region: value('region').trim(), color: value('color').trim(),
+      production_time: value('production_time').trim(), description: value('description').trim(),
+      image, made_to_order: value('made_to_order') === 'on',
     })
     event.currentTarget.reset()
+    clearProductImage()
     setShowProductForm(false)
   }
   function submitProfile(event: FormEvent<HTMLFormElement>) {
@@ -885,11 +930,11 @@ function CraftswomanAccountView({ user, navigationItems, dashboard, profile, pro
             </div>
           </div>}
         {canOpenSection('profile') && activeSection === 'profile' && profile && <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>INFORMACIÓN PERSONAL</small><h1>Mi perfil</h1><p>Actualiza los datos de tu taller que se muestran en Wayúu Store.</p></div></div><form className="profile-form" onSubmit={submitProfile}><label className="form-label">Nombre público *<input name="name" required maxLength={150} defaultValue={profile.name} autoComplete="name" disabled={!canEditProfile} /></label><label className="form-label">Teléfono<input name="phone" type="tel" maxLength={30} defaultValue={profile.phone} autoComplete="tel" disabled={!canEditProfile} /></label><label className="form-label">Comunidad<input name="community" maxLength={150} defaultValue={profile.community} autoComplete="address-level3" disabled={!canEditProfile} /></label><label className="form-label">Región<input name="region" maxLength={100} defaultValue={profile.region} disabled={!canEditProfile} /></label><label className="form-label craftswoman-description-field">Biografía<textarea name="biography" rows={4} maxLength={3000} defaultValue={profile.biography} disabled={!canEditProfile} /></label>{canEditProfile && <button className="button button-dark" disabled={busy}>{busy ? <LoaderCircle className="spin" size={16} /> : <Check size={15} />} Guardar perfil</button>}</form></section>}
-        {canOpenSection('products') && activeSection === 'products' && <section className="craftswoman-panel craftswoman-products-section"><div className="craftswoman-panel-heading"><div><small>CATÁLOGO DE TU TALLER</small><h1>Mis tejidos y productos</h1><p>Registra tus piezas. Antes de aparecer en la tienda, cada producto debe ser aprobado por administración.</p></div>{canAddProducts && <button className="craftswoman-primary-action" onClick={() => setShowProductForm((value) => !value)}><Plus size={16} /> {showProductForm ? 'Cerrar formulario' : 'Registrar tejido'}</button>}</div>
+        {canOpenSection('products') && activeSection === 'products' && <section className="craftswoman-panel craftswoman-products-section"><div className="craftswoman-panel-heading"><div><small>CATÁLOGO DE TU TALLER</small><h1>Mis tejidos y productos</h1><p>Registra tus piezas. Antes de aparecer en la tienda, cada producto debe ser aprobado por administración.</p></div>{canAddProducts && <button className="craftswoman-primary-action" onClick={() => { if (showProductForm) clearProductImage(); setShowProductForm((value) => !value) }}><Plus size={16} /> {showProductForm ? 'Cerrar formulario' : 'Registrar tejido'}</button>}</div>
             {showProductForm && canAddProducts && <form className="craftswoman-product-form" onSubmit={submitProduct}>
-              <label className="form-label">Referencia<input name="sku" required maxLength={50} placeholder="Ej. WAY-TEJ-001" /></label><label className="form-label">Nombre de la pieza<input name="name" required maxLength={180} /></label><label className="form-label">Categoría<select name="category" required defaultValue=""><option value="" disabled>Selecciona una categoría</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label><label className="form-label">Precio sugerido (COP)<input name="price" type="number" min="0" step="1" required /></label><label className="form-label">Stock inicial<input name="stock" type="number" min="0" step="1" defaultValue="1" required /></label><label className="form-label">Talla *<input name="size" maxLength={30} defaultValue="M" required /></label><label className="form-label">Región de elaboración *<input name="region" maxLength={100} placeholder="La Guajira" required /></label><label className="form-label">Colores principales *<input name="color" maxLength={150} placeholder="Ej. vino tinto, beige y negro" required /></label><label className="form-label">Tiempo de elaboración *<input name="production_time" maxLength={100} placeholder="Ej. 10 a 15 días" required /></label><label className="form-label">Imagen del tejido (URL) *<input name="image_url" type="url" placeholder="https://..." required /></label><label className="form-label craftswoman-description-field">Descripción del tejido *<textarea name="description" rows={2} minLength={10} maxLength={2000} placeholder="Describe el diseño, la técnica y los detalles de la pieza..." required /></label><label className="admin-check"><input name="made_to_order" type="checkbox" /> Elaborar por pedido</label><button className="button button-dark craftswoman-submit-review" disabled={busy || !categories.length}>{busy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} Enviar a revisión</button>
+              <label className="form-label">Referencia<input name="sku" required maxLength={50} placeholder="Ej. WAY-TEJ-001" /></label><label className="form-label">Nombre de la pieza<input name="name" required maxLength={180} /></label><label className="form-label">Categoría<select name="category" required defaultValue=""><option value="" disabled>Selecciona una categoría</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label><label className="form-label">Precio sugerido (COP)<input name="price" type="number" min="0" step="1" required /></label><label className="form-label">Stock inicial<input name="stock" type="number" min="0" step="1" defaultValue="1" required /></label><label className="form-label">Talla *<input name="size" maxLength={30} defaultValue="M" required /></label><label className="form-label">Región de elaboración *<input name="region" maxLength={100} placeholder="La Guajira" required /></label><label className="form-label">Colores principales *<input name="color" maxLength={150} placeholder="Ej. vino tinto, beige y negro" required /></label><label className="form-label">Tiempo de elaboración *<input name="production_time" maxLength={100} placeholder="Ej. 10 a 15 días" required /></label><label className="form-label craftswoman-image-field">Imagen del tejido *<input name="image" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" required onChange={selectProductImage} /><small>JPEG, PNG o WebP. Máximo 5 MB.</small>{productImageError && <span className="craftswoman-image-error" role="alert">{productImageError}</span>}{productImagePreview && <img className="craftswoman-image-preview" src={productImagePreview} alt="Vista previa del tejido seleccionado" />}</label><label className="form-label craftswoman-description-field">Descripción del tejido *<textarea name="description" rows={2} minLength={10} maxLength={2000} placeholder="Describe el diseño, la técnica y los detalles de la pieza..." required /></label><label className="admin-check"><input name="made_to_order" type="checkbox" /> Elaborar por pedido</label><button className="button button-dark craftswoman-submit-review" disabled={busy || !categories.length}>{busy ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />} Enviar a revisión</button>
             </form>}
-            <div className="craftswoman-product-list">{products.map((product) => <article key={product.id}><div><strong>{product.name}</strong><small>{product.sku} · {product.category.name} · Talla {product.size}</small></div><span>{money(product.price)}</span><span>Stock {product.stock}</span><em className={product.active ? 'published' : ''}>{product.active ? 'Publicado' : 'Pendiente de revisión'}</em></article>)}{!products.length && <p className="muted-copy">Todavía no has registrado productos en tu taller.</p>}</div>
+            <div className="craftswoman-product-list">{products.map((product) => <article key={product.id}><div className="craftswoman-product-identity">{product.image_url && <ProductPhoto src={product.image_url} alt={`Fotografía de ${product.name}`} className="craftswoman-product-thumbnail" />}<span><strong>{product.name}</strong><small>{product.sku} · {product.category.name} · Talla {product.size}</small></span></div><span>{money(product.price)}</span><span>Stock {product.stock}</span><em className={product.active ? 'published' : ''}>{product.active ? 'Publicado' : 'Pendiente de revisión'}</em></article>)}{!products.length && <p className="muted-copy">Todavía no has registrado productos en tu taller.</p>}</div>
           </section>}
           {canOpenSection('inventory') && activeSection === 'inventory' && <section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>CONTROL DE EXISTENCIAS</small><h1>Mi inventario</h1><p>Consulta las piezas y las unidades registradas en tu taller.</p></div><span className="craftswoman-total-stock">{stock} unidades</span></div><div className="craftswoman-product-list">{products.map((product) => <article key={product.id}><div><strong>{product.name}</strong><small>{product.sku} · {product.category.name}</small></div><span>{money(product.price)}</span><span>Disponibles: {product.stock}</span><em className={product.stock > 0 ? 'published' : ''}>{product.stock > 0 ? 'Con existencias' : 'Agotado'}</em></article>)}{!products.length && <p className="muted-copy">Tu inventario aparecerá aquí cuando registres productos.</p>}</div></section>}
           {canOpenSection('orders') && activeSection === 'orders' && <div className="craftswoman-orders"><section className="craftswoman-panel"><div className="craftswoman-panel-heading"><div><small>OPORTUNIDADES DE TRABAJO</small><h1>Trabajos disponibles</h1></div><span>{(dashboard?.available_items ?? []).length}</span></div>{(dashboard?.available_items ?? []).map((item) => <div className="artisan-order" key={item.id}><WorkItemSummary item={item} />{canAssignOrders && <button className="button button-dark" disabled={acceptingOrderId !== null} onClick={() => void handleAcceptWorkItem(item.id)}>{acceptingOrderId === item.id ? 'Aceptando…' : 'Aceptar trabajo'}</button>}</div>)}{!dashboard?.available_items?.length && <p className="muted-copy">No hay trabajos disponibles.</p>}</section>

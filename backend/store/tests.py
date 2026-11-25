@@ -1410,6 +1410,121 @@ class StoreAPITests(TestCase):
             product.id,
         )
 
+    def test_craftswoman_can_upload_product_image_and_retrieve_its_media_url(self):
+        craft_user = self.create_role_user('craft-product-image-upload', AccessRole.Code.CRAFTSWOMAN)
+        craftswoman = Craftswoman.objects.create(user=craft_user, name='Tejedora con imagen', active=True)
+        self.client.force_login(craft_user)
+
+        with TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            response = self.client.post('/api/v1/craftswoman/products/', {
+                'sku': 'CRAFT-IMAGE-001', 'name': 'Manta cargada por tejedora',
+                'category': self.category.id, 'description': 'Tejido tradicional de prueba.',
+                'region': 'La Guajira', 'color': 'Vino y crema', 'size': 'M',
+                'production_time': '20 días', 'price': '280000', 'stock': '2',
+                'image': SimpleUploadedFile('tejido.png', self.make_test_image(), content_type='image/png'),
+            })
+
+            self.assertEqual(response.status_code, 201, response.content)
+            product = Product.objects.get(sku='CRAFT-IMAGE-001')
+            self.assertEqual(product.craftswoman_id, craftswoman.id)
+            self.assertFalse(product.active)
+            self.assertTrue(product.image.name.startswith('products/'))
+            self.assertTrue(Path(media_root, product.image.name).is_file())
+            expected_url = f'http://testserver/media/{product.image.name}'
+            self.assertEqual(response.json()['image_url'], expected_url)
+            from django.views.static import serve
+            media_response = serve(
+                RequestFactory().get(f'/media/{product.image.name}'),
+                product.image.name,
+                document_root=media_root,
+            )
+            try:
+                self.assertEqual(media_response.status_code, 200)
+                self.assertEqual(media_response['Content-Type'], 'image/png')
+                self.assertEqual(b''.join(media_response.streaming_content), self.make_test_image())
+            finally:
+                media_response.close()
+
+            listed = self.client.get('/api/v1/craftswoman/products/')
+            self.assertEqual(listed.status_code, 200)
+            self.assertEqual(listed.json()[0]['image_url'], expected_url)
+
+    def test_craftswoman_product_image_rejects_invalid_or_oversized_uploads(self):
+        craft_user = self.create_role_user('craft-invalid-product-image', AccessRole.Code.CRAFTSWOMAN)
+        Craftswoman.objects.create(user=craft_user, name='Tejedora valida', active=True)
+        self.client.force_login(craft_user)
+        base = {
+            'name': 'Pieza con imagen inválida', 'category': self.category.id,
+            'description': 'Descripción de prueba suficiente.', 'region': 'La Guajira',
+            'color': 'Vino', 'size': 'M', 'production_time': '20 días', 'price': '1', 'stock': '1',
+        }
+
+        corrupt = self.client.post('/api/v1/craftswoman/products/', {
+            **base, 'sku': 'CRAFT-IMAGE-CORRUPT',
+            'image': SimpleUploadedFile('fake.png', b'not an image', content_type='image/png'),
+        })
+        unsupported = self.client.post('/api/v1/craftswoman/products/', {
+            **base, 'sku': 'CRAFT-IMAGE-GIF',
+            'image': SimpleUploadedFile('animated.gif', self.make_test_image('GIF'), content_type='image/gif'),
+        })
+        oversized = self.client.post('/api/v1/craftswoman/products/', {
+            **base, 'sku': 'CRAFT-IMAGE-LARGE',
+            'image': SimpleUploadedFile('large.png', b'x' * (5 * 1024 * 1024 + 1), content_type='image/png'),
+        })
+        missing = self.client.post('/api/v1/craftswoman/products/', {
+            **base, 'sku': 'CRAFT-IMAGE-MISSING',
+        })
+
+        self.assertEqual(corrupt.status_code, 400)
+        self.assertEqual(unsupported.status_code, 400)
+        self.assertEqual(oversized.status_code, 400)
+        self.assertEqual(missing.status_code, 400)
+        self.assertFalse(Product.objects.filter(sku__startswith='CRAFT-IMAGE-').exists())
+
+    def test_craftswoman_can_replace_image_and_keep_it_when_no_new_upload_is_sent(self):
+        craft_user = self.create_role_user('craft-replace-product-image', AccessRole.Code.CRAFTSWOMAN)
+        craftswoman = Craftswoman.objects.create(user=craft_user, name='Tejedora editora', active=True)
+        self.client.force_login(craft_user)
+
+        with TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            created = self.client.post('/api/v1/craftswoman/products/', {
+                'sku': 'CRAFT-IMAGE-EDIT', 'name': 'Tejido para editar',
+                'category': self.category.id, 'description': 'Descripción de prueba suficiente.',
+                'region': 'La Guajira', 'color': 'Vino', 'size': 'M',
+                'production_time': '20 días', 'price': '120000', 'stock': '1',
+                'image': SimpleUploadedFile('original.png', self.make_test_image(), content_type='image/png'),
+            })
+            self.assertEqual(created.status_code, 201, created.content)
+            product = Product.objects.get(sku='CRAFT-IMAGE-EDIT')
+            self.assertEqual(product.craftswoman_id, craftswoman.id)
+            original_image_name = product.image.name
+            original_path = Path(media_root, original_image_name)
+            self.assertTrue(original_path.is_file())
+
+            unchanged = self.client.patch(
+                f'/api/v1/craftswoman/products/{product.id}/',
+                {'region': 'Alta Guajira'}, content_type='application/json',
+            )
+            self.assertEqual(unchanged.status_code, 200, unchanged.content)
+            product.refresh_from_db()
+            self.assertEqual(product.image.name, original_image_name)
+            self.assertTrue(original_path.is_file())
+            self.assertFalse(product.active)
+
+            replacement = self.client.patch(
+                f'/api/v1/craftswoman/products/{product.id}/',
+                data=encode_multipart('BoUnDaRyStRiNg', {
+                    'image': SimpleUploadedFile('replacement.jpg', self.make_test_image('JPEG'), content_type='image/jpeg'),
+                }),
+                content_type=MULTIPART_CONTENT,
+            )
+            self.assertEqual(replacement.status_code, 200, replacement.content)
+            product.refresh_from_db()
+            self.assertNotEqual(product.image.name, original_image_name)
+            self.assertTrue(Path(media_root, product.image.name).is_file())
+            self.assertTrue(original_path.is_file())
+            self.assertFalse(product.active)
+
     def test_craftswoman_product_api_rejects_manipulated_ownership_on_create_and_edit(self):
         own_user = self.create_role_user('craft-owner-tamper', AccessRole.Code.CRAFTSWOMAN)
         own_profile = Craftswoman.objects.create(user=own_user, name='Tejedora propia', active=True)

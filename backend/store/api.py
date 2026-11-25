@@ -712,14 +712,20 @@ class CraftswomanProductWriteSerializer(serializers.ModelSerializer):
     color = serializers.CharField(required=True, allow_blank=False, max_length=150)
     size = serializers.CharField(required=True, allow_blank=False, max_length=30)
     production_time = serializers.CharField(required=True, allow_blank=False, max_length=100)
-    image_url = serializers.URLField(required=True, allow_blank=False)
+    image_url = serializers.URLField(required=False, allow_blank=True)
+    image = ProductImageUploadField(write_only=True, required=False, allow_empty_file=False)
 
     class Meta:
         model = Product
         fields = (
             'sku', 'name', 'category', 'description', 'region', 'color', 'size',
-            'production_time', 'price', 'stock', 'image_url', 'made_to_order',
+            'production_time', 'price', 'stock', 'image_url', 'image', 'made_to_order',
         )
+
+    def validate(self, attrs):
+        if self.instance is None and not attrs.get('image') and not attrs.get('image_url'):
+            raise serializers.ValidationError({'image': 'Selecciona una imagen o proporciona una URL válida.'})
+        return attrs
 
     def to_internal_value(self, data):
         # Never silently ignore an attempted ownership or publication change.
